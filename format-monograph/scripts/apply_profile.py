@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Apply an approved format profile and produce the three review artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import shutil
+import sys
+from pathlib import Path
+
+from _common import (
+    FormatMonographError,
+    apply_rule,
+    content_fingerprint,
+    first_anchor_paragraph,
+    load_document,
+    summarize_rule,
+)
+from validate_profile import validate
+
+
+def output_paths(input_path: Path, output_dir: Path) -> tuple[Path, Path, Path]:
+    stem = input_path.stem
+    return (
+        output_dir / f"{stem}-formatted.docx",
+        output_dir / f"{stem}-review.docx",
+        output_dir / f"{stem}-format-report.md",
+    )
+
+
+def assert_outputs_available(paths: tuple[Path, ...], force: bool) -> None:
+    existing = [str(path) for path in paths if path.exists()]
+    if existing and not force:
+        raise FormatMonographError(
+            "Output files already exist; use --force to replace them: " + ", ".join(existing)
+        )
+
+
+def report_markdown(
+    input_path: Path,
+    profile: dict,
+    original_fp: str,
+    formatted_fp: str,
+    changes: list[dict],
+    manual: list[dict],
+    unanchored: list[str],
+) -> str:
+    integrity = "PASS" if original_fp == formatted_fp else "FAIL"
+    lines = [
+        "# 专著格式修改报告",
+        "",
+        "## 基本信息",
+        "",
+        f"- 输入文件：`{input_path.name}`",
+        f"- 格式配置：`{profile['profile_id']}` / {profile['name']}",
+        f"- 配置版本：`{profile['schema_version']}`",
+        f"- 批准人：{profile['approval'].get('approved_by', '')}",
+        f"- 批准时间：{profile['approval'].get('approved_at', '')}",
+        f"- 生成时间：{dt.datetime.now(dt.timezone.utc).isoformat()}",
+        "",
+        "## 内容一致性",
+        "",
+        f"- 结果：**{integrity}**",
+        f"- 原稿指纹：`{original_fp}`",
+        f"- 格式稿指纹：`{formatted_fp}`",
+        "- 指纹排除自动字段显示结果，但包含正文、表格、页眉页脚、脚注和尾注。",
+        "",
+        "## 已应用规则",
+        "",
+        "| 规则 | 选择器 | 命中数量 | 属性 |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for change in changes:
+        props = ", ".join(
+            f"{key}={value}" for key, value in sorted(change["properties"].items())
+        )
+        lines.append(
+            f"| {change['id']} | {change['selector']} | {change['targets']} | {props} |"
+        )
+    if not changes:
+        lines.append("| - | - | 0 | 没有自动规则 |")
+
+    lines.extend(["", "## 人工复核", ""])
+    if manual:
+        for rule in manual:
+            lines.append(
+                f"- `{rule['id']}`：{rule['evidence_summary']} "
+                f"（选择器：`{rule['selector']['kind']}:{rule['selector']['value']}`）"
+            )
+    else:
+        lines.append("- 无。")
+
+    lines.extend(["", "## 审阅标注", ""])
+    if unanchored:
+        lines.append("- 以下规则无法精确锚定，已仅在本报告记录：" + ", ".join(unanchored))
+    else:
+        lines.append("- 所有自动规则均已在审阅稿中建立批注锚点。")
+
+    lines.extend(
+        [
+            "",
+            "## 渲染与视觉 QA",
+            "",
+            "- 状态：待运行 `render_docx.py` 并逐页人工检查。",
+            "- 在完成逐页检查前，不得将本报告结论改为“通过”。",
+            "",
+            "## 结论",
+            "",
+            "- 当前结论：" + ("结构检查通过，等待视觉 QA。" if integrity == "PASS" else "失败：内容一致性检查未通过。"),
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--profile", required=True, type=Path)
+    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        errors, profile = validate(args.profile)
+        if errors:
+            raise FormatMonographError("Profile validation failed: " + "; ".join(errors))
+        if profile["approval"]["status"] != "approved":
+            raise FormatMonographError("Profile approval.status must be approved.")
+
+        formatted_path, review_path, report_path = output_paths(args.input, args.output_dir)
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        assert_outputs_available((formatted_path, review_path, report_path), args.force)
+        if args.input.resolve() in {formatted_path.resolve(), review_path.resolve()}:
+            raise FormatMonographError("Output path must not overwrite the input DOCX.")
+
+        original_fp = content_fingerprint(args.input)
+        document = load_document(args.input)
+        changes: list[dict] = []
+        manual: list[dict] = []
+
+        for rule in profile["rules"]:
+            if rule["status"] != "approved":
+                continue
+            if rule["application"] == "manual_review":
+                manual.append(rule)
+                continue
+            targets = apply_rule(document, rule)
+            changes.append(
+                {
+                    "id": rule["id"],
+                    "selector": f"{rule['selector']['kind']}:{rule['selector']['value']}",
+                    "targets": targets,
+                    "properties": rule["properties"],
+                }
+            )
+
+        document.save(str(formatted_path))
+        formatted_fp = content_fingerprint(formatted_path)
+        if original_fp != formatted_fp:
+            formatted_path.unlink(missing_ok=True)
+            raise FormatMonographError(
+                "Content integrity failed after formatting. The generated formatted copy was removed."
+            )
+
+        review = load_document(formatted_path)
+        unanchored: list[str] = []
+        for rule in profile["rules"]:
+            if rule["status"] != "approved" or rule["application"] != "automatic":
+                continue
+            anchor = first_anchor_paragraph(review, rule)
+            if anchor is None:
+                unanchored.append(rule["id"])
+                continue
+            review.add_comment(
+                runs=anchor.runs,
+                text=summarize_rule(rule),
+                author="format-monograph",
+                initials="FM",
+            )
+        review.save(str(review_path))
+        if content_fingerprint(review_path) != original_fp:
+            review_path.unlink(missing_ok=True)
+            formatted_path.unlink(missing_ok=True)
+            raise FormatMonographError(
+                "Content integrity failed after adding review comments. Generated DOCX files were removed."
+            )
+
+        report_path.write_text(
+            report_markdown(
+                args.input,
+                profile,
+                original_fp,
+                formatted_fp,
+                changes,
+                manual,
+                unanchored,
+            ),
+            encoding="utf-8",
+        )
+        print(
+            json.dumps(
+                {
+                    "formatted": str(formatted_path),
+                    "review": str(review_path),
+                    "report": str(report_path),
+                    "content_integrity": "pass",
+                    "render_status": "pending",
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    except (FormatMonographError, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
