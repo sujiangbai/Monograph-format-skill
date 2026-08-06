@@ -17,6 +17,7 @@ from _common import (
     field_inventory,
     first_anchor_paragraph,
     load_document,
+    missing_profile_fonts,
     protected_object_manifest,
     summarize_rule,
 )
@@ -103,6 +104,8 @@ def report_markdown(
     derived_changes: list[dict],
     equation_summary: dict,
     protected_objects_ok: bool,
+    missing_fonts: list[str],
+    missing_fonts_approved: bool,
 ) -> str:
     integrity = "PASS" if original_fp == formatted_fp and protected_objects_ok else "FAIL"
     lines = [
@@ -116,6 +119,16 @@ def report_markdown(
         f"- 批准人：{profile['approval'].get('approved_by', '')}",
         f"- 批准时间：{profile['approval'].get('approved_at', '')}",
         f"- 生成时间：{dt.datetime.now(dt.timezone.utc).isoformat()}",
+        "",
+        "## 运行时依据",
+        "",
+        f"- 调用者明确要求最高：{profile.get('runtime_policy', {}).get('caller_requirements_highest', False)}",
+        "- 来源优先级：" + " > ".join(profile.get("source_precedence", [])),
+        "",
+        "## 字体预检",
+        "",
+        "- 缺失字体：" + (", ".join(missing_fonts) if missing_fonts else "无"),
+        f"- 用户批准缺失字体降级：{missing_fonts_approved}",
         "",
         "## 内容一致性",
         "",
@@ -198,6 +211,11 @@ def main() -> int:
     parser.add_argument("--profile", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--allow-missing-fonts",
+        action="store_true",
+        help="Continue only after the caller explicitly approves missing-font visual QA.",
+    )
     args = parser.parse_args()
 
     try:
@@ -216,6 +234,12 @@ def main() -> int:
         normalize_derived = uses_derived_normalization(profile)
         preflight_fields(args.input, profile)
         equation_summary = preflight_equations(args.input, profile)
+        missing_fonts = missing_profile_fonts(profile)
+        if missing_fonts and not args.allow_missing_fonts:
+            raise FormatMonographError(
+                "Required fonts are unavailable: " + ", ".join(missing_fonts)
+                + ". Obtain caller QA approval before using --allow-missing-fonts."
+            )
         original_objects = protected_object_manifest(args.input)
         original_fp = content_fingerprint(
             args.input, normalize_derived=normalize_derived
@@ -300,6 +324,8 @@ def main() -> int:
                 derived_changes,
                 equation_summary,
                 protected_objects_ok,
+                missing_fonts,
+                bool(missing_fonts and args.allow_missing_fonts),
             ),
             encoding="utf-8",
         )
@@ -312,6 +338,10 @@ def main() -> int:
                     "content_integrity": "pass",
                     "protected_object_integrity": "pass",
                     "derived_changes": len(derived_changes),
+                    "missing_fonts": missing_fonts,
+                    "missing_fonts_approved": bool(
+                        missing_fonts and args.allow_missing_fonts
+                    ),
                     "render_status": "pending",
                 },
                 ensure_ascii=False,
