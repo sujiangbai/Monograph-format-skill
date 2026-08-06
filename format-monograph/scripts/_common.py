@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -26,6 +27,9 @@ R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS = {"w": W_NS, "m": M_NS, "o": O_NS, "v": V_NS, "r": R_NS}
 CONTENT_PART = re.compile(
     r"^word/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$"
+)
+FIELD_MARKER_PATTERN = re.compile(
+    r"\[\[(?:TOC|PAGE|(?:REF|PAGEREF|SEQ):[A-Za-z0-9_.-]+)\]\]"
 )
 
 ROLE_STYLE_MAP = {
@@ -195,8 +199,7 @@ def _paragraph_text_without_field_results(paragraph: etree._Element) -> str:
 
 
 def _normalize_derived_paragraph_text(paragraph: etree._Element, value: str) -> str:
-    if _field_instruction_for_marker(value.strip()) is not None:
-        return ""
+    value = FIELD_MARKER_PATTERN.sub("", value)
     styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
     if styles:
         match = re.fullmatch(r"Heading([1-4])", styles[0])
@@ -257,24 +260,41 @@ def word_xml_counts(path: Path) -> dict[str, int]:
                 continue
             root = etree.fromstring(package.read(name))
             counts["fields"] += len(root.xpath(".//w:fldChar | .//w:fldSimple", namespaces=NS))
-            counts["equations"] += len(
-                root.xpath(
-                    ".//*[local-name()='oMath' or local-name()='oMathPara']"
-                )
-            )
+            counts["equations"] += len(root.xpath(".//*[local-name()='oMath']"))
             counts["drawings"] += len(root.xpath(".//w:drawing", namespaces=NS))
             counts["text_boxes"] += len(root.xpath(".//w:txbxContent", namespaces=NS))
     return counts
 
 
-def iter_document_paragraphs(document: Any) -> Iterable[Any]:
-    for paragraph in document.paragraphs:
+def _iter_container_paragraphs(container: Any) -> Iterable[Any]:
+    for paragraph in container.paragraphs:
         yield paragraph
-    for table in document.tables:
+    for table in container.tables:
         for row in table.rows:
             for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    yield paragraph
+                yield from _iter_container_paragraphs(cell)
+
+
+def iter_document_paragraphs(document: Any) -> Iterable[Any]:
+    seen: set[int] = set()
+    containers = [document]
+    for section in document.sections:
+        containers.extend(
+            [
+                section.header,
+                section.first_page_header,
+                section.even_page_header,
+                section.footer,
+                section.first_page_footer,
+                section.even_page_footer,
+            ]
+        )
+    for container in containers:
+        for paragraph in _iter_container_paragraphs(container):
+            identity = id(paragraph._p)
+            if identity not in seen:
+                seen.add(identity)
+                yield paragraph
 
 
 def style_name_for_selector(selector: dict[str, str]) -> str | None:
@@ -594,20 +614,109 @@ def _field_instruction_for_marker(marker: str) -> tuple[str, str] | None:
     return f"SEQ {value} \\* ARABIC \\s 1", "1"
 
 
+def _text_run_like(source_run: Any, value: str) -> Any:
+    run = OxmlElement("w:r")
+    r_pr = source_run._r.find(qn("w:rPr"))
+    if r_pr is not None:
+        run.append(copy.deepcopy(r_pr))
+    text = OxmlElement("w:t")
+    if value[:1].isspace() or value[-1:].isspace():
+        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text.text = value
+    run.append(text)
+    return run
+
+
+def _simple_field_like(source_run: Any, instruction: str, placeholder: str) -> Any:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    field.append(_text_run_like(source_run, placeholder))
+    return field
+
+
+def _field_reference_target(marker: str) -> str | None:
+    match = re.fullmatch(r"\[\[(?:REF|PAGEREF):([A-Za-z0-9_.-]+)\]\]", marker)
+    return None if match is None else match.group(1)
+
+
 def _convert_explicit_field_markers(document: Any) -> int:
     converted = 0
+    bookmarks = set(document.element.xpath(".//w:bookmarkStart/@w:name"))
     for index, paragraph in enumerate(iter_document_paragraphs(document)):
-        marker = paragraph.text.strip()
-        field = _field_instruction_for_marker(marker)
-        if field is None or marker != paragraph.text.strip():
+        paragraph_text = paragraph.text
+        matches = list(FIELD_MARKER_PATTERN.finditer(paragraph_text))
+        if not matches:
             continue
-        _clear_paragraph_content(paragraph)
-        _append_simple_field(paragraph, field[0], field[1])
-        _record_derived_change(
-            document,
-            {"kind": "field_marker", "paragraph": index, "source": marker, "field": field[0]},
-        )
-        converted += 1
+
+        runs = list(paragraph.runs)
+        ranges = []
+        cursor = 0
+        for run in runs:
+            start = cursor
+            cursor += len(run.text)
+            ranges.append((start, cursor, run))
+
+        assignments: dict[int, list[tuple[re.Match[str], Any]]] = {}
+        for match in matches:
+            marker = match.group(0)
+            if marker == "[[TOC]]" and paragraph_text.strip() != marker:
+                raise FormatMonographError(
+                    f"TOC marker must occupy its own paragraph at paragraph {index}."
+                )
+            target = _field_reference_target(marker)
+            if target is not None and target not in bookmarks:
+                raise FormatMonographError(
+                    f"Field marker {marker} references missing bookmark {target} "
+                    f"at paragraph {index}."
+                )
+            containing = [
+                (start, run)
+                for start, end, run in ranges
+                if start <= match.start() and match.end() <= end
+            ]
+            if len(containing) != 1:
+                raise FormatMonographError(
+                    f"Field marker spans multiple runs at paragraph {index}: {marker}"
+                )
+            start, run = containing[0]
+            assignments.setdefault(id(run._r), []).append((match, run))
+
+        for _, assigned in assignments.items():
+            source_run = assigned[0][1]
+            run_start = next(start for start, _, run in ranges if run is source_run)
+            parent = source_run._r.getparent()
+            insertion = parent.index(source_run._r)
+            local_cursor = 0
+            for match, _ in assigned:
+                local_start = match.start() - run_start
+                local_end = match.end() - run_start
+                prefix = source_run.text[local_cursor:local_start]
+                if prefix:
+                    parent.insert(insertion, _text_run_like(source_run, prefix))
+                    insertion += 1
+                marker = match.group(0)
+                instruction, placeholder = _field_instruction_for_marker(marker)
+                parent.insert(
+                    insertion,
+                    _simple_field_like(source_run, instruction, placeholder),
+                )
+                insertion += 1
+                _record_derived_change(
+                    document,
+                    {
+                        "kind": "field_marker",
+                        "paragraph": index,
+                        "source": marker,
+                        "field": instruction,
+                    },
+                )
+                converted += 1
+                local_cursor = local_end
+            suffix = source_run.text[local_cursor:]
+            if suffix:
+                parent.insert(insertion, _text_run_like(source_run, suffix))
+            parent.remove(source_run._r)
     return converted
 
 
@@ -804,7 +913,7 @@ def equation_inventory(path: Path) -> dict[str, Any]:
             if not name.startswith("word/") or not name.endswith(".xml"):
                 continue
             root = etree.fromstring(package.read(name))
-            result["omml"] += len(root.xpath(".//m:oMath | .//m:oMathPara", namespaces=NS))
+            result["omml"] += len(root.xpath(".//m:oMath", namespaces=NS))
             for ole in root.xpath(".//*[local-name()='OLEObject']"):
                 prog_id = (ole.get("ProgID") or ole.get(f"{{{O_NS}}}ProgID") or "").lower()
                 if "dsmt" in prog_id or "mathtype" in prog_id:
@@ -846,7 +955,7 @@ def protected_object_manifest(path: Path) -> dict[str, Any]:
                 media[name] = _sha256_bytes(data)
             if name.startswith("word/") and name.endswith(".xml"):
                 root = etree.fromstring(data)
-                for equation in root.xpath(".//m:oMath | .//m:oMathPara", namespaces=NS):
+                for equation in root.xpath(".//m:oMath", namespaces=NS):
                     canonical = etree.tostring(equation, method="c14n", exclusive=True)
                     omml.append(_sha256_bytes(canonical))
     return {
