@@ -65,7 +65,7 @@ def normalized_alignment(value: str) -> str:
 
 
 def compare_value(key: str, actual: Any, expected: Any) -> bool:
-    if key.endswith("_pt") or key == "line_spacing":
+    if key.endswith(("_pt", "_mm")) or key == "line_spacing":
         return close(actual, expected)
     if key == "color_hex" and actual is not None:
         return str(actual).lstrip("#").upper() == str(expected).lstrip("#").upper()
