@@ -2,8 +2,8 @@
 
 | 版本 | 状态 | 文件 | 说明 |
 | --- | --- | --- | --- |
-| 0.1.0 | 当前 | [v0.1.0-foundation.md](v0.1.0-foundation.md) | 跨 Agent 专著 DOCX 格式 skill 基线 |
-| 0.2.0 | 待合并 | [v0.2.0-technical-textbook-profile.md](v0.2.0-technical-textbook-profile.md) | 理工科教材格式、调用者要求最高及可编辑公式规则 |
+| 0.1.0 | 历史 | [v0.1.0-foundation.md](v0.1.0-foundation.md) | 跨 Agent 专著 DOCX 格式 skill 基线 |
+| 0.2.0 | 当前 | [v0.2.0-technical-textbook-profile.md](v0.2.0-technical-textbook-profile.md) | 理工科教材格式、调用者要求最高及可编辑公式规则 |
 
 ## 版本规则
 
