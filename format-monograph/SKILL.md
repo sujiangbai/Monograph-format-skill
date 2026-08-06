@@ -44,10 +44,11 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 2. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, and ambiguous static numbering.
 3. Run:
    `<python> scripts/apply_profile.py <input.docx> --profile <profile.json> --output-dir <directory>`
-4. Never overwrite the input file.
-5. Treat `manual_review` rules as review items. Do not simulate an automatic change.
-6. Preserve all authored text. Only display values generated from approved TOC, numbering, caption, page-number, or cross-reference fields may change.
-7. Run:
+4. If required fonts are missing, stop for QA. Use `--allow-missing-fonts` only after the caller explicitly approves structural output without those fonts; the report records the override.
+5. Never overwrite the input file.
+6. Treat `manual_review` rules as review items. Do not simulate an automatic change.
+7. Preserve all authored text. Only display values generated from approved TOC, numbering, caption, page-number, or cross-reference fields may change.
+8. Run:
    `<python> scripts/audit_docx.py <input.docx> <formatted.docx> --profile <profile.json> --output <audit.json>`
 
 ## Equations
