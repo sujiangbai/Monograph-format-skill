@@ -2,68 +2,65 @@
 
 ## 要素清单
 
-检查以下要素是否存在并分别建立规则：
-
-- 页面尺寸、装订线、页边距、分节、横竖版和起始页。
-- 封面、扉页、版权页、序言、前言、摘要、目录和其他前置部分。
-- 章、节和小节标题的字体、字号、间距、对齐、分页及编号。
-- 正文、中西文混排、首行缩进、行距、段前段后、孤行和段中分页。
-- 页眉、页脚、奇偶页、首页差异和页码体系。
-- 图片、表格、公式、题注、编号和交叉引用。
-- 脚注、尾注、参考文献、索引和附录。
+检查页面与分节、前置部分、目录、四级以上标题、正文混排、页眉页码、图表公式、题注与交叉引用、脚注尾注、长引文、参考文献、索引、答案、附录和教学提示框。
 
 ## 自动选择器
 
-V1 自动执行以下选择器：
+V1.1 可自动执行：
 
-- `document: all`：页面尺寸和默认分节属性。
-- `section_role: all`：对所有现有节应用页面属性。
-- `style_name: <Word style name>`：修改指定 Word 样式定义。
-- `paragraph_role`：`body`、`title`、`subtitle`、`heading1` 至 `heading9`。
-- `caption_role: all`：映射到 Word `Caption` 样式。
-- `table_role: all`：应用表格样式和对齐。
-- `bibliography_role: all`：映射到 Word `Bibliography` 样式。
+- `document: all` 或 `section_role: all`：现有各节页面属性。
+- `style_name: <Word style name>`：指定 Word 样式。
+- `paragraph_role`：`body`、`body_text`、`title`、`subtitle`、`chapter_title`、`level_2_section` 至 `level_4_section`、`long_quote`、`heading1` 至 `heading9`。
+- `caption_role: all`、`table_role: all`、`bibliography_role: all`。
+- `field_role`：批准的字段标记、多级标题编号和无歧义手工前缀迁移。
+- `equation_role`：可编辑公式保护和公式图片阻塞策略。
 
-无法可靠定位的封面块、版权页、特定附录、浮动对象、文本框、公式版式或自定义语义对象应使用 `manual_review`。
+`note_role`、`index_role`、`callout_role`、答案、自定义语义对象、宽表分节、续表断点、文本框和浮动对象在 V1.1 中仍使用 `manual_review`，除非已有更窄且经过测试的自动规则。
 
-## 自动属性
+## 样式属性
 
-样式和段落属性：
+- 字体：`font_name`、`font_name_ascii`、`font_name_east_asia`、`font_name_complex_script`、`font_size_pt`、`bold`、`italic`、`color_hex`。
+- 段落：`alignment`、`space_before_pt`、`space_after_pt`、`line_spacing`、`line_spacing_rule`、`line_spacing_pt`。
+- 缩进：`first_line_indent_pt`、`first_line_indent_chars`、`left_indent_pt`、`right_indent_pt`。
+- 分页：`keep_with_next`、`keep_together`、`page_break_before`、`widow_control`。
 
-- `font_name`
-- `font_size_pt`
-- `bold`
-- `italic`
-- `color_hex`
-- `alignment`
-- `space_before_pt`
-- `space_after_pt`
-- `line_spacing`
-- `first_line_indent_pt`
-- `left_indent_pt`
-- `right_indent_pt`
-- `keep_with_next`
-- `keep_together`
-- `page_break_before`
-- `widow_control`
+`line_spacing_rule` 为 `exact` 时必须同时提供 `line_spacing_pt`；字符缩进以 1/100 字符写入 OOXML。
 
-页面与分节属性：
+## 页面与分节属性
 
-- `page_width_mm`
-- `page_height_mm`
-- `orientation`
-- `margin_top_mm`
-- `margin_bottom_mm`
-- `margin_left_mm`
-- `margin_right_mm`
-- `gutter_mm`
-- `different_first_page_header_footer`
-- `odd_and_even_pages_header_footer`
+- 固定值：`page_width_mm`、`page_height_mm`、`orientation`、四侧 `margin_*_mm`、`gutter_mm`。
+- 保持纸张：`page_size_policy: preserve`。
+- 镜像比例：`mirror_margins`、`margin_inner_ratio`、`margin_outer_ratio`、`margin_top_ratio`、`margin_bottom_ratio`。
+- 页眉页脚：`header_distance_ratio`、`footer_distance_ratio`、`different_first_page_header_footer`、`odd_and_even_pages_header_footer`。
 
-表格属性：
+比例值基于当前节的纸张宽高计算。扫描页只能支持候选比例，不能直接证明准确毫米值。
+
+## 表格属性
 
 - `table_style`
 - `alignment`
 - `repeat_header_row`
+- `prevent_row_split`
 
-任何未列出的属性必须标记为 `manual_review`，除非后续版本方案明确增加自动支持。
+`prevent_row_split` 适用于普通行。超高行、续表标签、断点和横向分节必须先盘点并通过 QA。
+
+## 字段属性
+
+- `update_on_open`
+- `mark_fields_dirty`
+- `convert_explicit_markers`
+- `rebuild_heading_numbering`
+- `heading_levels`
+- `strip_manual_heading_prefixes`
+
+支持的显式标记为 `[[TOC]]`、`[[PAGE]]`、`[[SEQ:name]]`、`[[REF:name]]` 和 `[[PAGEREF:name]]`。不得根据相似文本猜测静态目录、题注或交叉引用。
+
+## 公式属性
+
+- `require_editable_equations`
+- `preserve_editable_objects`
+- `block_formula_images`
+
+可编辑对象包括 OMML 以及仍可由相应编辑器打开的 MathType/OLE。LaTeX 只能转换为可编辑 OMML。任何公式图片候选、旧版 Equation Editor 对象或对象哈希变化都必须阻塞或进入 QA，不得静默栅格化或重建。
+
+任何未列出的自动属性必须改为 `manual_review`，除非后续不可变版本方案明确增加支持并有测试覆盖。
