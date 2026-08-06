@@ -5,7 +5,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import platform
 import re
+import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
@@ -167,6 +171,114 @@ def write_json(path: Path, value: Any) -> None:
 
 def profile_schema_path() -> Path:
     return Path(__file__).resolve().parent.parent / "references" / "format-profile.schema.json"
+
+
+def _font_directories() -> list[Path]:
+    candidates: list[Path] = []
+    system = platform.system()
+    if system == "Windows":
+        if os.environ.get("WINDIR"):
+            candidates.append(Path(os.environ["WINDIR"]) / "Fonts")
+        if os.environ.get("LOCALAPPDATA"):
+            candidates.append(
+                Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "Windows" / "Fonts"
+            )
+    elif system == "Darwin":
+        candidates.extend(
+            [
+                Path("/System/Library/Fonts"),
+                Path("/Library/Fonts"),
+                Path.home() / "Library" / "Fonts",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                Path("/usr/share/fonts"),
+                Path("/usr/local/share/fonts"),
+                Path.home() / ".fonts",
+                Path.home() / ".local" / "share" / "fonts",
+            ]
+        )
+    return [path for path in candidates if path.is_dir()]
+
+
+def available_font_names() -> set[str]:
+    names: set[str] = set()
+    fc_list = shutil.which("fc-list")
+    if fc_list:
+        try:
+            result = subprocess.run(
+                [fc_list, "--format=%{family}\\n"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+            for line in result.stdout.splitlines():
+                names.update(part.strip() for part in line.split(",") if part.strip())
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    if platform.system() == "Windows":
+        try:
+            import winreg
+
+            key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+                index = 0
+                while True:
+                    try:
+                        label, _, _ = winreg.EnumValue(key, index)
+                    except OSError:
+                        break
+                    label = re.sub(r"\s*\([^)]*\)\s*$", "", label)
+                    names.update(
+                        part.strip()
+                        for part in re.split(r"\s*&\s*", label)
+                        if part.strip()
+                    )
+                    index += 1
+        except OSError:
+            pass
+
+    for directory in _font_directories():
+        for pattern in ("*.ttf", "*.ttc", "*.otf", "*.dfont"):
+            for path in directory.rglob(pattern):
+                names.add(path.stem)
+    return names
+
+
+def _font_key(value: str) -> str:
+    return re.sub(r"[\s_-]+", "", value).casefold()
+
+
+def required_profile_fonts(profile: dict[str, Any]) -> list[str]:
+    keys = {
+        "font_name",
+        "font_name_ascii",
+        "font_name_east_asia",
+        "font_name_complex_script",
+    }
+    return sorted(
+        {
+            str(value)
+            for rule in profile.get("rules", [])
+            if rule.get("status") == "approved"
+            and rule.get("application") == "automatic"
+            for key, value in rule.get("properties", {}).items()
+            if key in keys and str(value).strip()
+        }
+    )
+
+
+def missing_profile_fonts(profile: dict[str, Any]) -> list[str]:
+    available = {_font_key(name) for name in available_font_names()}
+    return [
+        name
+        for name in required_profile_fonts(profile)
+        if _font_key(name) not in available
+    ]
 
 
 def _paragraph_text_without_field_results(paragraph: etree._Element) -> str:
