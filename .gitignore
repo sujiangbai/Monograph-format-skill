@@ -1,0 +1,27 @@
+# User and publisher documents
+*.docx
+*.docm
+*.dotx
+*.pdf
+
+# Generated reports and renders
+*-formatted.*
+*-review.*
+*-format-report.md
+page-*.png
+rendered/
+output/
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
