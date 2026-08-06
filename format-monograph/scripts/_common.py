@@ -276,25 +276,10 @@ def _iter_container_paragraphs(container: Any) -> Iterable[Any]:
 
 
 def iter_document_paragraphs(document: Any) -> Iterable[Any]:
-    seen: set[int] = set()
-    containers = [document]
-    for section in document.sections:
-        containers.extend(
-            [
-                section.header,
-                section.first_page_header,
-                section.even_page_header,
-                section.footer,
-                section.first_page_footer,
-                section.even_page_footer,
-            ]
-        )
-    for container in containers:
-        for paragraph in _iter_container_paragraphs(container):
-            identity = id(paragraph._p)
-            if identity not in seen:
-                seen.add(identity)
-                yield paragraph
+    # Accessing an undefined header/footer through python-docx materializes a new
+    # part. Restrict automatic paragraph traversal to existing body containers
+    # so a read-only rule count cannot alter the package.
+    yield from _iter_container_paragraphs(document)
 
 
 def style_name_for_selector(selector: dict[str, str]) -> str | None:
