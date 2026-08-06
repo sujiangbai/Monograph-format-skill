@@ -78,7 +78,7 @@ def style_value(style: Any, key: str) -> Any:
         return float(value) if isinstance(value, (int, float)) else None
     if key == "line_spacing_pt":
         value = pf.line_spacing
-        return None if value is None or isinstance(value, (int, float)) else value.pt
+        return None if value is None or not hasattr(value, "pt") else value.pt
     if key == "line_spacing_rule":
         value = str(pf.line_spacing_rule).lower()
         if "exact" in value:
