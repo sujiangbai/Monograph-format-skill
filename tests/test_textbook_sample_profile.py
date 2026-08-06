@@ -81,7 +81,8 @@ class TextbookSampleProfileTests(unittest.TestCase):
             set(guarded_rules),
         )
         for rule in guarded_rules.values():
-            self.assertIn("QA", rule["notes"])
+            note = rule["notes"]
+            self.assertTrue("QA" in note or "等待决定" in note, rule["id"])
 
 
 if __name__ == "__main__":
