@@ -252,7 +252,11 @@ def main() -> int:
         if original_fp != formatted_fp or not protected_objects_ok:
             formatted_path.unlink(missing_ok=True)
             raise FormatMonographError(
-                "Content or protected-object integrity failed after formatting. "
+                "Integrity failed after formatting "
+                f"(content={'pass' if original_fp == formatted_fp else 'fail'}, "
+                f"protected_objects={'pass' if protected_objects_ok else 'fail'}, "
+                f"original_fingerprint={original_fp}, "
+                f"formatted_fingerprint={formatted_fp}). "
                 "The generated formatted copy was removed."
             )
 
