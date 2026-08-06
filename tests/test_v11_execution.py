@@ -184,6 +184,7 @@ class V11ExecutionTests(unittest.TestCase):
         document.add_heading("第1章 Synthetic chapter", level=1)
         document.add_paragraph("中西文 mixed body text remains unchanged.")
         document.add_paragraph("[[PAGE]]")
+        document.add_paragraph("图 [[SEQ:Figure]] Synthetic caption")
         equation = document.add_paragraph()
         add_omml(equation)
         table = document.add_table(rows=2, cols=2)
@@ -289,6 +290,12 @@ class V11ExecutionTests(unittest.TestCase):
         parsed_inventory = json.loads(inventory.read_text(encoding="utf-8"))
         self.assertEqual(1, parsed_inventory["equations"]["omml"])
         self.assertEqual(1, parsed_inventory["fields"]["types"]["PAGE"])
+        self.assertEqual(1, parsed_inventory["fields"]["types"]["SEQ"])
+        self.assertEqual(["Figure"], parsed_inventory["fields"]["sequences"])
+        self.assertEqual(
+            18,
+            parsed_inventory["style_definitions"]["Normal"]["line_spacing"],
+        )
 
         audit = self.root / "audit.json"
         audited = self.run_script(
@@ -306,6 +313,28 @@ class V11ExecutionTests(unittest.TestCase):
             audited.stdout + "\n" + audited.stderr,
         )
         self.assertTrue(json.loads(audit.read_text(encoding="utf-8"))["passed"])
+
+    def test_missing_cross_reference_bookmark_blocks_application(self) -> None:
+        broken_docx = self.root / "broken-reference.docx"
+        document = Document()
+        document.add_paragraph("See [[REF:missing_target]] for details.")
+        document.save(broken_docx)
+        original = broken_docx.read_bytes()
+
+        result = self.run_script(
+            "apply_profile.py",
+            broken_docx,
+            "--profile",
+            self.profile_path,
+            "--output-dir",
+            self.root / "broken-out",
+        )
+        self.assertEqual(1, result.returncode)
+        self.assertIn("missing bookmark", result.stderr.lower())
+        self.assertEqual(original, broken_docx.read_bytes())
+        self.assertFalse(
+            (self.root / "broken-out" / "broken-reference-formatted.docx").exists()
+        )
 
     def test_formula_image_candidate_blocks_application(self) -> None:
         image_docx = self.root / "formula-image.docx"
