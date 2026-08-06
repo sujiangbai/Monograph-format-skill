@@ -47,6 +47,21 @@ class ReferenceProfileTests(unittest.TestCase):
             self.assertEqual("draft", rule["status"], rule["id"])
             self.assertEqual("manual_review", rule["application"], rule["id"])
 
+    def test_publisher_standard_conflicts_require_user_decision(self) -> None:
+        precedence = self.profile["source_precedence"]
+        self.assertLess(
+            precedence.index("written_requirement"),
+            precedence.index("pdf_specification"),
+        )
+        answer = next(
+            question["answer"]
+            for question in self.profile["open_questions"]
+            if question["id"] == "QA-001"
+        )
+        self.assertIn("不得自动裁决", answer)
+        self.assertIn("开放冲突项", answer)
+        self.assertIn("等待用户决定", answer)
+
     def test_repository_does_not_record_private_pdf_paths(self) -> None:
         for source in self.profile["sources"]:
             self.assertFalse(source["public"])
