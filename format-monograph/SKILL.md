@@ -40,16 +40,23 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 
 ## Apply approved rules
 
-1. Run `<python> scripts/inspect_docx.py <input.docx> --output <inventory.json>`.
-2. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, and ambiguous static numbering.
-3. Run:
-   `<python> scripts/apply_profile.py <input.docx> --profile <profile.json> --output-dir <directory>`
-4. If required fonts are missing, stop for QA. Use `--allow-missing-fonts` only after the caller explicitly approves structural output without those fonts; the report records the override.
-5. Never overwrite the input file.
-6. Treat `manual_review` rules as review items. Do not simulate an automatic change.
-7. Preserve all authored text. Only display values generated from approved TOC, numbering, caption, page-number, or cross-reference fields may change.
-8. Run:
-   `<python> scripts/audit_docx.py <input.docx> <formatted.docx> --profile <profile.json> --output <audit.json>`
+1. Read [structure-map.md](references/structure-map.md).
+2. Run:
+   `<python> scripts/inspect_docx.py <input.docx> --output <inventory.json> --structure-map-output <candidate-structure-map.json>`
+3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, heading levels, captions, cross-page tables, and trailing sections.
+4. Ask the caller to approve each proposed structural operation. Keep uncertain entries unapproved and report them; never infer approval from profile approval.
+5. Set the map status to `approved`, then bind it to the unchanged source:
+   `<python> scripts/validate_structure_map.py <approved-structure-map.json> --source <input.docx>`
+6. Run:
+   `<python> scripts/apply_profile.py <input.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output-dir <directory>`
+7. If required fonts are missing, stop for QA. Use `--allow-missing-fonts` only after the caller explicitly approves structural output without those fonts; the report records the override.
+8. Never overwrite the input file.
+9. Treat `manual_review` rules as review items. Do not simulate an automatic change.
+10. Preserve all authored text. Only display values generated from approved TOC, numbering, caption, page-number, or cross-reference fields may change.
+11. Run:
+   `<python> scripts/audit_docx.py <input.docx> <formatted.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output <audit.json>`
+
+For a whole book, use one source-bound structure map that covers the entire DOCX. A chapter trial is evidence for tuning the rules, not the final scope of the skill.
 
 ## Equations
 
@@ -96,6 +103,7 @@ Stop and ask the caller when:
 - a formula-image candidate or unresolved legacy equation object exists;
 - content or protected-object integrity fails;
 - field migration is ambiguous;
+- a structure map does not match the current source fingerprint or is not approved;
 - rendering fails for a reason other than an unavailable renderer.
 
 Never silently substitute fonts, infer uncovered rules, edit prose, generate answers, rasterize formulas, or report unperformed validation as passed.
