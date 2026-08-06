@@ -509,6 +509,333 @@ def apply_table_properties(document: Any, properties: dict[str, Any]) -> int:
     return len(document.tables)
 
 
+
+def _record_derived_change(document: Any, change: dict[str, Any]) -> None:
+    changes = getattr(document, "_format_monograph_derived_changes", None)
+    if changes is None:
+        changes = []
+        setattr(document, "_format_monograph_derived_changes", changes)
+    changes.append(change)
+
+
+def _set_update_fields_on_open(document: Any, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn("w:updateFields"))
+    if enabled:
+        if element is None:
+            element = OxmlElement("w:updateFields")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def _mark_fields_dirty(document: Any) -> int:
+    root = document.element
+    fields = root.xpath(".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']")
+    for field in fields:
+        field.set(qn("w:dirty"), "true")
+    return len(fields)
+
+
+def _clear_paragraph_content(paragraph: Any) -> None:
+    p = paragraph._p
+    for child in list(p):
+        if child.tag != qn("w:pPr"):
+            p.remove(child)
+
+
+def _append_simple_field(paragraph: Any, instruction: str, placeholder: str) -> None:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = placeholder
+    run.append(text)
+    field.append(run)
+    paragraph._p.append(field)
+
+
+def _field_instruction_for_marker(marker: str) -> tuple[str, str] | None:
+    fixed = {
+        "[[TOC]]": ('TOC \\o "1-3" \\h \\z \\u', "Update table of contents"),
+        "[[PAGE]]": ("PAGE", "1"),
+    }
+    if marker in fixed:
+        return fixed[marker]
+    match = re.fullmatch(r"\[\[(REF|PAGEREF|SEQ):([A-Za-z0-9_.-]+)\]\]", marker)
+    if not match:
+        return None
+    kind, value = match.groups()
+    if kind == "REF":
+        return f"REF {value} \\h", "0"
+    if kind == "PAGEREF":
+        return f"PAGEREF {value} \\h", "0"
+    return f"SEQ {value} \\* ARABIC \\s 1", "1"
+
+
+def _convert_explicit_field_markers(document: Any) -> int:
+    converted = 0
+    for index, paragraph in enumerate(iter_document_paragraphs(document)):
+        marker = paragraph.text.strip()
+        field = _field_instruction_for_marker(marker)
+        if field is None or marker != paragraph.text.strip():
+            continue
+        _clear_paragraph_content(paragraph)
+        _append_simple_field(paragraph, field[0], field[1])
+        _record_derived_change(
+            document,
+            {"kind": "field_marker", "paragraph": index, "source": marker, "field": field[0]},
+        )
+        converted += 1
+    return converted
+
+
+def _remove_prefix_from_runs(paragraph: Any, length: int) -> None:
+    remaining = length
+    for run in paragraph.runs:
+        if remaining <= 0:
+            break
+        text = run.text
+        take = min(len(text), remaining)
+        run.text = text[take:]
+        remaining -= take
+    if remaining:
+        raise FormatMonographError("Heading prefix spans an unsupported non-text object.")
+
+
+def _heading_prefix_pattern(level: int) -> re.Pattern[str]:
+    if level == 1:
+        return re.compile(r"^\s*第\s*[0-9一二三四五六七八九十百]+\s*章\s*")
+    separators = level - 1
+    return re.compile(rf"^\s*\d+(?:[.-]\d+){{{separators}}}\s*")
+
+
+def _strip_manual_heading_prefixes(document: Any, levels: int) -> int:
+    changed = 0
+    for index, paragraph in enumerate(document.paragraphs):
+        if not paragraph.style or not paragraph.style.name.startswith("Heading "):
+            continue
+        try:
+            level = int(paragraph.style.name.split()[-1])
+        except ValueError:
+            continue
+        if level > levels:
+            continue
+        text = paragraph.text
+        match = _heading_prefix_pattern(level).match(text)
+        if not match:
+            if re.match(r"^\s*(?:第\s*\d+\s*章|\d+[.-]\d+)", text):
+                raise FormatMonographError(
+                    f"Ambiguous manual heading number at paragraph {index}: {text[:80]}"
+                )
+            continue
+        prefix = match.group(0)
+        _remove_prefix_from_runs(paragraph, len(prefix))
+        _record_derived_change(
+            document,
+            {"kind": "heading_prefix", "paragraph": index, "removed": prefix},
+        )
+        changed += 1
+    return changed
+
+
+def _next_numbering_id(root: Any, tag: str, attribute: str) -> int:
+    values = []
+    for element in root.findall(qn(f"w:{tag}")):
+        value = element.get(qn(f"w:{attribute}"))
+        if value is not None and value.isdigit():
+            values.append(int(value))
+    return max(values, default=0) + 1
+
+
+def _ensure_heading_numbering(document: Any, levels: int) -> int:
+    if not 1 <= levels <= 4:
+        raise FormatMonographError("heading_levels must be between 1 and 4.")
+    root = document.part.numbering_part.element
+    abstract_id = _next_numbering_id(root, "abstractNum", "abstractNumId")
+    num_id = _next_numbering_id(root, "num", "numId")
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    multi = OxmlElement("w:multiLevelType")
+    multi.set(qn("w:val"), "multilevel")
+    abstract.append(multi)
+
+    for level in range(levels):
+        lvl = OxmlElement("w:lvl")
+        lvl.set(qn("w:ilvl"), str(level))
+        start = OxmlElement("w:start")
+        start.set(qn("w:val"), "1")
+        num_fmt = OxmlElement("w:numFmt")
+        num_fmt.set(qn("w:val"), "decimal")
+        p_style = OxmlElement("w:pStyle")
+        p_style.set(qn("w:val"), f"Heading{level + 1}")
+        lvl_text = OxmlElement("w:lvlText")
+        if level == 0:
+            lvl_text.set(qn("w:val"), "第%1章")
+        else:
+            lvl_text.set(
+                qn("w:val"),
+                ".".join(f"%{number}" for number in range(1, level + 2)),
+            )
+        suff = OxmlElement("w:suff")
+        suff.set(qn("w:val"), "space")
+        lvl.extend([start, num_fmt, p_style, lvl_text, suff])
+        abstract.append(lvl)
+    root.insert(0, abstract)
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(num_id))
+    abstract_ref = OxmlElement("w:abstractNumId")
+    abstract_ref.set(qn("w:val"), str(abstract_id))
+    num.append(abstract_ref)
+    root.append(num)
+
+    for level in range(levels):
+        style = document.styles[f"Heading {level + 1}"]
+        p_pr = style.element.get_or_add_pPr()
+        num_pr = p_pr.find(qn("w:numPr"))
+        if num_pr is None:
+            num_pr = OxmlElement("w:numPr")
+            p_pr.append(num_pr)
+        for child_name in ("ilvl", "numId"):
+            existing = num_pr.find(qn(f"w:{child_name}"))
+            if existing is not None:
+                num_pr.remove(existing)
+        ilvl = OxmlElement("w:ilvl")
+        ilvl.set(qn("w:val"), str(level))
+        number = OxmlElement("w:numId")
+        number.set(qn("w:val"), str(num_id))
+        num_pr.extend([ilvl, number])
+    return levels
+
+
+def apply_field_properties(document: Any, properties: dict[str, Any]) -> int:
+    changed = 0
+    if "update_on_open" in properties:
+        _set_update_fields_on_open(document, bool(properties["update_on_open"]))
+        changed += 1
+    if properties.get("mark_fields_dirty"):
+        changed += _mark_fields_dirty(document)
+    if properties.get("convert_explicit_markers"):
+        changed += _convert_explicit_field_markers(document)
+
+    levels = int(properties.get("heading_levels", 4))
+    if properties.get("strip_manual_heading_prefixes"):
+        changed += _strip_manual_heading_prefixes(document, levels)
+    if properties.get("rebuild_heading_numbering"):
+        changed += _ensure_heading_numbering(document, levels)
+    return changed
+
+
+def apply_equation_properties(document: Any, properties: dict[str, Any]) -> int:
+    unsupported_values = {
+        key: value
+        for key, value in properties.items()
+        if key in EQUATION_PROPERTIES and value not in {True, False}
+    }
+    if unsupported_values:
+        raise FormatMonographError(
+            "Equation policy properties must be boolean: "
+            + ", ".join(sorted(unsupported_values))
+        )
+    return len(document.element.xpath(".//*[local-name()='oMath']"))
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def field_inventory(path: Path) -> dict[str, Any]:
+    ensure_docx(path)
+    counts: dict[str, int] = {}
+    total = 0
+    with zipfile.ZipFile(path) as package:
+        for name in package.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            root = etree.fromstring(package.read(name))
+            instructions = root.xpath(".//w:fldSimple/@w:instr", namespaces=NS)
+            instructions.extend(
+                text
+                for text in root.xpath(".//w:instrText/text()", namespaces=NS)
+                if text.strip()
+            )
+            for instruction in instructions:
+                match = re.match(r"\s*([A-Za-z]+)", instruction)
+                kind = match.group(1).upper() if match else "UNKNOWN"
+                counts[kind] = counts.get(kind, 0) + 1
+                total += 1
+    return {"total": total, "types": dict(sorted(counts.items()))}
+
+
+def equation_inventory(path: Path) -> dict[str, Any]:
+    ensure_docx(path)
+    result = {
+        "omml": 0,
+        "mathtype_ole": 0,
+        "legacy_equation_ole": 0,
+        "other_ole": 0,
+        "formula_image_candidates": 0,
+    }
+    with zipfile.ZipFile(path) as package:
+        for name in package.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            root = etree.fromstring(package.read(name))
+            result["omml"] += len(root.xpath(".//m:oMath | .//m:oMathPara", namespaces=NS))
+            for ole in root.xpath(".//*[local-name()='OLEObject']"):
+                prog_id = (ole.get("ProgID") or ole.get(f"{{{O_NS}}}ProgID") or "").lower()
+                if "dsmt" in prog_id or "mathtype" in prog_id:
+                    result["mathtype_ole"] += 1
+                elif prog_id in {"equation.3", "equation.2", "equation"}:
+                    result["legacy_equation_ole"] += 1
+                else:
+                    result["other_ole"] += 1
+
+            for paragraph in root.xpath(".//w:p", namespaces=NS):
+                if not paragraph.xpath(".//w:drawing | .//v:imagedata", namespaces=NS):
+                    continue
+                styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
+                metadata = paragraph.xpath(
+                    ".//*[local-name()='docPr']/@name | "
+                    ".//*[local-name()='docPr']/@title | "
+                    ".//*[local-name()='docPr']/@descr"
+                )
+                hint = " ".join(styles + metadata).lower()
+                if any(token in hint for token in ("equation", "formula", "公式")):
+                    result["formula_image_candidates"] += 1
+    result["editable_total"] = (
+        result["omml"] + result["mathtype_ole"] + result["legacy_equation_ole"]
+    )
+    return result
+
+
+def protected_object_manifest(path: Path) -> dict[str, Any]:
+    ensure_docx(path)
+    embeddings: dict[str, str] = {}
+    media: dict[str, str] = {}
+    omml: list[str] = []
+    with zipfile.ZipFile(path) as package:
+        for name in sorted(package.namelist()):
+            data = package.read(name)
+            if name.startswith("word/embeddings/"):
+                embeddings[name] = _sha256_bytes(data)
+            elif name.startswith("word/media/"):
+                media[name] = _sha256_bytes(data)
+            if name.startswith("word/") and name.endswith(".xml"):
+                root = etree.fromstring(data)
+                for equation in root.xpath(".//m:oMath | .//m:oMathPara", namespaces=NS):
+                    canonical = etree.tostring(equation, method="c14n", exclusive=True)
+                    omml.append(_sha256_bytes(canonical))
+    return {
+        "embeddings": embeddings,
+        "media": media,
+        "omml_sha256": sorted(omml),
+    }
+
 def apply_rule(document: Any, rule: dict[str, Any]) -> int:
     unsupported = unsupported_properties(rule)
     if unsupported:
@@ -521,6 +848,10 @@ def apply_rule(document: Any, rule: dict[str, Any]) -> int:
         return apply_section_properties(document, rule["properties"])
     if selector["kind"] == "table_role":
         return apply_table_properties(document, rule["properties"])
+    if selector["kind"] == "field_role":
+        return apply_field_properties(document, rule["properties"])
+    if selector["kind"] == "equation_role":
+        return apply_equation_properties(document, rule["properties"])
 
     style_name = style_name_for_selector(selector)
     if style_name is None:
