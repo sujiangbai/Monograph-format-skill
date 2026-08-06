@@ -391,10 +391,25 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
             setattr(paragraph_format, attr, bool(properties[key]))
 
 
+def _set_document_toggle(document: Any, name: str, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn(f"w:{name}"))
+    if enabled:
+        if element is None:
+            element = OxmlElement(f"w:{name}")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
 def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
     sections = list(document.sections)
-    explicit_size = "page_width_mm" in properties or "page_height_mm" in properties
+    page_size_policy = properties.get("page_size_policy")
+    if page_size_policy not in {None, "preserve"}:
+        raise FormatMonographError(f"Unsupported page_size_policy: {page_size_policy}")
 
+    explicit_size = "page_width_mm" in properties or "page_height_mm" in properties
     for section in sections:
         if "page_width_mm" in properties:
             section.page_width = Mm(float(properties["page_width_mm"]))
@@ -408,6 +423,7 @@ def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
             if section.orientation != target and not explicit_size:
                 section.page_width, section.page_height = section.page_height, section.page_width
             section.orientation = target
+
         for key, attr in (
             ("margin_top_mm", "top_margin"),
             ("margin_bottom_mm", "bottom_margin"),
@@ -417,6 +433,24 @@ def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
         ):
             if key in properties:
                 setattr(section, attr, Mm(float(properties[key])))
+
+        width_mm = float(section.page_width.mm)
+        height_mm = float(section.page_height.mm)
+        ratio_values = (
+            ("margin_inner_ratio", "left_margin", width_mm),
+            ("margin_outer_ratio", "right_margin", width_mm),
+            ("margin_top_ratio", "top_margin", height_mm),
+            ("margin_bottom_ratio", "bottom_margin", height_mm),
+            ("header_distance_ratio", "header_distance", height_mm),
+            ("footer_distance_ratio", "footer_distance", height_mm),
+        )
+        for key, attr, basis in ratio_values:
+            if key in properties:
+                ratio = float(properties[key])
+                if not 0 <= ratio < 0.5:
+                    raise FormatMonographError(f"{key} must be between 0 and 0.5.")
+                setattr(section, attr, Mm(basis * ratio))
+
         if "different_first_page_header_footer" in properties:
             section.different_first_page_header_footer = bool(
                 properties["different_first_page_header_footer"]
@@ -426,9 +460,10 @@ def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
         document.settings.odd_and_even_pages_header_footer = bool(
             properties["odd_and_even_pages_header_footer"]
         )
+    if "mirror_margins" in properties:
+        _set_document_toggle(document, "mirrorMargins", bool(properties["mirror_margins"]))
 
     return len(sections)
-
 
 def _set_repeat_table_header(row: Any, enabled: bool) -> None:
     tr_pr = row._tr.get_or_add_trPr()
@@ -436,6 +471,18 @@ def _set_repeat_table_header(row: Any, enabled: bool) -> None:
     if enabled:
         if existing is None:
             existing = OxmlElement("w:tblHeader")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def _set_prevent_row_split(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:cantSplit"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:cantSplit")
             tr_pr.append(existing)
         existing.set(qn("w:val"), "true")
     elif existing is not None:
@@ -453,6 +500,9 @@ def apply_table_properties(document: Any, properties: dict[str, Any]) -> int:
             table.alignment = TABLE_ALIGNMENTS[value]
         if "repeat_header_row" in properties and table.rows:
             _set_repeat_table_header(table.rows[0], bool(properties["repeat_header_row"]))
+        if "prevent_row_split" in properties:
+            for row in table.rows:
+                _set_prevent_row_split(row, bool(properties["prevent_row_split"]))
         for row in table.rows:
             for cell in row.cells:
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
