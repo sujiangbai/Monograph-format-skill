@@ -1,0 +1,324 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "gbt-2011-editorial-baseline-draft",
+  "name": "GB/T 15834—2011 与 GB/T 15835—2011 专著基础规则草案",
+  "locale": "zh-CN",
+  "scope": {
+    "document_type": "monograph",
+    "input_format": "DOCX",
+    "notes": "基础标准候选规则。只自动处理格式和批准的派生字段；任何字符级修订只进入报告。"
+  },
+  "target_applications": [
+    "Microsoft Word 2016",
+    "Microsoft Word 2019",
+    "Microsoft Word 2021",
+    "Microsoft 365",
+    "LibreOffice Writer"
+  ],
+  "source_precedence": [
+    "written_requirement",
+    "docx_template",
+    "pdf_specification",
+    "sample_book",
+    "image",
+    "text_note"
+  ],
+  "sources": [
+    {
+      "id": "SRC-001",
+      "type": "pdf_specification",
+      "label": "GB/T 15834—2011《标点符号用法》",
+      "locator": "第5章、附录A、附录B",
+      "summary": "提供现代汉语标点用法、横竖排位置、字符占位、禁则、序次语和标题标点规则。",
+      "public": false
+    },
+    {
+      "id": "SRC-002",
+      "type": "pdf_specification",
+      "label": "GB/T 15835—2011《出版物上数字用法》",
+      "locator": "第4章、第5章",
+      "summary": "提供出版物数字形式选择、一致性、字形占位、不拆行和竖排方向规则。",
+      "public": false
+    }
+  ],
+  "rules": [
+    {
+      "id": "FMT-PUNCT-001",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "forbid_line_start",
+        "targets": [
+          "句号",
+          "逗号",
+          "顿号",
+          "分号",
+          "冒号",
+          "问号",
+          "叹号"
+        ]
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "横排句内、句末点号位于对应文字之后，不应出现在行首。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-PUNCT-002",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "paired_mark_line_boundary",
+        "opening_marks": "forbid_line_end",
+        "closing_marks": "forbid_line_start"
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "引号、括号和书名号的前后半部分分别受行末和行首禁则约束。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-PUNCT-003",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "keep_mark_sequence_together",
+        "targets": [
+          "破折号",
+          "省略号"
+        ],
+        "nominal_width_han_characters": 2
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "破折号和省略号通常占两个汉字位置，不应从中间拆分到相邻两行。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-PUNCT-004",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "line_end_punctuation_compression",
+        "action": "confirm_with_publisher_before_adjustment"
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "行末全角标点可按版面需要压缩视觉占位，但具体压缩策略应服从出版社要求。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-PUNCT-005",
+      "category": "section",
+      "selector": {
+        "kind": "section_role",
+        "value": "vertical_text"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "vertical_punctuation_position_and_orientation"
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "竖排标点的位置、方向以及引号括号形式需按竖排规则复核。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-PUNCT-006",
+      "category": "heading",
+      "selector": {
+        "kind": "document",
+        "value": "heading_numbering"
+      },
+      "properties": {
+        "validation": "structural_and_visual",
+        "constraint": "sequence_marker_hierarchy",
+        "action": "approved_derived_field_only"
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "章节、条款和列表序次语具有层级次序及对应标点形式。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-PUNCT-007",
+      "category": "heading",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "title"
+      },
+      "properties": {
+        "validation": "content_audit",
+        "policy": "report_only",
+        "check": "title_terminal_punctuation"
+      },
+      "source_ids": [
+        "SRC-001"
+      ],
+      "evidence_summary": "标题末尾标点应按标准审校，但删除或替换现有字符超出V1范围。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NUM-001",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "arabic_numerals"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "upright_half_em_numerals",
+        "font_style": "upright",
+        "nominal_width_han_characters": 0.5
+      },
+      "source_ids": [
+        "SRC-002"
+      ],
+      "evidence_summary": "出版物中的阿拉伯数字通常采用正体并按半个汉字位置排印。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NUM-002",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "numeric_values"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "keep_complete_value_on_one_line"
+      },
+      "source_ids": [
+        "SRC-002"
+      ],
+      "evidence_summary": "一个完整数值应尽量保持在同一行，避免从中间断开。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NUM-003",
+      "category": "section",
+      "selector": {
+        "kind": "section_role",
+        "value": "vertical_text"
+      },
+      "properties": {
+        "validation": "visual",
+        "constraint": "rotate_arabic_numerals_clockwise_90_degrees",
+        "preserve_word_unit_direction": true
+      },
+      "source_ids": [
+        "SRC-002"
+      ],
+      "evidence_summary": "竖排文本中的阿拉伯数字按规定方向旋转，并保持词语单位方向一致。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NUM-004",
+      "category": "heading",
+      "selector": {
+        "kind": "document",
+        "value": "numeric_form_consistency"
+      },
+      "properties": {
+        "validation": "content_audit",
+        "policy": "report_only",
+        "check": "same_category_same_form"
+      },
+      "source_ids": [
+        "SRC-002"
+      ],
+      "evidence_summary": "同类别或同层级数字形式应保持一致；现有字符不由V1自动转换。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NUM-005",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "numeric_expression"
+      },
+      "properties": {
+        "validation": "content_audit",
+        "policy": "report_only",
+        "check": [
+          "numeral_selection",
+          "grouping",
+          "decimal",
+          "range",
+          "date",
+          "time",
+          "zero_form"
+        ]
+      },
+      "source_ids": [
+        "SRC-002"
+      ],
+      "evidence_summary": "数字形式、日期时间和数值表达规范只生成审校建议，不修改作者文字。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    }
+  ],
+  "conflicts": [],
+  "open_questions": [
+    {
+      "id": "QA-001",
+      "question": "出版社是否另有行末标点压缩、数字半字身或禁则处理要求，并应在何种场景覆盖本基础标准？",
+      "blocking": true,
+      "answer": "出版社已批准的具体要求在来源排序中优先；GB/T 标准在出版社未规定时作为默认基础规则。若双方对同一对象和属性发生冲突，不得自动裁决，必须建立开放冲突项并等待用户决定采用哪一项。"
+    },
+    {
+      "id": "QA-002",
+      "question": "首批专著是否包含竖排正文、竖排表头或其他竖排对象？",
+      "blocking": false
+    }
+  ],
+  "approval": {
+    "status": "draft",
+    "notes": "用户已确认范围决策A和来源冲突政策；具体规则仍为草案，且首批出版社资料尚未形成完整配置，因此不可用于修改DOCX。"
+  }
+}
