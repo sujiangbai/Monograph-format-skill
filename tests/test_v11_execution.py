@@ -300,7 +300,11 @@ class V11ExecutionTests(unittest.TestCase):
             "--output",
             audit,
         )
-        self.assertEqual(0, audited.returncode, audited.stderr)
+        self.assertEqual(
+            0,
+            audited.returncode,
+            audited.stdout + "\n" + audited.stderr,
+        )
         self.assertTrue(json.loads(audit.read_text(encoding="utf-8"))["passed"])
 
     def test_formula_image_candidate_blocks_application(self) -> None:
