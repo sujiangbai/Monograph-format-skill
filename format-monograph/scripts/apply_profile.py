@@ -14,6 +14,7 @@ from _common import (
     apply_rule,
     content_fingerprint,
     equation_inventory,
+    field_inventory,
     first_anchor_paragraph,
     load_document,
     protected_object_manifest,
@@ -52,6 +53,22 @@ def uses_derived_normalization(profile: dict) -> bool:
         and any(rule.get("properties", {}).get(key) for key in keys)
         for rule in profile.get("rules", [])
     )
+
+
+def preflight_fields(input_path: Path, profile: dict) -> dict:
+    inventory = field_inventory(input_path)
+    rebuilds_fields = any(
+        rule.get("status") == "approved"
+        and rule.get("application") == "automatic"
+        and rule.get("selector", {}).get("kind") == "field_role"
+        for rule in profile.get("rules", [])
+    )
+    if rebuilds_fields and inventory["unresolved_references"]:
+        raise FormatMonographError(
+            "Field policy blocked the document because REF/PAGEREF targets are missing: "
+            + ", ".join(inventory["unresolved_references"])
+        )
+    return inventory
 
 
 def preflight_equations(input_path: Path, profile: dict) -> dict:
@@ -197,6 +214,7 @@ def main() -> int:
             raise FormatMonographError("Output path must not overwrite the input DOCX.")
 
         normalize_derived = uses_derived_normalization(profile)
+        preflight_fields(args.input, profile)
         equation_summary = preflight_equations(args.input, profile)
         original_objects = protected_object_manifest(args.input)
         original_fp = content_fingerprint(
