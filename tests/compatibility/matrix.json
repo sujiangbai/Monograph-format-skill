@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "platforms": [
+    {
+      "name": "OpenAI Codex",
+      "discovery": "pending-live-validation",
+      "activation": "pending-live-validation",
+      "resource_loading": "pending-live-validation",
+      "script_execution": "pending-live-validation"
+    },
+    {
+      "name": "Claude Code",
+      "discovery": "pending-live-validation",
+      "activation": "pending-live-validation",
+      "resource_loading": "pending-live-validation",
+      "script_execution": "pending-live-validation"
+    },
+    {
+      "name": "Gemini CLI",
+      "discovery": "pending-live-validation",
+      "activation": "pending-live-validation",
+      "resource_loading": "pending-live-validation",
+      "script_execution": "pending-live-validation"
+    },
+    {
+      "name": "VS Code / GitHub Copilot",
+      "discovery": "pending-live-validation",
+      "activation": "pending-live-validation",
+      "resource_loading": "pending-live-validation",
+      "script_execution": "pending-live-validation"
+    }
+  ]
+}
