@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 from _common import (  # noqa: E402
     content_fingerprint,
     equation_inventory,
+    field_inventory,
     protected_object_manifest,
 )
 from validate_profile import validate  # noqa: E402
@@ -175,6 +176,56 @@ def add_omml(paragraph) -> None:
     paragraph._p.append(math)
 
 
+def add_split_ref_field(paragraph, bookmark: str) -> None:
+    bookmark_start = OxmlElement("w:bookmarkStart")
+    bookmark_start.set(qn("w:id"), "42")
+    bookmark_start.set(qn("w:name"), bookmark)
+    bookmark_end = OxmlElement("w:bookmarkEnd")
+    bookmark_end.set(qn("w:id"), "42")
+    paragraph._p.extend([bookmark_start, bookmark_end])
+
+    begin_run = OxmlElement("w:r")
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    begin_run.append(begin)
+
+    instruction_run_1 = OxmlElement("w:r")
+    instruction_1 = OxmlElement("w:instrText")
+    instruction_1.text = " REF "
+    instruction_run_1.append(instruction_1)
+
+    instruction_run_2 = OxmlElement("w:r")
+    instruction_2 = OxmlElement("w:instrText")
+    instruction_2.text = bookmark + " \\h "
+    instruction_run_2.append(instruction_2)
+
+    separate_run = OxmlElement("w:r")
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    separate_run.append(separate)
+
+    result_run = OxmlElement("w:r")
+    result_text = OxmlElement("w:t")
+    result_text.text = "1"
+    result_run.append(result_text)
+
+    end_run = OxmlElement("w:r")
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    end_run.append(end)
+
+    paragraph._p.extend(
+        [
+            begin_run,
+            instruction_run_1,
+            instruction_run_2,
+            separate_run,
+            result_run,
+            end_run,
+        ]
+    )
+
+
 class V11ExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -213,6 +264,21 @@ class V11ExecutionTests(unittest.TestCase):
             text=True,
             check=False,
         )
+
+    def test_split_complex_field_instruction_is_counted_once(self) -> None:
+        path = self.root / "split-field.docx"
+        document = Document()
+        add_split_ref_field(document.add_paragraph(), "target_bookmark")
+        document.save(path)
+
+        inventory = field_inventory(path)
+        self.assertEqual(1, inventory["total"])
+        self.assertEqual({"REF": 1}, inventory["types"])
+        self.assertEqual(
+            [{"type": "REF", "target": "target_bookmark"}],
+            inventory["references"],
+        )
+        self.assertEqual([], inventory["unresolved_references"])
 
     def test_profile_validates_and_v10_remains_supported(self) -> None:
         errors, parsed = validate(self.profile_path)
