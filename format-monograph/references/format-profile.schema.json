@@ -20,7 +20,11 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "type": "string",
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
     },
     "profile_id": {
       "type": "string",
@@ -79,6 +83,7 @@
       "items": {
         "type": "string",
         "enum": [
+          "user_requirement",
           "written_requirement",
           "docx_template",
           "pdf_specification",
@@ -115,6 +120,9 @@
     },
     "approval": {
       "$ref": "#/$defs/approval"
+    },
+    "runtime_policy": {
+      "$ref": "#/$defs/runtime_policy"
     }
   },
   "$defs": {
@@ -136,6 +144,7 @@
         "type": {
           "type": "string",
           "enum": [
+            "user_requirement",
             "written_requirement",
             "docx_template",
             "pdf_specification",
@@ -182,7 +191,11 @@
             "caption_role",
             "note_role",
             "bibliography_role",
-            "appendix_role"
+            "appendix_role",
+            "field_role",
+            "equation_role",
+            "index_role",
+            "callout_role"
           ]
         },
         "value": {
@@ -228,7 +241,10 @@
             "note",
             "bibliography",
             "appendix",
-            "field"
+            "field",
+            "index",
+            "callout",
+            "answer"
           ]
         },
         "selector": {
@@ -374,6 +390,40 @@
         "notes": {
           "type": "string",
           "maxLength": 1000
+        }
+      }
+    },
+    "runtime_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caller_requirements_highest",
+        "editable_equations_required",
+        "formula_image_policy"
+      ],
+      "properties": {
+        "caller_requirements_highest": {
+          "const": true
+        },
+        "editable_equations_required": {
+          "const": true
+        },
+        "formula_image_policy": {
+          "const": "block"
+        },
+        "legacy_equation_policy": {
+          "type": "string",
+          "enum": [
+            "qa",
+            "allow"
+          ]
+        },
+        "field_rebuild_policy": {
+          "type": "string",
+          "enum": [
+            "explicit_or_unambiguous",
+            "report_only"
+          ]
         }
       }
     }

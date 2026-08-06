@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -14,8 +13,12 @@ from _common import (
     FormatMonographError,
     apply_rule,
     content_fingerprint,
+    equation_inventory,
+    field_inventory,
     first_anchor_paragraph,
     load_document,
+    missing_profile_fonts,
+    protected_object_manifest,
     summarize_rule,
 )
 from validate_profile import validate
@@ -38,6 +41,58 @@ def assert_outputs_available(paths: tuple[Path, ...], force: bool) -> None:
         )
 
 
+def uses_derived_normalization(profile: dict) -> bool:
+    keys = {
+        "convert_explicit_markers",
+        "rebuild_heading_numbering",
+        "strip_manual_heading_prefixes",
+    }
+    return any(
+        rule.get("status") == "approved"
+        and rule.get("application") == "automatic"
+        and rule.get("selector", {}).get("kind") == "field_role"
+        and any(rule.get("properties", {}).get(key) for key in keys)
+        for rule in profile.get("rules", [])
+    )
+
+
+def preflight_fields(input_path: Path, profile: dict) -> dict:
+    inventory = field_inventory(input_path)
+    rebuilds_fields = any(
+        rule.get("status") == "approved"
+        and rule.get("application") == "automatic"
+        and rule.get("selector", {}).get("kind") == "field_role"
+        for rule in profile.get("rules", [])
+    )
+    if rebuilds_fields and inventory["unresolved_references"]:
+        raise FormatMonographError(
+            "Field policy blocked the document because REF/PAGEREF targets are missing: "
+            + ", ".join(inventory["unresolved_references"])
+        )
+    return inventory
+
+
+def preflight_equations(input_path: Path, profile: dict) -> dict:
+    inventory = equation_inventory(input_path)
+    policy = profile.get("runtime_policy", {})
+    if not policy.get("editable_equations_required"):
+        return inventory
+    if inventory["formula_image_candidates"]:
+        raise FormatMonographError(
+            "Editable-equation policy blocked the document: "
+            f"{inventory['formula_image_candidates']} formula image candidate(s) found."
+        )
+    if (
+        inventory["legacy_equation_ole"]
+        and policy.get("legacy_equation_policy", "qa") == "qa"
+    ):
+        raise FormatMonographError(
+            "Legacy Equation Editor objects require QA before formatting: "
+            f"{inventory['legacy_equation_ole']} object(s)."
+        )
+    return inventory
+
+
 def report_markdown(
     input_path: Path,
     profile: dict,
@@ -46,8 +101,13 @@ def report_markdown(
     changes: list[dict],
     manual: list[dict],
     unanchored: list[str],
+    derived_changes: list[dict],
+    equation_summary: dict,
+    protected_objects_ok: bool,
+    missing_fonts: list[str],
+    missing_fonts_approved: bool,
 ) -> str:
-    integrity = "PASS" if original_fp == formatted_fp else "FAIL"
+    integrity = "PASS" if original_fp == formatted_fp and protected_objects_ok else "FAIL"
     lines = [
         "# 专著格式修改报告",
         "",
@@ -60,12 +120,30 @@ def report_markdown(
         f"- 批准时间：{profile['approval'].get('approved_at', '')}",
         f"- 生成时间：{dt.datetime.now(dt.timezone.utc).isoformat()}",
         "",
+        "## 运行时依据",
+        "",
+        f"- 调用者明确要求最高：{profile.get('runtime_policy', {}).get('caller_requirements_highest', False)}",
+        "- 来源优先级：" + " > ".join(profile.get("source_precedence", [])),
+        "",
+        "## 字体预检",
+        "",
+        "- 缺失字体：" + (", ".join(missing_fonts) if missing_fonts else "无"),
+        f"- 用户批准缺失字体降级：{missing_fonts_approved}",
+        "",
         "## 内容一致性",
         "",
         f"- 结果：**{integrity}**",
         f"- 原稿指纹：`{original_fp}`",
         f"- 格式稿指纹：`{formatted_fp}`",
-        "- 指纹排除自动字段显示结果，但包含正文、表格、页眉页脚、脚注和尾注。",
+        "- 指纹排除字段显示结果；获批字段重建还会规范化明确识别的派生编号。",
+        f"- OMML、嵌入对象和媒体哈希：{'PASS' if protected_objects_ok else 'FAIL'}",
+        "",
+        "## 公式对象",
+        "",
+        f"- OMML：{equation_summary['omml']}",
+        f"- MathType OLE：{equation_summary['mathtype_ole']}",
+        f"- 旧版 Equation Editor：{equation_summary['legacy_equation_ole']}",
+        f"- 公式图片候选：{equation_summary['formula_image_candidates']}",
         "",
         "## 已应用规则",
         "",
@@ -81,6 +159,13 @@ def report_markdown(
         )
     if not changes:
         lines.append("| - | - | 0 | 没有自动规则 |")
+
+    lines.extend(["", "## 派生字段变更", ""])
+    if derived_changes:
+        for change in derived_changes:
+            lines.append(f"- `{change['kind']}`：{json.dumps(change, ensure_ascii=False)}")
+    else:
+        lines.append("- 无。")
 
     lines.extend(["", "## 人工复核", ""])
     if manual:
@@ -108,7 +193,12 @@ def report_markdown(
             "",
             "## 结论",
             "",
-            "- 当前结论：" + ("结构检查通过，等待视觉 QA。" if integrity == "PASS" else "失败：内容一致性检查未通过。"),
+            "- 当前结论："
+            + (
+                "结构检查通过，等待视觉 QA。"
+                if integrity == "PASS"
+                else "失败：内容或可编辑对象一致性检查未通过。"
+            ),
             "",
         ]
     )
@@ -121,6 +211,11 @@ def main() -> int:
     parser.add_argument("--profile", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--allow-missing-fonts",
+        action="store_true",
+        help="Continue only after the caller explicitly approves missing-font visual QA.",
+    )
     args = parser.parse_args()
 
     try:
@@ -136,7 +231,19 @@ def main() -> int:
         if args.input.resolve() in {formatted_path.resolve(), review_path.resolve()}:
             raise FormatMonographError("Output path must not overwrite the input DOCX.")
 
-        original_fp = content_fingerprint(args.input)
+        normalize_derived = uses_derived_normalization(profile)
+        preflight_fields(args.input, profile)
+        equation_summary = preflight_equations(args.input, profile)
+        missing_fonts = missing_profile_fonts(profile)
+        if missing_fonts and not args.allow_missing_fonts:
+            raise FormatMonographError(
+                "Required fonts are unavailable: " + ", ".join(missing_fonts)
+                + ". Obtain caller QA approval before using --allow-missing-fonts."
+            )
+        original_objects = protected_object_manifest(args.input)
+        original_fp = content_fingerprint(
+            args.input, normalize_derived=normalize_derived
+        )
         document = load_document(args.input)
         changes: list[dict] = []
         manual: list[dict] = []
@@ -157,12 +264,24 @@ def main() -> int:
                 }
             )
 
+        derived_changes = list(
+            getattr(document, "_format_monograph_derived_changes", [])
+        )
         document.save(str(formatted_path))
-        formatted_fp = content_fingerprint(formatted_path)
-        if original_fp != formatted_fp:
+        formatted_fp = content_fingerprint(
+            formatted_path, normalize_derived=normalize_derived
+        )
+        formatted_objects = protected_object_manifest(formatted_path)
+        protected_objects_ok = original_objects == formatted_objects
+        if original_fp != formatted_fp or not protected_objects_ok:
             formatted_path.unlink(missing_ok=True)
             raise FormatMonographError(
-                "Content integrity failed after formatting. The generated formatted copy was removed."
+                "Integrity failed after formatting "
+                f"(content={'pass' if original_fp == formatted_fp else 'fail'}, "
+                f"protected_objects={'pass' if protected_objects_ok else 'fail'}, "
+                f"original_fingerprint={original_fp}, "
+                f"formatted_fingerprint={formatted_fp}). "
+                "The generated formatted copy was removed."
             )
 
         review = load_document(formatted_path)
@@ -181,11 +300,16 @@ def main() -> int:
                 initials="FM",
             )
         review.save(str(review_path))
-        if content_fingerprint(review_path) != original_fp:
+        if (
+            content_fingerprint(review_path, normalize_derived=normalize_derived)
+            != original_fp
+            or protected_object_manifest(review_path) != original_objects
+        ):
             review_path.unlink(missing_ok=True)
             formatted_path.unlink(missing_ok=True)
             raise FormatMonographError(
-                "Content integrity failed after adding review comments. Generated DOCX files were removed."
+                "Content or protected-object integrity failed after adding review comments. "
+                "Generated DOCX files were removed."
             )
 
         report_path.write_text(
@@ -197,6 +321,11 @@ def main() -> int:
                 changes,
                 manual,
                 unanchored,
+                derived_changes,
+                equation_summary,
+                protected_objects_ok,
+                missing_fonts,
+                bool(missing_fonts and args.allow_missing_fonts),
             ),
             encoding="utf-8",
         )
@@ -207,6 +336,12 @@ def main() -> int:
                     "review": str(review_path),
                     "report": str(report_path),
                     "content_integrity": "pass",
+                    "protected_object_integrity": "pass",
+                    "derived_changes": len(derived_changes),
+                    "missing_fonts": missing_fonts,
+                    "missing_fonts_approved": bool(
+                        missing_fonts and args.allow_missing_fonts
+                    ),
                     "render_status": "pending",
                 },
                 ensure_ascii=False,

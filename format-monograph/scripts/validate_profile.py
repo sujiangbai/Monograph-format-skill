@@ -28,6 +28,23 @@ def semantic_errors(profile: dict) -> list[str]:
     if len(rule_ids) != len(set(rule_ids)):
         errors.append("Rule IDs must be unique.")
 
+    if profile.get("schema_version") == "1.1":
+        policy = profile.get("runtime_policy")
+        if not policy:
+            errors.append("Profile 1.1 requires runtime_policy.")
+        else:
+            if policy.get("caller_requirements_highest") is not True:
+                errors.append("Profile 1.1 must keep caller requirements at highest priority.")
+            if policy.get("editable_equations_required") is not True:
+                errors.append("Profile 1.1 must require editable equations.")
+            if policy.get("formula_image_policy") != "block":
+                errors.append("Profile 1.1 must block formula images.")
+        precedence = profile.get("source_precedence", [])
+        if not precedence or precedence[0] != "user_requirement":
+            errors.append(
+                "Profile 1.1 source_precedence must start with user_requirement."
+            )
+
     known_sources = set(source_ids)
     known_rules = set(rule_ids)
     for rule in profile.get("rules", []):
