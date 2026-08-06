@@ -24,6 +24,7 @@ from _common import (
     write_json,
 )
 from validate_profile import validate
+from structure_map import load_structure_map, structure_content_fingerprint
 
 
 def close(actual: Any, expected: Any, tolerance: float = 0.05) -> bool:
@@ -56,319 +57,307 @@ def style_value(style: Any, key: str) -> Any:
         return getattr(font, key)
     if key == "color_hex":
         return None if font.color.rgb is None else str(font.color.rgb)
-    if key == "alignment":
-        return None if pf.alignment is None else str(pf.alignment).split(".")[-1].lower()
-    point_values = {
-        "space_before_pt": pf.space_before,
-        "space_after_pt": pf.space_after,
-        "first_line_indent_pt": pf.first_line_indent,
-        "left_indent_pt": pf.left_indent,
-        "right_indent_pt": pf.right_indent,
-    }
-    if key in point_values:
-        value = point_values[key]
-        return None if value is None else value.pt
-    if key == "first_line_indent_chars":
-        p_pr = style.element.pPr
-        ind = None if p_pr is None else p_pr.find(qn("w:ind"))
-        value = None if ind is None else ind.get(qn("w:firstLineChars"))
-        return None if value is None else int(value) / 100
-    if key == "line_spacing":
-        value = pf.line_spacing
-        return float(value) if isinstance(value, (int, float)) else None
-    if key == "line_spacing_pt":
-        value = pf.line_spacing
-        return None if value is None or not hasattr(value, "pt") else value.pt
-    if key == "line_spacing_rule":
-        value = str(pf.line_spacing_rule).lower()
-        if "exact" in value:
-            return "exact"
-        if "at_least" in value or "at least" in value:
-            return "at_least"
-        if "multiple" in value:
-            return "multiple"
-        if "one_point_five" in value or "1.5" in value:
-            return "one_point_five"
-        if "double" in value:
-            return "double"
-        if "single" in value:
-            return "single"
-        return value
-    if key in {"keep_with_next", "keep_together", "page_break_before", "widow_control"}:
-        return getattr(pf, key)
-    return "<unsupported>"
+    if key == "a…11018 tokens truncated…
+        raise FormatMonographError(
+            "Structure map source fingerprint does not match the input DOCX."
+        )
 
 
-def normalized_alignment(value: str) -> str:
-    value = value.lower()
-    for name in ("left", "center", "right", "justify", "distributed"):
-        if name in value:
-            return name
-    return value
+def _verified_paragraph(document: Any, entry: dict[str, Any]) -> Any:
+    index = int(entry["paragraph"])
+    if not 0 <= index < len(document.paragraphs):
+        raise FormatMonographError(f"Structure-map paragraph is out of range: {index}")
+    paragraph = document.paragraphs[index]
+    if text_sha256(paragraph.text) != entry["text_sha256"]:
+        raise FormatMonographError(
+            f"Structure-map paragraph hash mismatch at paragraph {index}."
+        )
+    return paragraph
 
 
-def compare_value(key: str, actual: Any, expected: Any) -> bool:
-    if key.endswith(("_pt", "_mm", "_ratio")) or key in {
-        "line_spacing",
-        "first_line_indent_chars",
-    }:
-        return close(actual, expected)
-    if key == "color_hex" and actual is not None:
-        return str(actual).lstrip("#").upper() == str(expected).lstrip("#").upper()
-    if key == "alignment" and actual is not None:
-        return normalized_alignment(str(actual)) == str(expected).lower()
-    return actual == expected
+def _clear_paragraph(paragraph: Any) -> None:
+    for child in list(paragraph._p):
+        if child.tag != qn("w:pPr"):
+            paragraph._p.remove(child)
 
 
-def audit_style_rule(document: Any, rule: dict) -> list[dict]:
-    style_name = style_name_for_selector(rule["selector"])
-    if style_name is None:
-        return [{"property": "*", "expected": "supported style selector", "actual": "unsupported"}]
-    try:
-        style = document.styles[style_name]
-    except KeyError:
-        return [{"property": "*", "expected": style_name, "actual": "missing style"}]
-    failures = []
-    for key, expected in rule["properties"].items():
-        actual = style_value(style, key)
-        if not compare_value(key, actual, expected):
-            failures.append({"property": key, "expected": expected, "actual": actual})
-    return failures
+def _text_run(value: str) -> Any:
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    if value[:1].isspace() or value[-1:].isspace():
+        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text.text = value
+    run.append(text)
+    return run
 
 
-def document_toggle(document: Any, name: str) -> bool:
-    return document.settings.element.find(qn(f"w:{name}")) is not None
+def _simple_field(instruction: str, placeholder: str) -> Any:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    field.append(_text_run(placeholder))
+    return field
 
 
-def audit_section_rule(document: Any, rule: dict) -> list[dict]:
-    failures = []
-    for index, section in enumerate(document.sections):
-        width = float(section.page_width.mm)
-        height = float(section.page_height.mm)
-        values = {
-            "page_width_mm": width,
-            "page_height_mm": height,
-            "margin_top_mm": section.top_margin.mm,
-            "margin_bottom_mm": section.bottom_margin.mm,
-            "margin_left_mm": section.left_margin.mm,
-            "margin_right_mm": section.right_margin.mm,
-            "gutter_mm": section.gutter.mm,
-            "header_distance_ratio": section.header_distance.mm / height,
-            "footer_distance_ratio": section.footer_distance.mm / height,
-            "margin_inner_ratio": section.left_margin.mm / width,
-            "margin_outer_ratio": section.right_margin.mm / width,
-            "margin_top_ratio": section.top_margin.mm / height,
-            "margin_bottom_ratio": section.bottom_margin.mm / height,
-            "mirror_margins": document_toggle(document, "mirrorMargins"),
-            "page_size_policy": "preserve",
-            "different_first_page_header_footer": bool(section.different_first_page_header_footer),
-            "odd_and_even_pages_header_footer": bool(
-                document.settings.odd_and_even_pages_header_footer
+def _apply_toc_ranges(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    for entry in structure_map.get("toc_ranges", []):
+        if not entry.get("approved"):
+            continue
+        start, end = int(entry["start_paragraph"]), int(entry["end_paragraph"])
+        hashes = entry.get("paragraph_sha256", [])
+        if start < 0 or end < start or end >= len(document.paragraphs):
+            raise FormatMonographError("Approved TOC range is out of bounds.")
+        if len(hashes) != end - start + 1:
+            raise FormatMonographError("Approved TOC range hash count is invalid.")
+        for offset, index in enumerate(range(start, end + 1)):
+            if text_sha256(document.paragraphs[index].text) != hashes[offset]:
+                raise FormatMonographError(
+                    f"Approved TOC range hash mismatch at paragraph {index}."
+                )
+            _clear_paragraph(document.paragraphs[index])
+        levels = int(entry.get("levels", 4))
+        document.paragraphs[start]._p.append(
+            _simple_field(
+                f'TOC \\o "1-{levels}" \\h \\z \\u',
+                "Update table of contents",
+            )
+        )
+        changed += end - start + 1
+    return changed
+
+
+def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    for entry in structure_map.get("headings", []):
+        if not entry.get("approved"):
+            continue
+        level = int(entry["level"])
+        if level not in {1, 2, 3, 4}:
+            raise FormatMonographError(f"Invalid approved heading level: {level}")
+        _verified_paragraph(document, entry).style = f"Heading {level}"
+        changed += 1
+    return changed
+
+
+def _remove_prefix_from_runs(paragraph: Any, length: int) -> None:
+    remaining = length
+    for run in paragraph.runs:
+        if remaining <= 0:
+            break
+        take = min(len(run.text), remaining)
+        run.text = run.text[take:]
+        remaining -= take
+    if remaining:
+        raise FormatMonographError("Caption prefix spans an unsupported object.")
+
+
+def _apply_captions(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    for entry in structure_map.get("captions", []):
+        if not entry.get("approved"):
+            continue
+        paragraph = _verified_paragraph(document, entry)
+        match = CAPTION_PATTERN.match(paragraph.text)
+        if not match:
+            raise FormatMonographError(
+                f"Approved caption no longer matches at paragraph {entry['paragraph']}."
+            )
+        label, hierarchy, sequence, _ = match.groups()
+        if label != entry["label"]:
+            raise FormatMonographError("Approved caption label does not match.")
+        description_start = match.start(4)
+        _remove_prefix_from_runs(paragraph, description_start)
+        insertion = 1 if paragraph._p.pPr is not None else 0
+        elements = [
+            _text_run(f"{label} "),
+            _simple_field(
+                f"STYLEREF {int(entry['heading_level'])} \\s",
+                entry.get("cached_hierarchy", hierarchy),
             ),
-            "orientation": "landscape" if section.page_width > section.page_height else "portrait",
-        }
-        for key, expected in rule["properties"].items():
-            actual = values.get(key, "<unsupported>")
-            if not compare_value(key, actual, expected):
-                failures.append(
-                    {
-                        "section": index,
-                        "property": key,
-                        "expected": expected,
-                        "actual": actual,
-                    }
-                )
-    return failures
-
-
-def row_property(row: Any, name: str) -> bool:
-    tr_pr = row._tr.trPr
-    return tr_pr is not None and tr_pr.find(qn(f"w:{name}")) is not None
-
-
-def audit_table_rule(document: Any, rule: dict) -> list[dict]:
-    failures = []
-    for index, table in enumerate(document.tables):
-        for key, expected in rule["properties"].items():
-            if key == "table_style":
-                actual = table.style.name if table.style else None
-            elif key == "alignment":
-                actual = normalized_alignment(str(table.alignment))
-            elif key == "repeat_header_row":
-                actual = bool(table.rows and row_property(table.rows[0], "tblHeader"))
-            elif key == "prevent_row_split":
-                actual = all(row_property(row, "cantSplit") for row in table.rows)
-            else:
-                actual = "<unsupported>"
-            if not compare_value(key, actual, expected):
-                failures.append(
-                    {
-                        "table": index,
-                        "property": key,
-                        "expected": expected,
-                        "actual": actual,
-                    }
-                )
-    return failures
-
-
-def audit_field_rule(document: Any, rule: dict) -> list[dict]:
-    failures = []
-    properties = rule["properties"]
-    if properties.get("update_on_open") and not document_toggle(document, "updateFields"):
-        failures.append({"property": "update_on_open", "expected": True, "actual": False})
-    if properties.get("convert_explicit_markers"):
-        remaining = [
-            paragraph.text
-            for paragraph in document.paragraphs
-            if _field_instruction_for_marker(paragraph.text.strip()) is not None
+            _text_run("-"),
+            _simple_field(
+                f"SEQ {entry['sequence_name']} \\* ARABIC \\s {int(entry['heading_level'])}",
+                entry.get("cached_sequence", sequence),
+            ),
+            _text_run(" "),
         ]
-        if remaining:
-            failures.append(
-                {
-                    "property": "convert_explicit_markers",
-                    "expected": "no markers",
-                    "actual": remaining[:10],
-                }
-            )
-    levels = int(properties.get("heading_levels", 4))
-    if properties.get("rebuild_heading_numbering"):
-        for level in range(1, levels + 1):
-            style = document.styles[f"Heading {level}"]
-            p_pr = style.element.pPr
-            if p_pr is None or p_pr.find(qn("w:numPr")) is None:
-                failures.append(
-                    {
-                        "property": "rebuild_heading_numbering",
-                        "expected": f"numbering on Heading {level}",
-                        "actual": "missing",
-                    }
-                )
-    if properties.get("strip_manual_heading_prefixes"):
-        for paragraph in document.paragraphs:
-            if not paragraph.style or not paragraph.style.name.startswith("Heading "):
-                continue
-            try:
-                level = int(paragraph.style.name.split()[-1])
-            except ValueError:
-                continue
-            if level <= levels and _heading_prefix_pattern(level).match(paragraph.text):
-                failures.append(
-                    {
-                        "property": "strip_manual_heading_prefixes",
-                        "expected": "no manual prefix",
-                        "actual": paragraph.text[:80],
-                    }
-                )
-    return failures
+        for element in reversed(elements):
+            paragraph._p.insert(insertion, element)
+        paragraph.style = "Caption"
+        changed += 1
+    return changed
 
 
-def audit_equation_rule(path: Path, rule: dict) -> list[dict]:
-    values = equation_inventory(path)
-    failures = []
-    properties = rule["properties"]
-    if properties.get("block_formula_images") and values["formula_image_candidates"]:
-        failures.append(
-            {
-                "property": "block_formula_images",
-                "expected": 0,
-                "actual": values["formula_image_candidates"],
-            }
+def _set_row_property(row: Any, name: str, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    element = tr_pr.find(qn(f"w:{name}"))
+    if enabled and element is None:
+        element = OxmlElement(f"w:{name}")
+        element.set(qn("w:val"), "true")
+        tr_pr.append(element)
+    elif not enabled and element is not None:
+        tr_pr.remove(element)
+
+
+def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    for entry in structure_map.get("tables", []):
+        if not entry.get("approved"):
+            continue
+        index = int(entry["table"])
+        if not 0 <= index < len(document.tables):
+            raise FormatMonographError(f"Structure-map table is out of range: {index}")
+        table = document.tables[index]
+        first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
+        if text_sha256(first_row) != entry["first_row_sha256"]:
+            raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
+        if entry.get("repeat_header") and table.rows:
+            _set_row_property(table.rows[0], "tblHeader", True)
+        if entry.get("prevent_normal_row_split"):
+            for row in table.rows:
+                _set_row_property(row, "cantSplit", True)
+        changed += 1
+    return changed
+
+
+def _final_section_is_empty(document: Any, boundary_index: int) -> bool:
+    body = document.element.body
+    boundary = document.paragraphs[boundary_index]._p
+    children = list(body)
+    start = children.index(boundary) + 1
+    return not any(_paragraph_has_payload(element) for element in children[start:-1])
+
+
+def _remove_final_empty_section(document: Any, entry: dict[str, Any]) -> None:
+    boundary_index = int(entry["previous_boundary_paragraph"])
+    if not 0 <= boundary_index < len(document.paragraphs):
+        raise FormatMonographError("Trailing-section boundary is out of range.")
+    boundary = document.paragraphs[boundary_index]
+    if text_sha256(boundary.text) != entry["previous_boundary_sha256"]:
+        raise FormatMonographError("Trailing-section boundary hash mismatch.")
+    if not _final_section_is_empty(document, boundary_index):
+        raise FormatMonographError("Approved trailing section is no longer empty.")
+
+    p_pr = boundary._p.pPr
+    previous = None if p_pr is None else p_pr.find(qn("w:sectPr"))
+    final = document.element.body.sectPr
+    if previous is None or final is None:
+        raise FormatMonographError("Trailing-section boundary is missing section properties.")
+    blocked = ("headerReference", "footerReference", "pgNumType", "titlePg")
+    if any(final.find(qn(f"w:{name}")) is not None for name in blocked):
+        raise FormatMonographError(
+            "Trailing section has independent header, footer, or page-number settings."
         )
-    return failures
+
+    body = document.element.body
+    children = list(body)
+    boundary_position = children.index(boundary._p)
+    for child in list(children[boundary_position + 1 : -1]):
+        body.remove(child)
+    body.replace(final, copy.deepcopy(previous))
+    p_pr.remove(previous)
+    if not _paragraph_has_payload(boundary._p) and len(p_pr) == 0:
+        body.remove(boundary._p)
 
 
-def uses_derived_normalization(profile: dict) -> bool:
-    return any(
-        rule.get("status") == "approved"
-        and rule.get("application") == "automatic"
-        and rule.get("selector", {}).get("kind") == "field_role"
-        and any(
-            rule.get("properties", {}).get(key)
-            for key in (
-                "convert_explicit_markers",
-                "rebuild_heading_numbering",
-                "strip_manual_heading_prefixes",
+def _apply_trailing_sections(document: Any, structure_map: dict[str, Any]) -> int:
+    approved = [
+        entry
+        for entry in structure_map.get("trailing_empty_sections", [])
+        if entry.get("approved_delete")
+    ]
+    approved.sort(key=lambda item: int(item["section"]), reverse=True)
+    for entry in approved:
+        if int(entry["section"]) != len(document.sections) - 1:
+            raise FormatMonographError(
+                "Trailing empty sections must be approved and removed from the end inward."
             )
-        )
-        for rule in profile.get("rules", [])
-    )
+        _remove_final_empty_section(document, entry)
+    return len(approved)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("original", type=Path)
-    parser.add_argument("formatted", type=Path)
-    parser.add_argument("--profile", required=True, type=Path)
-    parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
+def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[dict[str, Any]]:
+    changes = [
+        {"kind": "structure_toc", "targets": _apply_toc_ranges(document, structure_map)},
+        {"kind": "structure_headings", "targets": _apply_headings(document, structure_map)},
+        {"kind": "structure_captions", "targets": _apply_captions(document, structure_map)},
+        {"kind": "structure_tables", "targets": _apply_tables(document, structure_map)},
+        {
+            "kind": "structure_trailing_sections",
+            "targets": _apply_trailing_sections(document, structure_map),
+        },
+    ]
+    return [change for change in changes if change["targets"]]
 
-    try:
-        profile_errors, profile = validate(args.profile)
-        if profile_errors:
-            raise FormatMonographError("Profile validation failed: " + "; ".join(profile_errors))
-        normalize = uses_derived_normalization(profile)
-        original_fp = content_fingerprint(args.original, normalize_derived=normalize)
-        formatted_fp = content_fingerprint(args.formatted, normalize_derived=normalize)
-        original_objects = protected_object_manifest(args.original)
-        formatted_objects = protected_object_manifest(args.formatted)
-        objects_ok = original_objects == formatted_objects
-        document = load_document(args.formatted)
-        rule_results = []
 
-        for rule in profile["rules"]:
-            if rule["status"] != "approved":
+def _approved_indexes(structure_map: dict[str, Any], key: str) -> dict[int, dict[str, Any]]:
+    return {
+        int(entry["paragraph"]): entry
+        for entry in structure_map.get(key, [])
+        if entry.get("approved")
+    }
+
+
+def structure_content_inventory(
+    path: Path, structure_map: dict[str, Any]
+) -> dict[str, list[str]]:
+    toc_indexes = {
+        index
+        for entry in structure_map.get("toc_ranges", [])
+        if entry.get("approved")
+        for index in range(int(entry["start_paragraph"]), int(entry["end_paragraph"]) + 1)
+    }
+    headings = _approved_indexes(structure_map, "headings")
+    captions = _approved_indexes(structure_map, "captions")
+    tail_cutoffs = []
+    for entry in structure_map.get("trailing_empty_sections", []):
+        if not entry.get("approved_delete"):
+            continue
+        boundary = int(entry["previous_boundary_paragraph"])
+        boundary_is_empty = entry.get("previous_boundary_sha256") == text_sha256("")
+        tail_cutoffs.append(boundary if boundary_is_empty else boundary + 1)
+    tail_cutoff = min(tail_cutoffs, default=None)
+
+    result: dict[str, list[str]] = {}
+    with zipfile.ZipFile(path) as package:
+        for name in sorted(package.namelist()):
+            if not CONTENT_PART.match(name):
                 continue
-            if rule["application"] == "manual_review":
-                rule_results.append(
-                    {"id": rule["id"], "status": "manual_review", "failures": []}
+            root = etree.fromstring(package.read(name))
+            values = []
+            body_index = -1
+            for paragraph in root.xpath(".//w:p", namespaces=NS):
+                direct_body_paragraph = (
+                    name == "word/document.xml"
+                    and paragraph.getparent() is not None
+                    and paragraph.getparent().tag == qn("w:body")
                 )
-                continue
-            kind = rule["selector"]["kind"]
-            if kind in {"document", "section_role"}:
-                failures = audit_section_rule(document, rule)
-            elif kind == "table_role":
-                failures = audit_table_rule(document, rule)
-            elif kind == "field_role":
-                failures = audit_field_rule(document, rule)
-            elif kind == "equation_role":
-                failures = audit_equation_rule(args.formatted, rule)
-            else:
-                failures = audit_style_rule(document, rule)
-            rule_results.append(
-                {
-                    "id": rule["id"],
-                    "status": "pass" if not failures else "fail",
-                    "failures": failures,
-                }
-            )
-
-        content_ok = original_fp == formatted_fp
-        rules_ok = all(item["status"] != "fail" for item in rule_results)
-        result = {
-            "passed": content_ok and objects_ok and rules_ok,
-            "content_integrity": {
-                "passed": content_ok,
-                "original_sha256": original_fp,
-                "formatted_sha256": formatted_fp,
-                "field_results_and_approved_derived_values_excluded": normalize,
-            },
-            "protected_object_integrity": {
-                "passed": objects_ok,
-                "original": original_objects,
-                "formatted": formatted_objects,
-            },
-            "equations": equation_inventory(args.formatted),
-            "rules": rule_results,
-        }
-        if args.output:
-            write_json(args.output, result)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result["passed"] else 1
-    except (FormatMonographError, OSError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+                if direct_body_paragraph:
+                    body_index += 1
+                current_index = body_index if direct_body_paragraph else None
+                if current_index is not None and tail_cutoff is not None and current_index >= tail_cutoff:
+                    continue
+                value = _paragraph_text_without_field_results(paragraph)
+                value = FIELD_MARKER_PATTERN.sub("", value)
+                if current_index in toc_indexes:
+                    value = ""
+                elif current_index in headings:
+                    match = _heading_prefix_pattern(int(headings[current_index]["level"])).match(value)
+                    if match:
+                        value = value[match.end() :]
+                elif current_index in captions:
+                    match = CAPTION_PATTERN.match(value)
+                    if match:
+                        value = f"{match.group(1)} {match.group(4)}"
+                    else:
+                        value = re.sub(r"^(图|表)\s+[-－—–]?\s*", r"\1 ", value)
+                values.append(value)
+            result[name] = values
+    return result
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def structure_content_fingerprint(path: Path, structure_map: dict[str, Any]) -> str:
+    result = structure_content_inventory(path, structure_map)
+    encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
