@@ -351,6 +351,7 @@ class V11ExecutionTests(unittest.TestCase):
             self.profile_path,
             "--output-dir",
             self.root / "broken-out",
+            "--allow-missing-fonts",
         )
         self.assertEqual(1, result.returncode)
         self.assertIn("missing bookmark", result.stderr.lower())
