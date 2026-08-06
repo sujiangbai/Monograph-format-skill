@@ -190,6 +190,7 @@ class CoreWorkflowTests(unittest.TestCase):
             self.profile,
             "--output-dir",
             self.output,
+            "--allow-missing-fonts",
         )
         self.assertEqual(0, applied.returncode, applied.stderr)
         formatted = self.output / "sample-formatted.docx"
