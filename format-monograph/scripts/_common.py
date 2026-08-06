@@ -194,7 +194,20 @@ def _paragraph_text_without_field_results(paragraph: etree._Element) -> str:
     return "".join(pieces)
 
 
-def content_inventory(path: Path) -> dict[str, list[str]]:
+def _normalize_derived_paragraph_text(paragraph: etree._Element, value: str) -> str:
+    if _field_instruction_for_marker(value.strip()) is not None:
+        return ""
+    styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
+    if styles:
+        match = re.fullmatch(r"Heading([1-4])", styles[0])
+        if match:
+            prefix = _heading_prefix_pattern(int(match.group(1))).match(value)
+            if prefix:
+                return value[prefix.end():]
+    return value
+
+
+def content_inventory(path: Path, normalize_derived: bool = False) -> dict[str, list[str]]:
     """Return authored text by OOXML part, excluding generated field results."""
     ensure_docx(path)
     result: dict[str, list[str]] = {}
@@ -203,16 +216,22 @@ def content_inventory(path: Path) -> dict[str, list[str]]:
             if not CONTENT_PART.match(name):
                 continue
             root = etree.fromstring(package.read(name))
-            result[name] = [
-                _paragraph_text_without_field_results(paragraph)
-                for paragraph in root.xpath(".//w:p", namespaces=NS)
-            ]
+            values = []
+            for paragraph in root.xpath(".//w:p", namespaces=NS):
+                value = _paragraph_text_without_field_results(paragraph)
+                if normalize_derived:
+                    value = _normalize_derived_paragraph_text(paragraph, value)
+                values.append(value)
+            result[name] = values
     return result
 
 
-def content_fingerprint(path: Path) -> str:
+def content_fingerprint(path: Path, normalize_derived: bool = False) -> str:
     encoded = json.dumps(
-        content_inventory(path), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        content_inventory(path, normalize_derived=normalize_derived),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
