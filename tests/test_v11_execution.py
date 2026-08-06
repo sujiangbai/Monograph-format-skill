@@ -228,6 +228,7 @@ class V11ExecutionTests(unittest.TestCase):
             self.profile_path,
             "--output-dir",
             self.out,
+            "--allow-missing-fonts",
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(self.original_bytes, self.input.read_bytes())
@@ -313,6 +314,28 @@ class V11ExecutionTests(unittest.TestCase):
             audited.stdout + "\n" + audited.stderr,
         )
         self.assertTrue(json.loads(audit.read_text(encoding="utf-8"))["passed"])
+
+    def test_missing_font_requires_explicit_qa_override(self) -> None:
+        missing_profile = approved_v11_profile()
+        missing_profile["rules"][1]["properties"]["font_name_ascii"] = (
+            "Definitely Missing Font 9F4C2B"
+        )
+        profile_path = self.root / "missing-font-profile.json"
+        profile_path.write_text(
+            json.dumps(missing_profile, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        result = self.run_script(
+            "apply_profile.py",
+            self.input,
+            "--profile",
+            profile_path,
+            "--output-dir",
+            self.root / "font-blocked",
+        )
+        self.assertEqual(1, result.returncode)
+        self.assertIn("required fonts are unavailable", result.stderr.lower())
+        self.assertIn("--allow-missing-fonts", result.stderr)
 
     def test_missing_cross_reference_bookmark_blocks_application(self) -> None:
         broken_docx = self.root / "broken-reference.docx"
