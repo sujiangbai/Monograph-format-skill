@@ -12,14 +12,18 @@ from typing import Any, Iterable
 from docx import Document
 from docx.enum.section import WD_ORIENT
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Mm, Pt, RGBColor
 from lxml import etree
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-NS = {"w": W_NS}
+M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+O_NS = "urn:schemas-microsoft-com:office:office"
+V_NS = "urn:schemas-microsoft-com:vml"
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+NS = {"w": W_NS, "m": M_NS, "o": O_NS, "v": V_NS, "r": R_NS}
 CONTENT_PART = re.compile(
     r"^word/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$"
 )
@@ -30,11 +34,20 @@ ROLE_STYLE_MAP = {
     "subtitle": "Subtitle",
     "caption": "Caption",
     "bibliography": "Bibliography",
+    "body_text": "Normal",
+    "chapter_title": "Heading 1",
+    "level_2_section": "Heading 2",
+    "level_3_section": "Heading 3",
+    "level_4_section": "Heading 4",
+    "long_quote": "Quote",
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
 STYLE_PROPERTIES = {
     "font_name",
+    "font_name_ascii",
+    "font_name_east_asia",
+    "font_name_complex_script",
     "font_size_pt",
     "bold",
     "italic",
@@ -43,7 +56,10 @@ STYLE_PROPERTIES = {
     "space_before_pt",
     "space_after_pt",
     "line_spacing",
+    "line_spacing_rule",
+    "line_spacing_pt",
     "first_line_indent_pt",
+    "first_line_indent_chars",
     "left_indent_pt",
     "right_indent_pt",
     "keep_with_next",
@@ -63,9 +79,37 @@ SECTION_PROPERTIES = {
     "gutter_mm",
     "different_first_page_header_footer",
     "odd_and_even_pages_header_footer",
+    "page_size_policy",
+    "mirror_margins",
+    "margin_inner_ratio",
+    "margin_outer_ratio",
+    "margin_top_ratio",
+    "margin_bottom_ratio",
+    "header_distance_ratio",
+    "footer_distance_ratio",
 }
 
-TABLE_PROPERTIES = {"table_style", "alignment", "repeat_header_row"}
+TABLE_PROPERTIES = {
+    "table_style",
+    "alignment",
+    "repeat_header_row",
+    "prevent_row_split",
+}
+
+FIELD_PROPERTIES = {
+    "update_on_open",
+    "mark_fields_dirty",
+    "convert_explicit_markers",
+    "rebuild_heading_numbering",
+    "heading_levels",
+    "strip_manual_heading_prefixes",
+}
+
+EQUATION_PROPERTIES = {
+    "require_editable_equations",
+    "preserve_editable_objects",
+    "block_formula_images",
+}
 
 ALIGNMENTS = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -233,6 +277,10 @@ def supported_properties(rule: dict[str, Any]) -> set[str]:
         return SECTION_PROPERTIES
     if kind == "table_role":
         return TABLE_PROPERTIES
+    if kind == "field_role":
+        return FIELD_PROPERTIES
+    if kind == "equation_role":
+        return EQUATION_PROPERTIES
     if style_name_for_selector(rule["selector"]):
         return STYLE_PROPERTIES
     return set()
@@ -242,14 +290,23 @@ def unsupported_properties(rule: dict[str, Any]) -> list[str]:
     return sorted(set(rule["properties"]) - supported_properties(rule))
 
 
-def _set_east_asian_font(font_element: Any, name: str) -> None:
+def _font_attributes(font_element: Any) -> Any:
     r_pr = font_element.get_or_add_rPr()
     r_fonts = r_pr.rFonts
     if r_fonts is None:
         r_fonts = OxmlElement("w:rFonts")
         r_pr.insert(0, r_fonts)
-    for attr in ("ascii", "hAnsi", "eastAsia", "cs"):
+    return r_fonts
+
+
+def _set_font_attributes(font_element: Any, name: str, attributes: tuple[str, ...]) -> None:
+    r_fonts = _font_attributes(font_element)
+    for attr in attributes:
         r_fonts.set(qn(f"w:{attr}"), name)
+
+
+def _set_east_asian_font(font_element: Any, name: str) -> None:
+    _set_font_attributes(font_element, name, ("ascii", "hAnsi", "eastAsia", "cs"))
 
 
 def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
@@ -259,6 +316,19 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
     if "font_name" in properties:
         font.name = properties["font_name"]
         _set_east_asian_font(style.element, properties["font_name"])
+    if "font_name_ascii" in properties:
+        font.name = properties["font_name_ascii"]
+        _set_font_attributes(
+            style.element, properties["font_name_ascii"], ("ascii", "hAnsi")
+        )
+    if "font_name_east_asia" in properties:
+        _set_font_attributes(
+            style.element, properties["font_name_east_asia"], ("eastAsia",)
+        )
+    if "font_name_complex_script" in properties:
+        _set_font_attributes(
+            style.element, properties["font_name_complex_script"], ("cs",)
+        )
     if "font_size_pt" in properties:
         font.size = Pt(float(properties["font_size_pt"]))
     if "bold" in properties:
@@ -286,6 +356,31 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
             setattr(paragraph_format, attr, Pt(float(properties[key])))
     if "line_spacing" in properties:
         paragraph_format.line_spacing = float(properties["line_spacing"])
+    if "line_spacing_rule" in properties:
+        rules = {
+            "single": WD_LINE_SPACING.SINGLE,
+            "one_point_five": WD_LINE_SPACING.ONE_POINT_FIVE,
+            "double": WD_LINE_SPACING.DOUBLE,
+            "at_least": WD_LINE_SPACING.AT_LEAST,
+            "exact": WD_LINE_SPACING.EXACTLY,
+            "multiple": WD_LINE_SPACING.MULTIPLE,
+        }
+        value = properties["line_spacing_rule"]
+        if value not in rules:
+            raise FormatMonographError(f"Unsupported line_spacing_rule: {value}")
+        paragraph_format.line_spacing_rule = rules[value]
+    if "line_spacing_pt" in properties:
+        paragraph_format.line_spacing = Pt(float(properties["line_spacing_pt"]))
+        if "line_spacing_rule" not in properties:
+            paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    if "first_line_indent_chars" in properties:
+        p_pr = style.element.get_or_add_pPr()
+        ind = p_pr.get_or_add_ind()
+        ind.set(
+            qn("w:firstLineChars"),
+            str(int(round(float(properties["first_line_indent_chars"]) * 100))),
+        )
+        ind.attrib.pop(qn("w:firstLine"), None)
     for key, attr in (
         ("keep_with_next", "keep_with_next"),
         ("keep_together", "keep_together"),
