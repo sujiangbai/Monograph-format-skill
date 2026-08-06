@@ -879,24 +879,54 @@ def _sha256_bytes(value: bytes) -> str:
 def field_inventory(path: Path) -> dict[str, Any]:
     ensure_docx(path)
     counts: dict[str, int] = {}
-    total = 0
+    instructions: list[str] = []
+    bookmarks: set[str] = set()
     with zipfile.ZipFile(path) as package:
         for name in package.namelist():
             if not name.startswith("word/") or not name.endswith(".xml"):
                 continue
             root = etree.fromstring(package.read(name))
-            instructions = root.xpath(".//w:fldSimple/@w:instr", namespaces=NS)
-            instructions.extend(
-                text
-                for text in root.xpath(".//w:instrText/text()", namespaces=NS)
-                if text.strip()
+            bookmarks.update(
+                root.xpath(".//w:bookmarkStart/@w:name", namespaces=NS)
             )
-            for instruction in instructions:
-                match = re.match(r"\s*([A-Za-z]+)", instruction)
-                kind = match.group(1).upper() if match else "UNKNOWN"
-                counts[kind] = counts.get(kind, 0) + 1
-                total += 1
-    return {"total": total, "types": dict(sorted(counts.items()))}
+            instructions.extend(
+                value
+                for value in root.xpath(".//w:fldSimple/@w:instr", namespaces=NS)
+                if value.strip()
+            )
+            instructions.extend(
+                value
+                for value in root.xpath(".//w:instrText/text()", namespaces=NS)
+                if value.strip()
+            )
+
+    references = []
+    sequences = []
+    for instruction in instructions:
+        match = re.match(r"\s*([A-Za-z]+)(?:\s+([^\\\s]+))?", instruction)
+        kind = match.group(1).upper() if match else "UNKNOWN"
+        argument = match.group(2) if match else None
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind in {"REF", "PAGEREF"} and argument:
+            references.append({"type": kind, "target": argument})
+        if kind == "SEQ" and argument:
+            sequences.append(argument)
+
+    unresolved = sorted(
+        {
+            item["target"]
+            for item in references
+            if item["target"] not in bookmarks
+        }
+    )
+    return {
+        "total": len(instructions),
+        "types": dict(sorted(counts.items())),
+        "bookmarks": sorted(bookmarks),
+        "references": references,
+        "unresolved_references": unresolved,
+        "sequences": sorted(set(sequences)),
+    }
 
 
 def equation_inventory(path: Path) -> dict[str, Any]:
