@@ -1,0 +1,459 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "technical-textbook-layout-draft",
+  "name": "理工科教材专著版式样书规则草案",
+  "locale": "zh-CN",
+  "scope": {
+    "document_type": "monograph",
+    "input_format": "DOCX",
+    "notes": "依据《钢结构基本原理（第三版）》扫描样书概括的教材类结构与对象布局。样书来自中国建筑工业出版社，不是商务印书馆要求；精确页面、字体和间距参数待可编辑模板与用户 QA。"
+  },
+  "target_applications": [
+    "Microsoft Word 2016",
+    "Microsoft Word 2019",
+    "Microsoft Word 2021",
+    "Microsoft 365",
+    "LibreOffice Writer"
+  ],
+  "source_precedence": [
+    "written_requirement",
+    "docx_template",
+    "pdf_specification",
+    "sample_book",
+    "image",
+    "text_note"
+  ],
+  "sources": [
+    {
+      "id": "SRC-201",
+      "type": "sample_book",
+      "label": "《钢结构基本原理（第三版）》扫描样书",
+      "locator": "Private scan, 365 pages; source file and rendered pages are not committed",
+      "summary": "中国建筑工业出版社理工科教材样书。用于概括前置部分、目录、标题层级、页眉页码、图表公式、例题习题、附录大表和参考文献的布局模式；扫描几何和推断字体不作为准确参数。",
+      "public": false
+    }
+  ],
+  "rules": [
+    {
+      "id": "FMT-PAGE-201",
+      "category": "page",
+      "selector": {"kind": "document", "value": "print_page_geometry"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "print_opening_evidence": "787x1092_mm_1_16",
+        "scan_geometry_authoritative": false,
+        "finished_page_size": "pending_qa",
+        "margins_and_gutter": "pending_qa"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "版权页提供印刷开本信息，但扫描裁切和白边不能用于恢复准确成品尺寸或页边距。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-FRONT-201",
+      "category": "front_matter",
+      "selector": {"kind": "section_role", "value": "front_matter_order"},
+      "properties": {
+        "validation": "structural",
+        "observed_sequence": ["title_information", "copyright_and_cip", "publishing_note", "edition_prefaces", "table_of_contents"],
+        "preserve_existing_optional_sections": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "样书前置部分按书名信息、版权和 CIP、出版说明、版次前言及目录组织。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-FRONT-202",
+      "category": "front_matter",
+      "selector": {"kind": "section_role", "value": "title_page"},
+      "properties": {
+        "validation": "visual",
+        "alignment": "center",
+        "hierarchy": ["series_or_program", "book_title", "edition", "authors_or_editors", "publisher"],
+        "publisher_anchor": "page_bottom_candidate",
+        "exact_spacing": "pending_qa"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "书名页使用纵向居中的多层级信息，并将出版社信息置于页面下部。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-TOC-201",
+      "category": "toc",
+      "selector": {"kind": "section_role", "value": "toc"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "first_page_title_alignment": "center",
+        "first_page_suppress_standard_header": true,
+        "continuation_header_text": "目录",
+        "continuation_page_number_position": "outer",
+        "header_rule": "thin",
+        "chapter_entries": "emphasized",
+        "section_entries": "regular",
+        "leader": "dots",
+        "entry_page_number_alignment": "right"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "目录首页使用居中大标题，续页显示目录页眉；条目通过层级、点引导线和右对齐页码组织。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-SECTION-201",
+      "category": "section",
+      "selector": {"kind": "section_role", "value": "chapter_opener"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "suppress_standard_running_header": true,
+        "chapter_title_alignment": "center",
+        "chapter_title_emphasis": "largest_body_heading",
+        "top_whitespace": "substantial_candidate",
+        "allow_intro_before_first_section": true,
+        "recto_start_required": false
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "章首页章题居中并留较多上方空白；可先有导语，且章不强制从右页开始。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-HEADER-201",
+      "category": "header_footer",
+      "selector": {"kind": "document", "value": "body_running_headers"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "mirrored": true,
+        "page_number_position": "outer",
+        "even_page_text": "chapter_title",
+        "odd_page_text": "current_section_title",
+        "bottom_rule": "thin",
+        "excluded_sections": ["chapter_opener", "toc_first_page"]
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "正文奇偶页采用镜像运行页眉，偶页章题、奇页节题、页码在外侧。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-HEAD-201",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "chapter_title"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "alignment": "center",
+        "numbering_pattern": "第{chapter}章",
+        "relative_rank": 1,
+        "exact_font_and_size": "pending_qa"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "章题为正文体系中最醒目的居中标题，使用中文章序。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-HEAD-202",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "level_2_section"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "alignment": "center",
+        "numbering_pattern": "{chapter}.{section}",
+        "relative_rank": 2,
+        "exact_spacing": "pending_qa"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "二级节题居中，使用章点节编号。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-HEAD-203",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "level_3_section"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "alignment": "center",
+        "numbering_pattern": "{chapter}.{section}.{subsection}",
+        "relative_rank": 3,
+        "stronger_weight_candidate": true,
+        "exact_spacing": "pending_qa"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "三级标题居中、尺寸小于二级标题，并呈现较强字重。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BODY-201",
+      "category": "body",
+      "selector": {"kind": "paragraph_role", "value": "body_text"},
+      "properties": {
+        "validation": "visual",
+        "alignment": "justified",
+        "first_line_indent_characters_candidate": 2,
+        "chinese_font_class_candidate": "serif_song_style",
+        "exact_font_size_line_spacing": "pending_qa"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "正文呈中文衬线体、两端对齐，首行约缩进两个汉字；准确参数无法由扫描件确定。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BODY-202",
+      "category": "body",
+      "selector": {"kind": "paragraph_role", "value": "numbered_list"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "marker_pattern": "({n})",
+        "alignment": "hanging_candidate",
+        "preserve_authored_numbering": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "正文分项常用括号数字并保持编号与续行的悬挂关系。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-FIG-201",
+      "category": "figure",
+      "selector": {"kind": "caption_role", "value": "figure"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "caption_position": "below",
+        "caption_alignment": "center",
+        "numbering_scope": "per_chapter",
+        "numbering_pattern": "图 {chapter}-{sequence}",
+        "allow_text_wrap_for_small_figures": true,
+        "center_large_figures": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "图题置于图下并按章编号；小图可绕排，大图通常居中独占版心。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-FIG-202",
+      "category": "figure",
+      "selector": {"kind": "caption_role", "value": "multi_panel_figure"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "subfigure_label_pattern": "({letter})",
+        "shared_caption": true,
+        "caption_position": "below"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "多分图使用小写字母括号标识，并由一个共享图题统领。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-TABLE-201",
+      "category": "table",
+      "selector": {"kind": "table_role", "value": "standard_table"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "title_position": "above",
+        "title_alignment": "center",
+        "number_position": "title_line_right",
+        "numbering_scope": "per_chapter",
+        "numbering_pattern": "表 {chapter}-{sequence}",
+        "simple_table_border_candidate": "minimal_horizontal_rules",
+        "complex_data_table_full_grid_allowed": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "表题位于表上并居中，表号在同一标题行右侧；复杂数据表允许完整网格。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-TABLE-202",
+      "category": "table",
+      "selector": {"kind": "table_role", "value": "table_notes"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "position": "below",
+        "prefix": "注：",
+        "alignment": "hanging_candidate",
+        "multiple_notes": "numbered_when_needed"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "表下注释放在表下，以注字引出并按需要分项。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-EQ-201",
+      "category": "equation",
+      "selector": {"kind": "paragraph_role", "value": "display_equation"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "equation_alignment": "center",
+        "number_alignment": "right",
+        "numbering_scope": "per_chapter",
+        "numbering_pattern": "({chapter}-{sequence})"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "独立公式居中，公式号靠右并按章连续编号。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-EQ-202",
+      "category": "equation",
+      "selector": {"kind": "paragraph_role", "value": "where_definitions"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "lead_in": "式中",
+        "layout": "one_symbol_definition_per_line_candidate",
+        "continuation_alignment": "hanging"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "公式后的符号释义由式中引出并形成逐项悬挂排列。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BODY-203",
+      "category": "body",
+      "selector": {"kind": "paragraph_role", "value": "worked_example"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "example_label_pattern": "【例 {chapter}-{sequence}】",
+        "solution_label": "【解】",
+        "numbering_scope": "per_chapter",
+        "solution_step_pattern": "({n})",
+        "preserve_example_content": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "例题与解答使用醒目标识，例号按章编号，解答可再按括号数字分步。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-SECTION-202",
+      "category": "section",
+      "selector": {"kind": "section_role", "value": "chapter_exercises"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "title": "习题",
+        "title_alignment": "center",
+        "item_number_pattern": "{chapter}.{sequence}",
+        "running_header_text_candidate": "习题"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "章末习题使用居中标题，题号为章点题号，续页可使用习题运行页眉。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-APP-201",
+      "category": "appendix",
+      "selector": {"kind": "appendix_role", "value": "appendix_heading"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "numbering_pattern": "附录 {number}",
+        "title_alignment": "center",
+        "relative_rank": "chapter_like"
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "后置附录使用附录加阿拉伯数字的章级标题体系。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-APP-202",
+      "category": "appendix",
+      "selector": {"kind": "table_role", "value": "appendix_table"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "numbering_scope": "per_appendix",
+        "numbering_pattern": "附表 {appendix}-{sequence}",
+        "subtable_suffix_pattern": "({letter})",
+        "full_grid_allowed": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "附表按附录独立编号，可用字母后缀区分子表，数据密集时使用完整网格。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-SECTION-203",
+      "category": "section",
+      "selector": {"kind": "section_role", "value": "rotated_oversize_table_page"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "page_orientation": "portrait",
+        "rotate_table_content_degrees": 90,
+        "keep_header_orientation": "normal",
+        "keep_page_number_orientation": "normal",
+        "publisher_specific_override_required": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "样书将过宽表体在竖版页内旋转 90 度，同时保留正常方向的页眉和页码。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review",
+      "notes": "若出版社要求横排图表专页隐藏页眉页码，应报告冲突并等待决定。"
+    },
+    {
+      "id": "FMT-BIB-201",
+      "category": "bibliography",
+      "selector": {"kind": "bibliography_role", "value": "sample_bibliography"},
+      "properties": {
+        "validation": "structural_and_visual",
+        "heading_alignment": "center",
+        "list_numbering": "square_bracket_sequence",
+        "entry_alignment": "hanging",
+        "mixed_language_entries": true,
+        "policy": "format_only_do_not_rewrite_entry_text",
+        "publisher_specific_override_required": true
+      },
+      "source_ids": ["SRC-201"],
+      "evidence_summary": "样书参考文献使用方括号顺序编号和悬挂对齐，中外文条目混排。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review",
+      "notes": "商务印书馆参考要求不加序号；真实项目必须按更高优先级来源处理并在冲突时 QA。"
+    }
+  ],
+  "conflicts": [],
+  "open_questions": [
+    {"id": "QA-201", "question": "请提供出版社批准的教材 DOCX 模板或可编辑样章，以确认真实样式、字段和分节。", "blocking": true},
+    {"id": "QA-202", "question": "成品尺寸、上下内外边距、装订线、页眉页脚距离和版心尺寸分别是多少？", "blocking": true},
+    {"id": "QA-203", "question": "正文、各级标题、图题、表题、公式、例题、习题、附录和参考文献分别使用哪些中西文字体、字号、字重、行距及段前段后？", "blocking": true},
+    {"id": "QA-204", "question": "公式采用 Word OMML、MathType 还是保留现有对象；是否允许转换？", "blocking": true},
+    {"id": "QA-205", "question": "跨页表采用何种续表标识、重复表头、拆行和横向分节规则？", "blocking": true},
+    {"id": "QA-206", "question": "首批教材是否包含脚注、尾注、长引文、术语表、索引、答案、学习目标或教学提示框？", "blocking": false},
+    {"id": "QA-207", "question": "本样书的参考文献编号和旋转大表模式是否只作为类别证据，不用于覆盖商务印书馆要求？", "blocking": false, "answer": "按已确认的来源优先级，只作为低优先级样书证据；冲突时报告并等待决定。"},
+    {"id": "QA-208", "question": "请在获得真实教材 DOCX 后确认目录、标题编号、题注、交叉引用和页码字段的实现方式。", "blocking": true}
+  ],
+  "approval": {
+    "status": "draft",
+    "notes": "已完成扫描样书的结构与布局学习。所有规则仍为手工复核草案；扫描页边距、字体和精确间距未固化，不能直接用于修改 DOCX。"
+  }
+}
