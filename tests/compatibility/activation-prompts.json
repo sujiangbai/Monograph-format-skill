@@ -1,0 +1,21 @@
+{
+  "should_trigger": [
+    "请按照出版社给的 PDF 规范修改这本专著的 DOCX 格式",
+    "Analyze this Word template and create a formatting profile for my monograph",
+    "把书稿统一成样书的版式，但不要改正文内容",
+    "Audit this formatted academic book against the approved profile"
+  ],
+  "should_not_trigger": [
+    "润色这篇小说的语言",
+    "把这份 CSV 做成销售图表",
+    "总结这本书的主要观点",
+    "创建一个新的演示文稿"
+  ],
+  "required_behavior": [
+    "Read SKILL.md before acting",
+    "Build and validate a profile before modifying a DOCX",
+    "Stop for approval when the profile is not approved",
+    "Preserve the source DOCX",
+    "Do not claim visual QA without inspecting every rendered page"
+  ]
+}
