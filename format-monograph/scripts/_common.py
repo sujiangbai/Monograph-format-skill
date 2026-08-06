@@ -973,6 +973,35 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _complex_field_instructions(root: etree._Element) -> list[str]:
+    instructions: list[str] = []
+    for paragraph in root.xpath(".//w:p", namespaces=NS):
+        stack: list[dict[str, Any]] = []
+        for element in paragraph.iter():
+            if element.tag == qn("w:fldChar"):
+                kind = element.get(qn("w:fldCharType"))
+                if kind == "begin":
+                    stack.append({"parts": [], "captured": False})
+                elif kind == "separate" and stack and not stack[-1]["captured"]:
+                    value = "".join(stack[-1]["parts"]).strip()
+                    if value:
+                        instructions.append(value)
+                    stack[-1]["captured"] = True
+                elif kind == "end" and stack:
+                    field = stack.pop()
+                    if not field["captured"]:
+                        value = "".join(field["parts"]).strip()
+                        if value:
+                            instructions.append(value)
+            elif (
+                element.tag == qn("w:instrText")
+                and stack
+                and not stack[-1]["captured"]
+            ):
+                stack[-1]["parts"].append(element.text or "")
+    return instructions
+
+
 def field_inventory(path: Path) -> dict[str, Any]:
     ensure_docx(path)
     counts: dict[str, int] = {}
@@ -987,15 +1016,11 @@ def field_inventory(path: Path) -> dict[str, Any]:
                 root.xpath(".//w:bookmarkStart/@w:name", namespaces=NS)
             )
             instructions.extend(
-                value
+                value.strip()
                 for value in root.xpath(".//w:fldSimple/@w:instr", namespaces=NS)
                 if value.strip()
             )
-            instructions.extend(
-                value
-                for value in root.xpath(".//w:instrText/text()", namespaces=NS)
-                if value.strip()
-            )
+            instructions.extend(_complex_field_instructions(root))
 
     references = []
     sequences = []
