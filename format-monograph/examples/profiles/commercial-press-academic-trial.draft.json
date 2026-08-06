@@ -1,0 +1,366 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "commercial-press-academic-trial-draft",
+  "name": "商务印书馆学术著作出版体例规范（试行）参考规则草案",
+  "locale": "zh-CN",
+  "scope": {
+    "document_type": "monograph",
+    "input_format": "DOCX",
+    "notes": "依据公开转载页面建立的出版社参考规则草案。等待样书和直接出版社资料补充，不得作为已批准配置应用。"
+  },
+  "target_applications": [
+    "Microsoft Word 2016",
+    "Microsoft Word 2019",
+    "Microsoft Word 2021",
+    "Microsoft 365",
+    "LibreOffice Writer"
+  ],
+  "source_precedence": [
+    "written_requirement",
+    "docx_template",
+    "pdf_specification",
+    "sample_book",
+    "image",
+    "text_note"
+  ],
+  "sources": [
+    {
+      "id": "SRC-101",
+      "type": "written_requirement",
+      "label": "《商务印书馆学术著作出版体例规范（试行）》公开转载页面",
+      "locator": "https://xueheng.nju.edu.cn/xscb/xzzl/20190625/i5673.html",
+      "summary": "南京大学学衡研究院页面标示2017-12-24发布，包含文字、图表、文献引注、注释、参考文献和索引要求；当前作为出版社参考要求，待样书和直接出版社资料复核。",
+      "public": true
+    }
+  ],
+  "rules": [
+    {
+      "id": "FMT-FIG-101",
+      "category": "figure",
+      "selector": {
+        "kind": "document",
+        "value": "figures_and_tables"
+      },
+      "properties": {
+        "validation": "structural",
+        "constraint": "consistent_numbering",
+        "numbering_scope_options": [
+          "whole_book",
+          "per_chapter"
+        ],
+        "list_when_numerous": true
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "图表应统一编号，可按全书或分章排序；数量较多时另设目录。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-FIG-102",
+      "category": "figure",
+      "selector": {
+        "kind": "document",
+        "value": "figures_and_tables"
+      },
+      "properties": {
+        "validation": "structural_and_visual",
+        "constraint": "first_reference_before_object"
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "正文应先提及图表，再出现相应图表对象。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-TABLE-101",
+      "category": "table",
+      "selector": {
+        "kind": "table_role",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "visual",
+        "title_position": "above",
+        "notes_and_source_position": "below",
+        "continuation_label": "续表",
+        "repeat_header_row": true
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "表题置于表上，说明与来源置于表下；跨页表标示续表并重复表头。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-FIG-103",
+      "category": "figure",
+      "selector": {
+        "kind": "caption_role",
+        "value": "figure"
+      },
+      "properties": {
+        "validation": "visual",
+        "caption_position_options": [
+          "below",
+          "side"
+        ]
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "图题和相关说明位于图下或图侧。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-SECTION-101",
+      "category": "section",
+      "selector": {
+        "kind": "section_role",
+        "value": "landscape_figure_table_page"
+      },
+      "properties": {
+        "validation": "structural_and_visual",
+        "suppress_header": true,
+        "suppress_page_number_display": true
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "横排图表专页不显示页眉和页码，实施前需结合分节结构确认。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BODY-101",
+      "category": "body",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "block_quote"
+      },
+      "properties": {
+        "validation": "visual",
+        "separate_paragraph": true,
+        "remove_quote_marks": false,
+        "first_line_indent_character_candidate": 4,
+        "continuation_indent_character_candidate": 2,
+        "blank_line_before_candidate": 1,
+        "blank_line_after_candidate": 1,
+        "policy": "format_only_keep_existing_characters"
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "较长引文采用独立段落、缩进和上下留白；V1不得自动删除现有引号字符。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NOTE-101",
+      "category": "note",
+      "selector": {
+        "kind": "note_role",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "structural",
+        "placement_options": [
+          "footnote",
+          "chapter_endnote",
+          "book_endnote"
+        ],
+        "default_candidate": "footnote"
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "原创著作原则上采用脚注，也可按全书情况采用章后注或书后注。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NOTE-102",
+      "category": "note",
+      "selector": {
+        "kind": "note_role",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "structural_and_visual",
+        "constraint": "distinguish_note_categories",
+        "numbering_scheme": "pending_qa"
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "作者注、编者注、译者注等类别应通过编号系统或文字标识区分。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BIB-101",
+      "category": "bibliography",
+      "selector": {
+        "kind": "bibliography_role",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "structural",
+        "no_list_numbering": true,
+        "group_order_candidate": [
+          "Chinese",
+          "foreign"
+        ],
+        "entry_order": "source_defined",
+        "policy": "do_not_rewrite_entry_text"
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "参考文献不加序号，中外文可分组，并按责任者和出版时间规则排列。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BIB-102",
+      "category": "bibliography",
+      "selector": {
+        "kind": "bibliography_role",
+        "value": "all"
+      },
+      "properties": {
+        "validation": "visual",
+        "font_size_name_candidate": "小五",
+        "font_size_pt_candidate": 9
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "参考文献建议使用小五号字，具体字体与段落参数待样书确认。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-APPENDIX-101",
+      "category": "appendix",
+      "selector": {
+        "kind": "appendix_role",
+        "value": "index"
+      },
+      "properties": {
+        "validation": "structural_and_visual",
+        "sort_order": "name_pronunciation",
+        "font_size_name_candidate": "小五",
+        "font_size_pt_candidate": 9,
+        "columns_candidate": 2
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "索引按名称音序排列，建议使用小五号字和双栏版式。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BIB-103",
+      "category": "bibliography",
+      "selector": {
+        "kind": "document",
+        "value": "citations_and_references"
+      },
+      "properties": {
+        "validation": "content_audit",
+        "policy": "report_only",
+        "checks": [
+          "citation_system_consistency",
+          "required_fields",
+          "page_locator",
+          "responsibility_statement",
+          "language_specific_punctuation"
+        ]
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "文献引注和参考文献数据只做完整性与一致性报告，不由V1自动改写。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-BODY-102",
+      "category": "body",
+      "selector": {
+        "kind": "document",
+        "value": "authored_text"
+      },
+      "properties": {
+        "validation": "content_audit",
+        "policy": "report_only",
+        "checks": [
+          "simplified_traditional_consistency",
+          "variant_characters",
+          "proper_names",
+          "translations",
+          "abbreviations"
+        ]
+      },
+      "source_ids": [
+        "SRC-101"
+      ],
+      "evidence_summary": "文字、专名和译名规范会改变作者字符，V1只报告。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    }
+  ],
+  "conflicts": [],
+  "open_questions": [
+    {
+      "id": "QA-101",
+      "question": "本公开试行规范目前作为出版社参考要求，后续样书和直接出版社资料均需与其核对。",
+      "blocking": false,
+      "answer": "用户已确认目前作为参考标准。"
+    },
+    {
+      "id": "QA-102",
+      "question": "首批专著采用文献—注释制还是著者—出版年制？",
+      "blocking": true
+    },
+    {
+      "id": "QA-103",
+      "question": "首批专著采用脚注、章后注还是书后注？",
+      "blocking": true
+    },
+    {
+      "id": "QA-104",
+      "question": "请通过后续样书确认长引文、参考文献、索引和横排图表页的具体版式参数。",
+      "blocking": true
+    },
+    {
+      "id": "QA-105",
+      "question": "图表达到多少个时需要另设图表目录？",
+      "blocking": false
+    }
+  ],
+  "approval": {
+    "status": "draft",
+    "notes": "来源已登记，但规则值和注释、引注方案尚未通过样书QA，不可用于修改DOCX。"
+  }
+}
