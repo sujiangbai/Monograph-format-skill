@@ -47,7 +47,9 @@ def style_definition(style) -> dict:
         "font_size_pt": length_points(style.font.size),
         "bold": style.font.bold,
         "line_spacing": (
-            float(spacing) if isinstance(spacing, (int, float)) else length_points(spacing)
+            length_points(spacing)
+            if spacing is not None and hasattr(spacing, "pt")
+            else (None if spacing is None else float(spacing))
         ),
         "line_spacing_rule": (
             None
