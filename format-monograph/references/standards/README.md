@@ -14,5 +14,4 @@
 ## 当前资料
 
 - [GB/T 15834—2011](gbt-15834-2011.md)：标点符号用法及排版位置。
-- [GB/T 15835—2011](gbt-15835-2011.md)：出版物数字形式及书写格式。
-- [规则配置草案](../../examples/profiles/gbt-2011-editorial-baseline.draft.json)：仅用于提取和 QA，不可直接应用。
+- [GB/T 15835—2011](gbt-15835-2011.md)：出版物数字形式及书写格式。\n- [商务印书馆学术著作出版体例规范（试行）](commercial-press-academic-monograph-trial.md)：公开转载页面的出版社参考要求。\n- [GB/T 规则配置草案](../../examples/profiles/gbt-2011-editorial-baseline.draft.json)：仅用于提取和 QA，不可直接应用。\n- [商务印书馆规则配置草案](../../examples/profiles/commercial-press-academic-trial.draft.json)：等待样书补充和任务级 QA。
