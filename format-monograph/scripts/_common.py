@@ -16,6 +16,7 @@ from typing import Any, Iterable
 
 from docx import Document
 from docx.enum.section import WD_ORIENT
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
@@ -48,6 +49,16 @@ ROLE_STYLE_MAP = {
     "level_3_section": "Heading 3",
     "level_4_section": "Heading 4",
     "long_quote": "Quote",
+    "heading_1": "Heading 1",
+    "heading_2": "Heading 2",
+    "heading_3": "Heading 3",
+    "heading_4": "Heading 4",
+    "figure_caption": "Caption",
+    "table_caption": "Caption",
+    "equation_caption": "Caption",
+    "reference_entry": "Bibliography",
+    "answer": "Normal",
+    "teaching_callout": "Normal",
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
@@ -111,7 +122,15 @@ FIELD_PROPERTIES = {
     "rebuild_heading_numbering",
     "heading_levels",
     "strip_manual_heading_prefixes",
+    "chapter_start",
 }
+
+FONT_ALIAS_GROUPS = (
+    {"宋体", "simsun", "nsimsun", "新宋体"},
+    {"黑体", "simhei"},
+    {"楷体", "kaiti", "simkai", "楷体_gb2312"},
+    {"仿宋", "fangsong", "simfang", "仿宋_gb2312"},
+)
 
 EQUATION_PROPERTIES = {
     "require_editable_equations",
@@ -253,6 +272,34 @@ def _font_key(value: str) -> str:
     return re.sub(r"[\s_-]+", "", value).casefold()
 
 
+def font_alias_keys(value: str) -> set[str]:
+    key = _font_key(value)
+    for group in FONT_ALIAS_GROUPS:
+        normalized = {_font_key(item) for item in group}
+        if key in normalized:
+            return normalized
+    return {key}
+
+
+def resolve_font_name(value: str, available_names: set[str] | None = None) -> dict[str, Any]:
+    available_names = available_font_names() if available_names is None else available_names
+    available_by_key = {_font_key(name): name for name in available_names}
+    for key in font_alias_keys(value):
+        if key in available_by_key:
+            return {
+                "requested": value,
+                "available": True,
+                "matched_name": available_by_key[key],
+                "match": "exact" if key == _font_key(value) else "verified_alias",
+            }
+    return {
+        "requested": value,
+        "available": False,
+        "matched_name": None,
+        "match": "missing",
+    }
+
+
 def required_profile_fonts(profile: dict[str, Any]) -> list[str]:
     keys = {
         "font_name",
@@ -273,11 +320,18 @@ def required_profile_fonts(profile: dict[str, Any]) -> list[str]:
 
 
 def missing_profile_fonts(profile: dict[str, Any]) -> list[str]:
-    available = {_font_key(name) for name in available_font_names()}
     return [
-        name
+        item["requested"]
+        for item in profile_font_resolutions(profile)
+        if not item["available"]
+    ]
+
+
+def profile_font_resolutions(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    available = available_font_names()
+    return [
+        resolve_font_name(name, available)
         for name in required_profile_fonts(profile)
-        if _font_key(name) not in available
     ]
 
 
@@ -527,170 +581,7 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
             setattr(paragraph_format, attr, bool(properties[key]))
 
 
-def _set_document_toggle(document: Any, name: str, enabled: bool) -> None:
-    settings = document.settings.element
-    element = settings.find(qn(f"w:{name}"))
-    if enabled:
-        if element is None:
-            element = OxmlElement(f"w:{name}")
-            settings.append(element)
-        element.set(qn("w:val"), "true")
-    elif element is not None:
-        settings.remove(element)
-
-
-def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
-    sections = list(document.sections)
-    page_size_policy = properties.get("page_size_policy")
-    if page_size_policy not in {None, "preserve"}:
-        raise FormatMonographError(f"Unsupported page_size_policy: {page_size_policy}")
-
-    explicit_size = "page_width_mm" in properties or "page_height_mm" in properties
-    for section in sections:
-        if "page_width_mm" in properties:
-            section.page_width = Mm(float(properties["page_width_mm"]))
-        if "page_height_mm" in properties:
-            section.page_height = Mm(float(properties["page_height_mm"]))
-        if "orientation" in properties:
-            orientation = str(properties["orientation"]).lower()
-            if orientation not in {"portrait", "landscape"}:
-                raise FormatMonographError(f"Unsupported orientation: {orientation}")
-            target = WD_ORIENT.PORTRAIT if orientation == "portrait" else WD_ORIENT.LANDSCAPE
-            if section.orientation != target and not explicit_size:
-                section.page_width, section.page_height = section.page_height, section.page_width
-            section.orientation = target
-
-        for key, attr in (
-            ("margin_top_mm", "top_margin"),
-            ("margin_bottom_mm", "bottom_margin"),
-            ("margin_left_mm", "left_margin"),
-            ("margin_right_mm", "right_margin"),
-            ("gutter_mm", "gutter"),
-        ):
-            if key in properties:
-                setattr(section, attr, Mm(float(properties[key])))
-
-        width_mm = float(section.page_width.mm)
-        height_mm = float(section.page_height.mm)
-        ratio_values = (
-            ("margin_inner_ratio", "left_margin", width_mm),
-            ("margin_outer_ratio", "right_margin", width_mm),
-            ("margin_top_ratio", "top_margin", height_mm),
-            ("margin_bottom_ratio", "bottom_margin", height_mm),
-            ("header_distance_ratio", "header_distance", height_mm),
-            ("footer_distance_ratio", "footer_distance", height_mm),
-        )
-        for key, attr, basis in ratio_values:
-            if key in properties:
-                ratio = float(properties[key])
-                if not 0 <= ratio < 0.5:
-                    raise FormatMonographError(f"{key} must be between 0 and 0.5.")
-                setattr(section, attr, Mm(basis * ratio))
-
-        if "different_first_page_header_footer" in properties:
-            section.different_first_page_header_footer = bool(
-                properties["different_first_page_header_footer"]
-            )
-
-    if "odd_and_even_pages_header_footer" in properties:
-        document.settings.odd_and_even_pages_header_footer = bool(
-            properties["odd_and_even_pages_header_footer"]
-        )
-    if "mirror_margins" in properties:
-        _set_document_toggle(document, "mirrorMargins", bool(properties["mirror_margins"]))
-
-    return len(sections)
-
-def _set_repeat_table_header(row: Any, enabled: bool) -> None:
-    tr_pr = row._tr.get_or_add_trPr()
-    existing = tr_pr.find(qn("w:tblHeader"))
-    if enabled:
-        if existing is None:
-            existing = OxmlElement("w:tblHeader")
-            tr_pr.append(existing)
-        existing.set(qn("w:val"), "true")
-    elif existing is not None:
-        tr_pr.remove(existing)
-
-
-def _set_prevent_row_split(row: Any, enabled: bool) -> None:
-    tr_pr = row._tr.get_or_add_trPr()
-    existing = tr_pr.find(qn("w:cantSplit"))
-    if enabled:
-        if existing is None:
-            existing = OxmlElement("w:cantSplit")
-            tr_pr.append(existing)
-        existing.set(qn("w:val"), "true")
-    elif existing is not None:
-        tr_pr.remove(existing)
-
-
-def apply_table_properties(document: Any, properties: dict[str, Any]) -> int:
-    for table in document.tables:
-        if "table_style" in properties:
-            table.style = properties["table_style"]
-        if "alignment" in properties:
-            value = properties["alignment"]
-            if value not in TABLE_ALIGNMENTS:
-                raise FormatMonographError(f"Unsupported table alignment: {value}")
-            table.alignment = TABLE_ALIGNMENTS[value]
-        if "repeat_header_row" in properties and table.rows:
-            _set_repeat_table_header(table.rows[0], bool(properties["repeat_header_row"]))
-        if "prevent_row_split" in properties:
-            for row in table.rows:
-                _set_prevent_row_split(row, bool(properties["prevent_row_split"]))
-        for row in table.rows:
-            for cell in row.cells:
-                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-    return len(document.tables)
-
-
-
-def _record_derived_change(document: Any, change: dict[str, Any]) -> None:
-    changes = getattr(document, "_format_monograph_derived_changes", None)
-    if changes is None:
-        changes = []
-        setattr(document, "_format_monograph_derived_changes", changes)
-    changes.append(change)
-
-
-def _set_update_fields_on_open(document: Any, enabled: bool) -> None:
-    settings = document.settings.element
-    element = settings.find(qn("w:updateFields"))
-    if enabled:
-        if element is None:
-            element = OxmlElement("w:updateFields")
-            settings.append(element)
-        element.set(qn("w:val"), "true")
-    elif element is not None:
-        settings.remove(element)
-
-
-def _mark_fields_dirty(document: Any) -> int:
-    root = document.element
-    fields = root.xpath(".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']")
-    for field in fields:
-        field.set(qn("w:dirty"), "true")
-    return len(fields)
-
-
-def _clear_paragraph_content(paragraph: Any) -> None:
-    p = paragraph._p
-    for child in list(p):
-        if child.tag != qn("w:pPr"):
-            p.remove(child)
-
-
-def _append_simple_field(paragraph: Any, instruction: str, placeholder: str) -> None:
-    field = OxmlElement("w:fldSimple")
-    field.set(qn("w:instr"), instruction)
-    field.set(qn("w:dirty"), "true")
-    run = OxmlElement("w:r")
-    text = OxmlElement("w:t")
-    text.text = placeholder
-    run.append(text)
-    field.append(run)
-    paragraph._p.append(field)
+…2969 tokens truncated…ld)
 
 
 def _field_instruction_for_marker(marker: str) -> tuple[str, str] | None:
@@ -875,9 +766,11 @@ def _next_numbering_id(root: Any, tag: str, attribute: str) -> int:
     return max(values, default=0) + 1
 
 
-def _ensure_heading_numbering(document: Any, levels: int) -> int:
+def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1) -> int:
     if not 1 <= levels <= 4:
         raise FormatMonographError("heading_levels must be between 1 and 4.")
+    if chapter_start < 1:
+        raise FormatMonographError("chapter_start must be a positive integer.")
     root = document.part.numbering_part.element
     abstract_id = _next_numbering_id(root, "abstractNum", "abstractNumId")
     num_id = _next_numbering_id(root, "num", "numId")
@@ -892,7 +785,7 @@ def _ensure_heading_numbering(document: Any, levels: int) -> int:
         lvl = OxmlElement("w:lvl")
         lvl.set(qn("w:ilvl"), str(level))
         start = OxmlElement("w:start")
-        start.set(qn("w:val"), "1")
+        start.set(qn("w:val"), str(chapter_start if level == 0 else 1))
         num_fmt = OxmlElement("w:numFmt")
         num_fmt.set(qn("w:val"), "decimal")
         p_style = OxmlElement("w:pStyle")
@@ -916,10 +809,17 @@ def _ensure_heading_numbering(document: Any, levels: int) -> int:
     abstract_ref = OxmlElement("w:abstractNumId")
     abstract_ref.set(qn("w:val"), str(abstract_id))
     num.append(abstract_ref)
+    if chapter_start != 1:
+        override = OxmlElement("w:lvlOverride")
+        override.set(qn("w:ilvl"), "0")
+        start_override = OxmlElement("w:startOverride")
+        start_override.set(qn("w:val"), str(chapter_start))
+        override.append(start_override)
+        num.append(override)
     root.append(num)
 
     for level in range(levels):
-        style = document.styles[f"Heading {level + 1}"]
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
         p_pr = style.element.get_or_add_pPr()
         num_pr = p_pr.find(qn("w:numPr"))
         if num_pr is None:
@@ -951,7 +851,9 @@ def apply_field_properties(document: Any, properties: dict[str, Any]) -> int:
     if properties.get("strip_manual_heading_prefixes"):
         changed += _strip_manual_heading_prefixes(document, levels)
     if properties.get("rebuild_heading_numbering"):
-        changed += _ensure_heading_numbering(document, levels)
+        changed += _ensure_heading_numbering(
+            document, levels, int(properties.get("chapter_start", 1))
+        )
     return changed
 
 
@@ -1116,7 +1018,14 @@ def protected_object_manifest(path: Path) -> dict[str, Any]:
         "omml_sha256": sorted(omml),
     }
 
-def apply_rule(document: Any, rule: dict[str, Any]) -> int:
+def apply_rule(
+    document: Any,
+    rule: dict[str, Any],
+    *,
+    paragraph_targets: list[Any] | None = None,
+    table_targets: list[tuple[Any, dict[str, Any]]] | None = None,
+    chapter_start: int | None = None,
+) -> int:
     unsupported = unsupported_properties(rule)
     if unsupported:
         raise FormatMonographError(
@@ -1127,9 +1036,12 @@ def apply_rule(document: Any, rule: dict[str, Any]) -> int:
     if selector["kind"] in {"document", "section_role"}:
         return apply_section_properties(document, rule["properties"])
     if selector["kind"] == "table_role":
-        return apply_table_properties(document, rule["properties"])
+        return apply_table_properties(document, rule["properties"], table_targets)
     if selector["kind"] == "field_role":
-        return apply_field_properties(document, rule["properties"])
+        properties = dict(rule["properties"])
+        if chapter_start is not None:
+            properties["chapter_start"] = chapter_start
+        return apply_field_properties(document, properties)
     if selector["kind"] == "equation_role":
         return apply_equation_properties(document, rule["properties"])
 
@@ -1138,12 +1050,9 @@ def apply_rule(document: Any, rule: dict[str, Any]) -> int:
         raise FormatMonographError(
             f"Rule {rule['id']} uses an unsupported automatic selector: {selector}"
         )
-    try:
-        style = document.styles[style_name]
-    except KeyError as exc:
-        raise FormatMonographError(
-            f"Rule {rule['id']} targets missing Word style: {style_name}"
-        ) from exc
+    if paragraph_targets is not None:
+        return apply_style_rule_to_paragraphs(document, rule, paragraph_targets)
+    style = ensure_paragraph_style(document, style_name)
     apply_style_properties(style, rule["properties"])
     return sum(
         1
