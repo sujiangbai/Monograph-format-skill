@@ -15,11 +15,21 @@ from pathlib import Path
 from _common import FormatMonographError, ensure_docx, write_json
 
 
-def locate_soffice() -> str:
-    executable = shutil.which("soffice") or shutil.which("libreoffice")
+def locate_soffice(requested: str | None = None) -> tuple[str, str]:
+    source = "argument"
+    executable = requested
+    if not executable:
+        source = "environment"
+        executable = os.environ.get("FORMAT_MONOGRAPH_RENDERER")
+    if not executable:
+        source = "path"
+        executable = shutil.which("soffice") or shutil.which("libreoffice")
     if not executable:
         raise FormatMonographError("LibreOffice soffice was not found.")
-    return executable
+    path = Path(executable).expanduser()
+    if not path.is_file() and source != "path":
+        raise FormatMonographError(f"Configured renderer does not exist: {path}")
+    return str(path.resolve()) if path.is_file() else str(executable), source
 
 
 def main() -> int:
@@ -29,13 +39,14 @@ def main() -> int:
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--keep-pdf", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--renderer", help="Explicit LibreOffice-compatible renderer path.")
     args = parser.parse_args()
 
     try:
         ensure_docx(args.input)
         if args.dpi < 72 or args.dpi > 300:
             raise FormatMonographError("--dpi must be between 72 and 300.")
-        soffice = locate_soffice()
+        soffice, renderer_source = locate_soffice(args.renderer)
         try:
             import fitz
         except ImportError as exc:
@@ -111,6 +122,8 @@ def main() -> int:
             "dpi": args.dpi,
             "pages": page_paths,
             "pdf": kept_pdf,
+            "renderer": soffice,
+            "renderer_source": renderer_source,
             "visual_review": "pending",
         }
         write_json(manifest_path, result)

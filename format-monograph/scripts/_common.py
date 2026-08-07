@@ -16,6 +16,7 @@ from typing import Any, Iterable
 
 from docx import Document
 from docx.enum.section import WD_ORIENT
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
@@ -48,6 +49,16 @@ ROLE_STYLE_MAP = {
     "level_3_section": "Heading 3",
     "level_4_section": "Heading 4",
     "long_quote": "Quote",
+    "heading_1": "Heading 1",
+    "heading_2": "Heading 2",
+    "heading_3": "Heading 3",
+    "heading_4": "Heading 4",
+    "figure_caption": "Caption",
+    "table_caption": "Caption",
+    "equation_caption": "Caption",
+    "reference_entry": "Bibliography",
+    "answer": "Normal",
+    "teaching_callout": "Normal",
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
@@ -111,7 +122,15 @@ FIELD_PROPERTIES = {
     "rebuild_heading_numbering",
     "heading_levels",
     "strip_manual_heading_prefixes",
+    "chapter_start",
 }
+
+FONT_ALIAS_GROUPS = (
+    {"宋体", "simsun", "nsimsun", "新宋体"},
+    {"黑体", "simhei"},
+    {"楷体", "kaiti", "simkai", "楷体_gb2312"},
+    {"仿宋", "fangsong", "simfang", "仿宋_gb2312"},
+)
 
 EQUATION_PROPERTIES = {
     "require_editable_equations",
@@ -253,6 +272,34 @@ def _font_key(value: str) -> str:
     return re.sub(r"[\s_-]+", "", value).casefold()
 
 
+def font_alias_keys(value: str) -> set[str]:
+    key = _font_key(value)
+    for group in FONT_ALIAS_GROUPS:
+        normalized = {_font_key(item) for item in group}
+        if key in normalized:
+            return normalized
+    return {key}
+
+
+def resolve_font_name(value: str, available_names: set[str] | None = None) -> dict[str, Any]:
+    available_names = available_font_names() if available_names is None else available_names
+    available_by_key = {_font_key(name): name for name in available_names}
+    for key in font_alias_keys(value):
+        if key in available_by_key:
+            return {
+                "requested": value,
+                "available": True,
+                "matched_name": available_by_key[key],
+                "match": "exact" if key == _font_key(value) else "verified_alias",
+            }
+    return {
+        "requested": value,
+        "available": False,
+        "matched_name": None,
+        "match": "missing",
+    }
+
+
 def required_profile_fonts(profile: dict[str, Any]) -> list[str]:
     keys = {
         "font_name",
@@ -273,11 +320,18 @@ def required_profile_fonts(profile: dict[str, Any]) -> list[str]:
 
 
 def missing_profile_fonts(profile: dict[str, Any]) -> list[str]:
-    available = {_font_key(name) for name in available_font_names()}
     return [
-        name
+        item["requested"]
+        for item in profile_font_resolutions(profile)
+        if not item["available"]
+    ]
+
+
+def profile_font_resolutions(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    available = available_font_names()
+    return [
+        resolve_font_name(name, available)
         for name in required_profile_fonts(profile)
-        if _font_key(name) not in available
     ]
 
 
@@ -527,6 +581,130 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
             setattr(paragraph_format, attr, bool(properties[key]))
 
 
+def ensure_paragraph_style(document: Any, style_name: str) -> Any:
+    try:
+        return document.styles[style_name]
+    except KeyError:
+        style = document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        if style_name != "Normal":
+            style.base_style = document.styles["Normal"]
+        return style
+
+
+def _drop_attributes(element: Any, names: tuple[str, ...]) -> None:
+    for name in names:
+        element.attrib.pop(qn(f"w:{name}"), None)
+    if not element.attrib and len(element) == 0 and element.getparent() is not None:
+        element.getparent().remove(element)
+
+
+def clear_controlled_direct_format(paragraph: Any, properties: dict[str, Any]) -> None:
+    p_pr = paragraph._p.pPr
+    if p_pr is not None:
+        if "alignment" in properties:
+            element = p_pr.find(qn("w:jc"))
+            if element is not None:
+                p_pr.remove(element)
+
+        spacing_keys = {
+            "space_before_pt": ("before", "beforeLines", "beforeAutospacing"),
+            "space_after_pt": ("after", "afterLines", "afterAutospacing"),
+            "line_spacing": ("line", "lineRule"),
+            "line_spacing_pt": ("line", "lineRule"),
+            "line_spacing_rule": ("line", "lineRule"),
+        }
+        spacing = p_pr.find(qn("w:spacing"))
+        if spacing is not None:
+            attrs = tuple(
+                attr
+                for key, values in spacing_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(spacing, attrs)
+
+        indent_keys = {
+            "first_line_indent_pt": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "first_line_indent_chars": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "left_indent_pt": ("left", "leftChars", "start", "startChars"),
+            "right_indent_pt": ("right", "rightChars", "end", "endChars"),
+        }
+        indent = p_pr.find(qn("w:ind"))
+        if indent is not None:
+            attrs = tuple(
+                attr
+                for key, values in indent_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(indent, attrs)
+
+        for key, tag in (
+            ("keep_with_next", "keepNext"),
+            ("keep_together", "keepLines"),
+            ("page_break_before", "pageBreakBefore"),
+            ("widow_control", "widowControl"),
+        ):
+            element = p_pr.find(qn(f"w:{tag}"))
+            if key in properties and element is not None:
+                p_pr.remove(element)
+
+    for run in paragraph.runs:
+        r_pr = run._r.rPr
+        if r_pr is None:
+            continue
+        if any(
+            key in properties
+            for key in (
+                "font_name",
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_name_complex_script",
+            )
+        ):
+            r_fonts = r_pr.find(qn("w:rFonts"))
+            if r_fonts is not None:
+                attrs = []
+                if "font_name" in properties:
+                    attrs.extend(("ascii", "hAnsi", "eastAsia", "cs"))
+                if "font_name_ascii" in properties:
+                    attrs.extend(("ascii", "hAnsi"))
+                if "font_name_east_asia" in properties:
+                    attrs.append("eastAsia")
+                if "font_name_complex_script" in properties:
+                    attrs.append("cs")
+                _drop_attributes(r_fonts, tuple(attrs))
+        for key, tags in (
+            ("font_size_pt", ("sz", "szCs")),
+            ("bold", ("b", "bCs")),
+            ("italic", ("i", "iCs")),
+            ("color_hex", ("color",)),
+        ):
+            if key not in properties:
+                continue
+            for tag in tags:
+                element = r_pr.find(qn(f"w:{tag}"))
+                if element is not None:
+                    r_pr.remove(element)
+
+
+def apply_style_rule_to_paragraphs(
+    document: Any, rule: dict[str, Any], paragraphs: Iterable[Any]
+) -> int:
+    style_name = style_name_for_selector(rule["selector"])
+    if style_name is None:
+        raise FormatMonographError(
+            f"Rule {rule['id']} has no paragraph style mapping."
+        )
+    style = ensure_paragraph_style(document, style_name)
+    apply_style_properties(style, rule["properties"])
+    targets = list(paragraphs)
+    for paragraph in targets:
+        paragraph.style = style
+        clear_controlled_direct_format(paragraph, rule["properties"])
+    return len(targets)
+
+
 def _set_document_toggle(document: Any, name: str, enabled: bool) -> None:
     settings = document.settings.element
     element = settings.find(qn(f"w:{name}"))
@@ -625,8 +803,13 @@ def _set_prevent_row_split(row: Any, enabled: bool) -> None:
         tr_pr.remove(existing)
 
 
-def apply_table_properties(document: Any, properties: dict[str, Any]) -> int:
-    for table in document.tables:
+def apply_table_properties(
+    document: Any,
+    properties: dict[str, Any],
+    targets: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> int:
+    selected = targets if targets is not None else [(table, {}) for table in document.tables]
+    for table, entry in selected:
         if "table_style" in properties:
             table.style = properties["table_style"]
         if "alignment" in properties:
@@ -635,14 +818,22 @@ def apply_table_properties(document: Any, properties: dict[str, Any]) -> int:
                 raise FormatMonographError(f"Unsupported table alignment: {value}")
             table.alignment = TABLE_ALIGNMENTS[value]
         if "repeat_header_row" in properties and table.rows:
-            _set_repeat_table_header(table.rows[0], bool(properties["repeat_header_row"]))
+            header_rows = entry.get("repeat_header_rows", [0])
+            for row_index in header_rows:
+                if 0 <= int(row_index) < len(table.rows):
+                    _set_repeat_table_header(
+                        table.rows[int(row_index)], bool(properties["repeat_header_row"])
+                    )
         if "prevent_row_split" in properties:
-            for row in table.rows:
+            caption_row = entry.get("caption_row")
+            for row_index, row in enumerate(table.rows):
+                if caption_row is not None and row_index == int(caption_row):
+                    continue
                 _set_prevent_row_split(row, bool(properties["prevent_row_split"]))
         for row in table.rows:
             for cell in row.cells:
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-    return len(document.tables)
+    return len(selected)
 
 
 
@@ -875,9 +1066,11 @@ def _next_numbering_id(root: Any, tag: str, attribute: str) -> int:
     return max(values, default=0) + 1
 
 
-def _ensure_heading_numbering(document: Any, levels: int) -> int:
+def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1) -> int:
     if not 1 <= levels <= 4:
         raise FormatMonographError("heading_levels must be between 1 and 4.")
+    if chapter_start < 1:
+        raise FormatMonographError("chapter_start must be a positive integer.")
     root = document.part.numbering_part.element
     abstract_id = _next_numbering_id(root, "abstractNum", "abstractNumId")
     num_id = _next_numbering_id(root, "num", "numId")
@@ -892,7 +1085,7 @@ def _ensure_heading_numbering(document: Any, levels: int) -> int:
         lvl = OxmlElement("w:lvl")
         lvl.set(qn("w:ilvl"), str(level))
         start = OxmlElement("w:start")
-        start.set(qn("w:val"), "1")
+        start.set(qn("w:val"), str(chapter_start if level == 0 else 1))
         num_fmt = OxmlElement("w:numFmt")
         num_fmt.set(qn("w:val"), "decimal")
         p_style = OxmlElement("w:pStyle")
@@ -916,10 +1109,17 @@ def _ensure_heading_numbering(document: Any, levels: int) -> int:
     abstract_ref = OxmlElement("w:abstractNumId")
     abstract_ref.set(qn("w:val"), str(abstract_id))
     num.append(abstract_ref)
+    if chapter_start != 1:
+        override = OxmlElement("w:lvlOverride")
+        override.set(qn("w:ilvl"), "0")
+        start_override = OxmlElement("w:startOverride")
+        start_override.set(qn("w:val"), str(chapter_start))
+        override.append(start_override)
+        num.append(override)
     root.append(num)
 
     for level in range(levels):
-        style = document.styles[f"Heading {level + 1}"]
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
         p_pr = style.element.get_or_add_pPr()
         num_pr = p_pr.find(qn("w:numPr"))
         if num_pr is None:
@@ -951,7 +1151,9 @@ def apply_field_properties(document: Any, properties: dict[str, Any]) -> int:
     if properties.get("strip_manual_heading_prefixes"):
         changed += _strip_manual_heading_prefixes(document, levels)
     if properties.get("rebuild_heading_numbering"):
-        changed += _ensure_heading_numbering(document, levels)
+        changed += _ensure_heading_numbering(
+            document, levels, int(properties.get("chapter_start", 1))
+        )
     return changed
 
 
@@ -1116,7 +1318,14 @@ def protected_object_manifest(path: Path) -> dict[str, Any]:
         "omml_sha256": sorted(omml),
     }
 
-def apply_rule(document: Any, rule: dict[str, Any]) -> int:
+def apply_rule(
+    document: Any,
+    rule: dict[str, Any],
+    *,
+    paragraph_targets: list[Any] | None = None,
+    table_targets: list[tuple[Any, dict[str, Any]]] | None = None,
+    chapter_start: int | None = None,
+) -> int:
     unsupported = unsupported_properties(rule)
     if unsupported:
         raise FormatMonographError(
@@ -1127,9 +1336,12 @@ def apply_rule(document: Any, rule: dict[str, Any]) -> int:
     if selector["kind"] in {"document", "section_role"}:
         return apply_section_properties(document, rule["properties"])
     if selector["kind"] == "table_role":
-        return apply_table_properties(document, rule["properties"])
+        return apply_table_properties(document, rule["properties"], table_targets)
     if selector["kind"] == "field_role":
-        return apply_field_properties(document, rule["properties"])
+        properties = dict(rule["properties"])
+        if chapter_start is not None:
+            properties["chapter_start"] = chapter_start
+        return apply_field_properties(document, properties)
     if selector["kind"] == "equation_role":
         return apply_equation_properties(document, rule["properties"])
 
@@ -1138,12 +1350,9 @@ def apply_rule(document: Any, rule: dict[str, Any]) -> int:
         raise FormatMonographError(
             f"Rule {rule['id']} uses an unsupported automatic selector: {selector}"
         )
-    try:
-        style = document.styles[style_name]
-    except KeyError as exc:
-        raise FormatMonographError(
-            f"Rule {rule['id']} targets missing Word style: {style_name}"
-        ) from exc
+    if paragraph_targets is not None:
+        return apply_style_rule_to_paragraphs(document, rule, paragraph_targets)
+    style = ensure_paragraph_style(document, style_name)
     apply_style_properties(style, rule["properties"])
     return sum(
         1

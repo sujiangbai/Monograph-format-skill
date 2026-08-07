@@ -58,9 +58,22 @@ def font_directories() -> list[str]:
     return [str(path) for path in candidates if path.is_dir()]
 
 
+def resolve_renderer(requested: str | None) -> tuple[str | None, str | None]:
+    if requested:
+        path = Path(requested).expanduser()
+        return (str(path.resolve()), "argument") if path.is_file() else (None, "argument")
+    configured = os.environ.get("FORMAT_MONOGRAPH_RENDERER")
+    if configured:
+        path = Path(configured).expanduser()
+        return (str(path.resolve()), "environment") if path.is_file() else (None, "environment")
+    discovered = shutil.which("soffice") or shutil.which("libreoffice")
+    return discovered, "path" if discovered else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    parser.add_argument("--renderer", help="Explicit LibreOffice-compatible renderer path.")
     args = parser.parse_args()
 
     packages = package_status()
@@ -70,7 +83,7 @@ def main() -> int:
     )
     validation_ok = python_ok and bool(packages["jsonschema"]["available"])
     editing_ok = inspection_ok
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice, renderer_source = resolve_renderer(args.renderer)
     pymupdf_ok = bool(packages["PyMuPDF"]["available"])
 
     if editing_ok and validation_ok and soffice and pymupdf_ok:
@@ -102,6 +115,8 @@ def main() -> int:
         },
         "rendering": {
             "soffice": soffice,
+            "renderer": soffice,
+            "source": renderer_source,
             "pymupdf": pymupdf_ok,
             "available": bool(soffice and pymupdf_ok),
         },
