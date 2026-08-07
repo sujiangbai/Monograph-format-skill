@@ -18,13 +18,19 @@ from _common import (
     _heading_prefix_pattern,
     content_fingerprint,
     equation_inventory,
+    font_alias_keys,
     load_document,
     protected_object_manifest,
     style_name_for_selector,
     write_json,
 )
 from validate_profile import validate
-from structure_map import load_structure_map, structure_content_fingerprint
+from structure_map import (
+    approved_data_tables,
+    approved_role_paragraphs,
+    load_structure_map,
+    structure_content_fingerprint,
+)
 
 
 def close(actual: Any, expected: Any, tolerance: float = 0.05) -> bool:
@@ -109,6 +115,10 @@ def normalized_alignment(value: str) -> str:
 
 
 def compare_value(key: str, actual: Any, expected: Any) -> bool:
+    if isinstance(actual, list):
+        return bool(actual) and all(compare_value(key, item, expected) for item in actual)
+    if key.startswith("font_name") and actual is not None:
+        return bool(font_alias_keys(str(actual)) & font_alias_keys(str(expected)))
     if key.endswith(("_pt", "_mm", "_ratio")) or key in {
         "line_spacing",
         "first_line_indent_chars",
@@ -119,6 +129,122 @@ def compare_value(key: str, actual: Any, expected: Any) -> bool:
     if key == "alignment" and actual is not None:
         return normalized_alignment(str(actual)) == str(expected).lower()
     return actual == expected
+
+
+def run_font_value(run: Any, key: str) -> Any:
+    r_pr = run._r.rPr
+    r_fonts = None if r_pr is None else r_pr.find(qn("w:rFonts"))
+    if key == "font_name":
+        return run.font.name
+    if key == "font_name_ascii":
+        return None if r_fonts is None else (
+            r_fonts.get(qn("w:ascii")) or r_fonts.get(qn("w:hAnsi"))
+        )
+    if key == "font_name_east_asia":
+        return None if r_fonts is None else r_fonts.get(qn("w:eastAsia"))
+    if key == "font_name_complex_script":
+        return None if r_fonts is None else r_fonts.get(qn("w:cs"))
+    if key == "font_size_pt":
+        return None if run.font.size is None else run.font.size.pt
+    if key in {"bold", "italic"}:
+        return getattr(run.font, key)
+    if key == "color_hex":
+        return None if run.font.color.rgb is None else str(run.font.color.rgb)
+    return None
+
+
+def paragraph_effective_value(paragraph: Any, key: str) -> Any:
+    style = paragraph.style
+    if key.startswith("font_name") or key in {
+        "font_size_pt",
+        "bold",
+        "italic",
+        "color_hex",
+    }:
+        fallback = style_value(style, key)
+        values = []
+        for run in paragraph.runs:
+            if not run.text:
+                continue
+            direct = run_font_value(run, key)
+            values.append(fallback if direct is None else direct)
+        return values or fallback
+
+    pf = paragraph.paragraph_format
+    direct: Any = None
+    if key == "alignment":
+        direct = pf.alignment
+        if direct is not None:
+            direct = str(direct).split(".")[-1].lower()
+    elif key in {
+        "space_before_pt",
+        "space_after_pt",
+        "first_line_indent_pt",
+        "left_indent_pt",
+        "right_indent_pt",
+    }:
+        attr = {
+            "space_before_pt": "space_before",
+            "space_after_pt": "space_after",
+            "first_line_indent_pt": "first_line_indent",
+            "left_indent_pt": "left_indent",
+            "right_indent_pt": "right_indent",
+        }[key]
+        value = getattr(pf, attr)
+        direct = None if value is None else value.pt
+    elif key == "first_line_indent_chars":
+        p_pr = paragraph._p.pPr
+        ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+        value = None if ind is None else ind.get(qn("w:firstLineChars"))
+        direct = None if value is None else int(value) / 100
+    elif key == "line_spacing":
+        value = pf.line_spacing
+        direct = float(value) if isinstance(value, (int, float)) else None
+    elif key == "line_spacing_pt":
+        value = pf.line_spacing
+        direct = None if value is None or not hasattr(value, "pt") else value.pt
+    elif key == "line_spacing_rule":
+        value = pf.line_spacing_rule
+        if value is not None:
+            raw = str(value).lower()
+            direct = next(
+                (
+                    name
+                    for name, marker in (
+                        ("exact", "exact"),
+                        ("at_least", "at_least"),
+                        ("multiple", "multiple"),
+                        ("one_point_five", "one_point_five"),
+                        ("double", "double"),
+                        ("single", "single"),
+                    )
+                    if marker in raw
+                ),
+                raw,
+            )
+    elif key in {"keep_with_next", "keep_together", "page_break_before", "widow_control"}:
+        direct = getattr(pf, key)
+    return style_value(style, key) if direct is None else direct
+
+
+def audit_paragraph_rule(
+    document: Any, rule: dict[str, Any], paragraphs: list[Any]
+) -> list[dict[str, Any]]:
+    failures = audit_style_rule(document, rule)
+    for target_index, paragraph in enumerate(paragraphs):
+        for key, expected in rule["properties"].items():
+            actual = paragraph_effective_value(paragraph, key)
+            if not compare_value(key, actual, expected):
+                failures.append(
+                    {
+                        "target": target_index,
+                        "property": key,
+                        "expected": expected,
+                        "actual": actual,
+                        "reason": "effective format differs after style and direct formatting",
+                    }
+                )
+    return failures
 
 
 def audit_style_rule(document: Any, rule: dict) -> list[dict]:
@@ -187,18 +313,33 @@ def row_property(row: Any, name: str) -> bool:
     return tr_pr is not None and tr_pr.find(qn(f"w:{name}")) is not None
 
 
-def audit_table_rule(document: Any, rule: dict) -> list[dict]:
+def audit_table_rule(
+    document: Any,
+    rule: dict,
+    targets: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> list[dict]:
     failures = []
-    for index, table in enumerate(document.tables):
+    selected = targets if targets is not None else [(table, {}) for table in document.tables]
+    for index, (table, entry) in enumerate(selected):
         for key, expected in rule["properties"].items():
             if key == "table_style":
                 actual = table.style.name if table.style else None
             elif key == "alignment":
                 actual = normalized_alignment(str(table.alignment))
             elif key == "repeat_header_row":
-                actual = bool(table.rows and row_property(table.rows[0], "tblHeader"))
+                rows = entry.get("repeat_header_rows", [0])
+                actual = bool(rows) and all(
+                    0 <= int(row_index) < len(table.rows)
+                    and row_property(table.rows[int(row_index)], "tblHeader")
+                    for row_index in rows
+                )
             elif key == "prevent_row_split":
-                actual = all(row_property(row, "cantSplit") for row in table.rows)
+                caption_row = entry.get("caption_row")
+                actual = all(
+                    row_property(row, "cantSplit")
+                    for row_index, row in enumerate(table.rows)
+                    if caption_row is None or row_index != int(caption_row)
+                )
             else:
                 actual = "<unsupported>"
             if not compare_value(key, actual, expected):
@@ -213,7 +354,40 @@ def audit_table_rule(document: Any, rule: dict) -> list[dict]:
     return failures
 
 
-def audit_field_rule(document: Any, rule: dict) -> list[dict]:
+def heading_numbering_start(document: Any) -> int | None:
+    style = document.styles["Heading 1"]
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    for num in root.findall(qn("w:num")):
+        if num.get(qn("w:numId")) != num_id:
+            continue
+        for override in num.findall(qn("w:lvlOverride")):
+            if override.get(qn("w:ilvl")) == "0":
+                start = override.find(qn("w:startOverride"))
+                if start is not None:
+                    return int(start.get(qn("w:val")))
+        abstract_ref = num.find(qn("w:abstractNumId"))
+        if abstract_ref is None:
+            return None
+        abstract_id = abstract_ref.get(qn("w:val"))
+        for abstract in root.findall(qn("w:abstractNum")):
+            if abstract.get(qn("w:abstractNumId")) != abstract_id:
+                continue
+            for level in abstract.findall(qn("w:lvl")):
+                if level.get(qn("w:ilvl")) == "0":
+                    start = level.find(qn("w:start"))
+                    return None if start is None else int(start.get(qn("w:val")))
+    return None
+
+
+def audit_field_rule(
+    document: Any, rule: dict, chapter_start: int | None = None
+) -> list[dict]:
     failures = []
     properties = rule["properties"]
     if properties.get("update_on_open") and not document_toggle(document, "updateFields"):
@@ -243,6 +417,16 @@ def audit_field_rule(document: Any, rule: dict) -> list[dict]:
                         "property": "rebuild_heading_numbering",
                         "expected": f"numbering on Heading {level}",
                         "actual": "missing",
+                    }
+                )
+        if chapter_start is not None:
+            actual_start = heading_numbering_start(document)
+            if actual_start != chapter_start:
+                failures.append(
+                    {
+                        "property": "chapter_start",
+                        "expected": chapter_start,
+                        "actual": actual_start,
                     }
                 )
     if properties.get("strip_manual_heading_prefixes"):
@@ -339,11 +523,31 @@ def main() -> int:
             if kind in {"document", "section_role"}:
                 failures = audit_section_rule(document, rule)
             elif kind == "table_role":
-                failures = audit_table_rule(document, rule)
+                table_targets = (
+                    approved_data_tables(document, structure_map)
+                    if structure_map and structure_map.get("schema_version") == "1.1"
+                    else None
+                )
+                failures = audit_table_rule(document, rule, table_targets)
             elif kind == "field_role":
-                failures = audit_field_rule(document, rule)
+                numbering = structure_map.get("numbering", {}) if structure_map else {}
+                chapter_start = (
+                    int(numbering["chapter_start"])
+                    if numbering.get("approved")
+                    else None
+                )
+                failures = audit_field_rule(document, rule, chapter_start)
             elif kind == "equation_role":
                 failures = audit_equation_rule(args.formatted, rule)
+            elif (
+                structure_map
+                and structure_map.get("schema_version") == "1.1"
+                and kind in {"paragraph_role", "caption_role", "bibliography_role"}
+            ):
+                paragraphs = approved_role_paragraphs(
+                    document, structure_map, rule["selector"]
+                )
+                failures = audit_paragraph_rule(document, rule, paragraphs)
             else:
                 failures = audit_style_rule(document, rule)
             rule_results.append(
@@ -362,7 +566,17 @@ def main() -> int:
                 "passed": content_ok,
                 "original_sha256": original_fp,
                 "formatted_sha256": formatted_fp,
-                "field_results_and_approved_derived_values_excluded": normalize,
+                "field_results_and_approved_derived_values_excluded": bool(
+                    normalize or structure_map
+                ),
+                "normalization_sources": [
+                    source
+                    for source, enabled in (
+                        ("profile_field_rules", normalize),
+                        ("approved_structure_map", bool(structure_map)),
+                    )
+                    if enabled
+                ],
             },
             "protected_object_integrity": {
                 "passed": objects_ok,
