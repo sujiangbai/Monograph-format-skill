@@ -87,6 +87,14 @@ STYLE_PROPERTIES = {
     "widow_control",
 }
 
+CAPTION_POLICY_PROPERTIES = {
+    "numbering_mode",
+    "preserve_identifier",
+    "domain_context",
+    "allow_automatic_renumbering",
+    "preserve_table_cell_caption_position",
+}
+
 SECTION_PROPERTIES = {
     "page_width_mm",
     "page_height_mm",
@@ -471,6 +479,8 @@ def supported_properties(rule: dict[str, Any]) -> set[str]:
         return FIELD_PROPERTIES
     if kind == "equation_role":
         return EQUATION_PROPERTIES
+    if kind == "caption_role":
+        return STYLE_PROPERTIES | CAPTION_POLICY_PROPERTIES
     if style_name_for_selector(rule["selector"]):
         return STYLE_PROPERTIES
     return set()

@@ -252,7 +252,35 @@
         },
         "properties": {
           "type": "object",
-          "minProperties": 1
+          "minProperties": 1,
+          "properties": {
+            "numbering_mode": {
+              "type": "string",
+              "enum": [
+                "manual_text",
+                "seq_field"
+              ]
+            },
+            "preserve_identifier": {
+              "type": "boolean"
+            },
+            "domain_context": {
+              "type": "string",
+              "enum": [
+                "general",
+                "architecture",
+                "civil_engineering",
+                "mixed",
+                "unknown"
+              ]
+            },
+            "allow_automatic_renumbering": {
+              "type": "boolean"
+            },
+            "preserve_table_cell_caption_position": {
+              "type": "boolean"
+            }
+          }
         },
         "source_ids": {
           "type": "array",

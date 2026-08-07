@@ -45,7 +45,8 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
    `<python> scripts/inspect_docx.py <input.docx> --output <inventory.json> --structure-map-output <candidate-structure-map.json>`
 3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, chapter start and heading progression, captions, table kinds, exact header rows, cross-page tables, and trailing-section evidence.
 4. Ask the caller to approve each proposed structural operation. Keep uncertain entries unapproved and report them; never infer approval from profile approval.
-   For schema 1.1, mark body/title/front-matter roles explicitly, approve only `kind=data` tables for data-table rules, and leave incomplete or hierarchy-mismatched captions report-only.
+   For schema 1.2, mark body/title/front-matter roles explicitly and approve only `kind=data` tables for data-table rules. Caption identifiers remain editable manual text by default. Do not infer a missing number, sequence error, or `SEQ` conversion from punctuation alone.
+   In architecture, civil-engineering, structural-engineering, or drafting content, analyze whether hyphenated numbers identify a section, elevation, node, detail, or drawing callout. Preserve uncertain identifiers and ask the caller before changing them.
 5. Set the map status to `approved`, then bind it to the unchanged source:
    `<python> scripts/validate_structure_map.py <approved-structure-map.json> --source <input.docx>`
 6. Run:
@@ -53,7 +54,7 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 7. If required fonts are missing, stop for QA. Use `--allow-missing-fonts` only after the caller explicitly approves structural output without those fonts; the report records the override.
 8. Never overwrite the input file.
 9. Treat `manual_review` rules as review items. Do not simulate an automatic change.
-10. Preserve all authored text. Only display values generated from approved TOC, numbering, caption, page-number, or cross-reference fields may change.
+10. Preserve all authored text except an individually caller-confirmed caption-identifier replacement. Such a replacement must use `action=replace_identifier`, preserve the caption title exactly, and pass the dedicated audit. Approved field display values may also change.
 11. Run:
    `<python> scripts/audit_docx.py <input.docx> <formatted.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output <audit.json>`
 
@@ -70,7 +71,7 @@ For a whole book, use one source-bound structure map that covers the entire DOCX
 
 ## Fields and numbering
 
-Use real Word fields and linked numbering only when the profile and structure map explicitly approve them. Explicit markers are `[[TOC]]`, `[[PAGE]]`, `[[SEQ:name]]`, `[[REF:name]]`, and `[[PAGEREF:name]]`. Remove manual heading prefixes only when they match an approved, unambiguous pattern. Use the approved `chapter_start` for a chapter excerpt and validate progression across a whole book. Otherwise stop and ask.
+Use real Word fields and linked numbering only when the profile and structure map explicitly approve them. Figure and table identifiers default to editable manual text, not `SEQ`; preserve existing `SEQ`, `REF`, and `PAGEREF` fields. A new caption conversion requires both an approved profile rule with `numbering_mode=seq_field` and `allow_automatic_renumbering=true`, plus an individually approved `convert_to_seq` map entry. Explicit markers are `[[TOC]]`, `[[PAGE]]`, `[[SEQ:name]]`, `[[REF:name]]`, and `[[PAGEREF:name]]`. Remove manual heading prefixes only when they match an approved, unambiguous pattern. Use the approved `chapter_start` for a chapter excerpt and validate progression across a whole book. Otherwise stop and ask.
 
 ## Render and verify
 

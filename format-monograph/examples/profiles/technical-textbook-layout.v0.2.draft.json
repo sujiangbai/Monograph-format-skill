@@ -243,7 +243,12 @@
         "line_spacing_pt": 15,
         "space_before_pt": 0,
         "space_after_pt": 0,
-        "keep_with_next": true
+        "keep_with_next": true,
+        "numbering_mode": "manual_text",
+        "preserve_identifier": true,
+        "domain_context": "unknown",
+        "allow_automatic_renumbering": false,
+        "preserve_table_cell_caption_position": true
       },
       "source_ids": [
         "SRC-302",
@@ -253,7 +258,7 @@
       "confidence": "medium",
       "status": "draft",
       "application": "automatic",
-      "notes": "题注位置和语义对象识别仍需逐项检查。"
+      "notes": "题注编号默认保留为可编辑人工文本；建筑、土木和结构工程内容中的剖面、节点、详图或图纸标识需结合语义逐项确认。"
     },
     {
       "id": "FMT-TABLE-301",
