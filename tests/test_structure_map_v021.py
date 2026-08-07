@@ -65,7 +65,9 @@ class StructureMapV021Tests(unittest.TestCase):
         structure["tables"][0].update(
             {
                 "approved": True,
+                "kind": "data",
                 "repeat_header": True,
+                "repeat_header_rows": [0],
                 "prevent_normal_row_split": True,
             }
         )
