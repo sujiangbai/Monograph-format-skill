@@ -17,14 +17,17 @@ from _common import (
     field_inventory,
     first_anchor_paragraph,
     load_document,
-    missing_profile_fonts,
+    profile_font_resolutions,
     protected_object_manifest,
     summarize_rule,
 )
 from validate_profile import validate
 from structure_map import (
+    approved_data_tables,
+    approved_role_paragraphs,
     apply_structure_map,
     load_structure_map,
+    prime_structure_map_locators,
     structure_content_fingerprint,
     validate_structure_map_source,
 )
@@ -111,6 +114,7 @@ def report_markdown(
     equation_summary: dict,
     protected_objects_ok: bool,
     missing_fonts: list[str],
+    font_resolutions: list[dict],
     missing_fonts_approved: bool,
 ) -> str:
     integrity = "PASS" if original_fp == formatted_fp and protected_objects_ok else "FAIL"
@@ -134,6 +138,15 @@ def report_markdown(
         "## 字体预检",
         "",
         "- 缺失字体：" + (", ".join(missing_fonts) if missing_fonts else "无"),
+        "- 字体解析："
+        + (
+            "; ".join(
+                f"{item['requested']} -> {item['matched_name'] or 'missing'} ({item['match']})"
+                for item in font_resolutions
+            )
+            if font_resolutions
+            else "无"
+        ),
         f"- 用户批准缺失字体降级：{missing_fonts_approved}",
         "",
         "## 内容一致性",
@@ -249,7 +262,10 @@ def main() -> int:
         normalize_derived = uses_derived_normalization(profile)
         preflight_fields(args.input, profile)
         equation_summary = preflight_equations(args.input, profile)
-        missing_fonts = missing_profile_fonts(profile)
+        font_resolutions = profile_font_resolutions(profile)
+        missing_fonts = [
+            item["requested"] for item in font_resolutions if not item["available"]
+        ]
         if missing_fonts and not args.allow_missing_fonts:
             raise FormatMonographError(
                 "Required fonts are unavailable: " + ", ".join(missing_fonts)
@@ -266,6 +282,7 @@ def main() -> int:
         manual: list[dict] = []
 
         if structure_map:
+            prime_structure_map_locators(document, structure_map)
             for change in apply_structure_map(document, structure_map):
                 _changes = getattr(document, "_format_monograph_derived_changes", [])
                 _changes.append(change)
@@ -277,7 +294,27 @@ def main() -> int:
             if rule["application"] == "manual_review":
                 manual.append(rule)
                 continue
-            targets = apply_rule(document, rule)
+            kind = rule["selector"]["kind"]
+            paragraph_targets = None
+            table_targets = None
+            chapter_start = None
+            if structure_map and structure_map.get("schema_version") == "1.1":
+                if kind in {"paragraph_role", "caption_role", "bibliography_role"}:
+                    paragraph_targets = approved_role_paragraphs(
+                        document, structure_map, rule["selector"]
+                    )
+                elif kind == "table_role":
+                    table_targets = approved_data_tables(document, structure_map)
+                numbering = structure_map.get("numbering", {})
+                if kind == "field_role" and numbering.get("approved"):
+                    chapter_start = int(numbering["chapter_start"])
+            targets = apply_rule(
+                document,
+                rule,
+                paragraph_targets=paragraph_targets,
+                table_targets=table_targets,
+                chapter_start=chapter_start,
+            )
             changes.append(
                 {
                     "id": rule["id"],
@@ -314,7 +351,26 @@ def main() -> int:
         for rule in profile["rules"]:
             if rule["status"] != "approved" or rule["application"] != "automatic":
                 continue
-            anchor = first_anchor_paragraph(review, rule)
+            anchor = None
+            semantic_targeted = (
+                structure_map
+                and structure_map.get("schema_version") == "1.1"
+                and rule["selector"]["kind"]
+                in {"paragraph_role", "caption_role", "bibliography_role"}
+            )
+            if semantic_targeted:
+                anchor = next(
+                    (
+                        paragraph
+                        for paragraph in approved_role_paragraphs(
+                            review, structure_map, rule["selector"]
+                        )
+                        if paragraph.runs
+                    ),
+                    None,
+                )
+            if anchor is None and not semantic_targeted:
+                anchor = first_anchor_paragraph(review, rule)
             if anchor is None:
                 unanchored.append(rule["id"])
                 continue
@@ -354,6 +410,7 @@ def main() -> int:
                 equation_summary,
                 protected_objects_ok,
                 missing_fonts,
+                font_resolutions,
                 bool(missing_fonts and args.allow_missing_fonts),
             ),
             encoding="utf-8",
@@ -368,6 +425,7 @@ def main() -> int:
                     "protected_object_integrity": "pass",
                     "derived_changes": len(derived_changes),
                     "missing_fonts": missing_fonts,
+                    "font_resolutions": font_resolutions,
                     "missing_fonts_approved": bool(
                         missing_fonts and args.allow_missing_fonts
                     ),
