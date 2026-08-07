@@ -10,9 +10,9 @@ Use a source-bound structure map for operations that reinterpret document struct
 4. Pass the same map to `apply_profile.py` and `audit_docx.py`.
 5. Regenerate the map and repeat QA whenever the source fingerprint changes.
 
-New maps use schema `1.1`; readers continue to accept `1.0`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. It cannot authorize semantic paragraph targeting, chapter starts, non-first-row headers, table-caption migration, or expanded section evidence.
+New maps use schema `1.2`; readers continue to accept `1.0` and `1.1`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. It cannot express domain-aware manual caption actions.
 
-## Schema 1.1
+## Schema 1.2
 
 ### Paragraph roles
 
@@ -29,7 +29,19 @@ The `numbering` block records single-chapter or whole-book mode, `chapter_start`
 
 ### Captions and tables
 
-Captions may use either locator. Convert only complete, unambiguous, approved captions to `SEQ` fields. An approved caption in a single merged table row may move to a separate `Caption` paragraph immediately above the table; block the move when the row contains other authored content.
+Captions may use either locator. Each candidate records `numbering_mode`, `identifier_semantics`, `domain_context`, `domain_confidence`, and an action. The default is `numbering_mode=manual_text` with `action=preserve`; approval never implies renumbering or `SEQ` conversion.
+
+Caption actions are:
+
+- `preserve`: make no structural or text change.
+- `style_only`: apply the approved caption style through its paragraph role; preserve text and location.
+- `replace_identifier`: replace only the hashed identifier span after individual caller confirmation; preserve the label, separator, and title exactly.
+- `convert_to_seq`: require explicit approval in both the profile and map, plus an unambiguous legacy boundary.
+- `move_caption`: separately approve moving a single merged caption row; it does not imply renumbering.
+
+In architecture, civil-engineering, structural-engineering, and drafting contexts, a hyphenated number may identify a section, elevation, node, detail, or drawing callout. Analyze nearby semantic evidence and set `identifier_semantics` to `drawing_mark`, `mixed`, or `unknown` as appropriate. Punctuation alone never proves a missing sequence number. Keep an uncertain candidate report-only.
+
+An in-cell table caption remains in its first row by default. Move it only with `action=move_caption` and `migrate_outside_table=true`; block the move when the row contains other authored content.
 
 Each table has `kind`: `data`, `layout`, `callout`, or `unknown`. Only approved `data` tables receive table rules. Use `caption_row`, `header_rows`, `repeat_header_rows`, and `prevent_normal_row_split` to authorize exact rows. Layout tables, image containers, teaching boxes, and unknown tables remain unchanged.
 
@@ -41,7 +53,7 @@ Candidates report visible payload, header/footer references and payload, page-nu
 
 - `toc_ranges`: replace an approved static directory range with a real `TOC` field.
 - `headings`: assign approved body paragraphs to Heading 1-4 and remove only verified prefixes.
-- `captions`: create real `STYLEREF`/`SEQ` fields and preserve caption wording.
+- `captions`: preserve or style manual identifiers by default; perform only explicitly approved identifier replacement, relocation, or field conversion.
 - `tables`: apply exact approved header and row-split controls to data tables.
 - `trailing_empty_sections`: remove safe approved final sections from the end inward.
 
@@ -51,4 +63,4 @@ Style rules clear conflicting direct formatting only for the properties they con
 
 Maps contain indexes, roles, settings, and hashes, never manuscript text. Keep unpublished DOCX files, detailed inventories, rendered pages, and task reports outside the skill repository.
 
-Application verifies the source fingerprint and approved target hashes. Audit compares effective style plus paragraph/run formatting, normalizes only approved derived-field changes, and keeps all authored text logically significant.
+Application verifies the source fingerprint and approved target hashes. Audit compares effective style plus paragraph/run formatting, normalizes only approved derived-field changes, and keeps all authored text logically significant. A manual identifier replacement receives a separate audit entry proving that the exact approved identifier changed and the caption title did not.

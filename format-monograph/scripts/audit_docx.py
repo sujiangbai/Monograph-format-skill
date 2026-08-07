@@ -13,6 +13,7 @@ from typing import Any
 from docx.oxml.ns import qn
 
 from _common import (
+    STYLE_PROPERTIES,
     FormatMonographError,
     _field_instruction_for_marker,
     _heading_prefix_pattern,
@@ -28,6 +29,8 @@ from validate_profile import validate
 from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
+    audit_caption_identifier_replacements,
+    has_semantic_structure_map,
     load_structure_map,
     structure_content_fingerprint,
 )
@@ -233,6 +236,8 @@ def audit_paragraph_rule(
     failures = audit_style_rule(document, rule)
     for target_index, paragraph in enumerate(paragraphs):
         for key, expected in rule["properties"].items():
+            if key not in STYLE_PROPERTIES:
+                continue
             actual = paragraph_effective_value(paragraph, key)
             if not compare_value(key, actual, expected):
                 failures.append(
@@ -257,6 +262,8 @@ def audit_style_rule(document: Any, rule: dict) -> list[dict]:
         return [{"property": "*", "expected": style_name, "actual": "missing style"}]
     failures = []
     for key, expected in rule["properties"].items():
+        if key not in STYLE_PROPERTIES:
+            continue
         actual = style_value(style, key)
         if not compare_value(key, actual, expected):
             failures.append({"property": key, "expected": expected, "actual": actual})
@@ -525,7 +532,7 @@ def main() -> int:
             elif kind == "table_role":
                 table_targets = (
                     approved_data_tables(document, structure_map)
-                    if structure_map and structure_map.get("schema_version") == "1.1"
+                    if structure_map and has_semantic_structure_map(structure_map)
                     else None
                 )
                 failures = audit_table_rule(document, rule, table_targets)
@@ -541,7 +548,7 @@ def main() -> int:
                 failures = audit_equation_rule(args.formatted, rule)
             elif (
                 structure_map
-                and structure_map.get("schema_version") == "1.1"
+                and has_semantic_structure_map(structure_map)
                 and kind in {"paragraph_role", "caption_role", "bibliography_role"}
             ):
                 paragraphs = approved_role_paragraphs(
@@ -560,8 +567,18 @@ def main() -> int:
 
         content_ok = original_fp == formatted_fp
         rules_ok = all(item["status"] != "fail" for item in rule_results)
+        caption_replacements = (
+            audit_caption_identifier_replacements(
+                args.original, args.formatted, structure_map
+            )
+            if structure_map
+            else []
+        )
+        caption_replacements_ok = all(
+            item["status"] == "pass" for item in caption_replacements
+        )
         result = {
-            "passed": content_ok and objects_ok and rules_ok,
+            "passed": content_ok and objects_ok and rules_ok and caption_replacements_ok,
             "content_integrity": {
                 "passed": content_ok,
                 "original_sha256": original_fp,
@@ -584,6 +601,7 @@ def main() -> int:
                 "formatted": formatted_objects,
             },
             "equations": equation_inventory(args.formatted),
+            "approved_manual_identifier_replacements": caption_replacements,
             "rules": rule_results,
         }
         if args.output:

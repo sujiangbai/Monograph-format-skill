@@ -48,6 +48,7 @@ class StructureMapV021Tests(unittest.TestCase):
         document.save(self.source)
 
         structure = candidate_structure_map(self.source)
+        structure["schema_version"] = "1.1"
         structure["status"] = "approved"
         structure["toc_ranges"] = [
             {
@@ -61,7 +62,13 @@ class StructureMapV021Tests(unittest.TestCase):
         for entry in structure["headings"]:
             entry["approved"] = entry["paragraph"] in {2, 3, 4, 5}
         for entry in structure["captions"]:
-            entry["approved"] = True
+            entry.update(
+                {
+                    "approved": True,
+                    "completeness": "complete",
+                    "hierarchy_status": "match",
+                }
+            )
         structure["tables"][0].update(
             {
                 "approved": True,

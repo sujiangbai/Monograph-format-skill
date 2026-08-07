@@ -71,6 +71,16 @@ class TechnicalTextbookV02ProfileTests(unittest.TestCase):
         errors, _ = validate(PROFILE_PATH)
         self.assertEqual([], errors)
 
+    def test_caption_defaults_preserve_manual_domain_identifiers(self) -> None:
+        rule = next(
+            item for item in self.profile["rules"] if item["id"] == "FMT-CAP-301"
+        )
+        properties = rule["properties"]
+        self.assertEqual("manual_text", properties["numbering_mode"])
+        self.assertTrue(properties["preserve_identifier"])
+        self.assertFalse(properties["allow_automatic_renumbering"])
+        self.assertTrue(properties["preserve_table_cell_caption_position"])
+
 
 if __name__ == "__main__":
     unittest.main()

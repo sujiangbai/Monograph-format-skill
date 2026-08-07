@@ -26,6 +26,7 @@ from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
     apply_structure_map,
+    has_semantic_structure_map,
     load_structure_map,
     prime_structure_map_locators,
     structure_content_fingerprint,
@@ -63,6 +64,28 @@ def uses_derived_normalization(profile: dict) -> bool:
         and any(rule.get("properties", {}).get(key) for key in keys)
         for rule in profile.get("rules", [])
     )
+
+
+def assert_caption_actions_authorized(profile: dict, structure_map: dict) -> None:
+    requests_seq = any(
+        entry.get("approved") and entry.get("action") == "convert_to_seq"
+        for entry in structure_map.get("captions", [])
+    )
+    if not requests_seq:
+        return
+    allows_seq = any(
+        rule.get("status") == "approved"
+        and rule.get("application") == "automatic"
+        and rule.get("selector", {}).get("kind") == "caption_role"
+        and rule.get("properties", {}).get("numbering_mode") == "seq_field"
+        and rule.get("properties", {}).get("allow_automatic_renumbering") is True
+        for rule in profile.get("rules", [])
+    )
+    if not allows_seq:
+        raise FormatMonographError(
+            "SEQ caption conversion requires an approved caption profile rule with "
+            "numbering_mode=seq_field and allow_automatic_renumbering=true."
+        )
 
 
 def preflight_fields(input_path: Path, profile: dict) -> dict:
@@ -252,6 +275,7 @@ def main() -> int:
         if args.structure_map:
             structure_map = load_structure_map(args.structure_map)
             validate_structure_map_source(args.input, structure_map)
+            assert_caption_actions_authorized(profile, structure_map)
 
         formatted_path, review_path, report_path = output_paths(args.input, args.output_dir)
         args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -298,7 +322,7 @@ def main() -> int:
             paragraph_targets = None
             table_targets = None
             chapter_start = None
-            if structure_map and structure_map.get("schema_version") == "1.1":
+            if structure_map and has_semantic_structure_map(structure_map):
                 if kind in {"paragraph_role", "caption_role", "bibliography_role"}:
                     paragraph_targets = approved_role_paragraphs(
                         document, structure_map, rule["selector"]
@@ -354,7 +378,7 @@ def main() -> int:
             anchor = None
             semantic_targeted = (
                 structure_map
-                and structure_map.get("schema_version") == "1.1"
+                and has_semantic_structure_map(structure_map)
                 and rule["selector"]["kind"]
                 in {"paragraph_role", "caption_role", "bibliography_role"}
             )

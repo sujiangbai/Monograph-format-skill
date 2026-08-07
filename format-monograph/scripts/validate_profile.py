@@ -56,6 +56,39 @@ def semantic_errors(profile: dict) -> list[str]:
             errors.append(
                 f"Automatic rule {rule['id']} has unsupported properties: {', '.join(unsupported)}"
             )
+        if rule.get("selector", {}).get("kind") == "caption_role":
+            properties = rule.get("properties", {})
+            numbering_mode = properties.get("numbering_mode")
+            if numbering_mode not in {None, "manual_text", "seq_field"}:
+                errors.append(
+                    f"Caption rule {rule['id']} has invalid numbering_mode: {numbering_mode}"
+                )
+            domain_context = properties.get("domain_context")
+            if domain_context not in {
+                None,
+                "general",
+                "architecture",
+                "civil_engineering",
+                "mixed",
+                "unknown",
+            }:
+                errors.append(
+                    f"Caption rule {rule['id']} has invalid domain_context: {domain_context}"
+                )
+            for key in (
+                "preserve_identifier",
+                "allow_automatic_renumbering",
+                "preserve_table_cell_caption_position",
+            ):
+                if key in properties and not isinstance(properties[key], bool):
+                    errors.append(f"Caption rule {rule['id']} requires boolean {key}.")
+            if (
+                numbering_mode == "manual_text"
+                and properties.get("allow_automatic_renumbering") is True
+            ):
+                errors.append(
+                    f"Caption rule {rule['id']} cannot automatically renumber manual text."
+                )
 
     for conflict in profile.get("conflicts", []):
         missing = sorted(set(conflict["rule_ids"]) - known_rules)

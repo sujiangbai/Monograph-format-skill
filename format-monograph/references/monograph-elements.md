@@ -26,6 +26,8 @@ V1.1 可自动执行：
 
 `line_spacing_rule` 为 `exact` 时必须同时提供 `line_spacing_pt`；字符缩进以 1/100 字符写入 OOXML。
 
+题注规则还可声明 `numbering_mode`、`preserve_identifier`、`domain_context`、`allow_automatic_renumbering` 和 `preserve_table_cell_caption_position`。默认使用 `manual_text`、保留编号、禁止自动重编号并保留表格首行题注位置。`seq_field` 只有在当前调用者明确要求且结构图逐项批准时才能执行。
+
 ## 页面与分节属性
 
 - 固定值：`page_width_mm`、`page_height_mm`、`orientation`、四侧 `margin_*_mm`、`gutter_mm`。

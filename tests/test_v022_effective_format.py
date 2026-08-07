@@ -64,6 +64,7 @@ class V022EffectiveFormatTests(unittest.TestCase):
         document.save(self.source)
 
         structure = candidate_structure_map(self.source)
+        structure["schema_version"] = "1.1"
         structure["status"] = "approved"
         structure["numbering"].update(
             {"approved": True, "chapter_start": 4, "mode": "single_chapter"}
@@ -77,7 +78,14 @@ class V022EffectiveFormatTests(unittest.TestCase):
             elif entry["role"] in {"heading_1", "heading_2", "table_caption"}:
                 entry["approved"] = True
         for entry in structure["captions"]:
-            entry.update({"approved": True, "migrate_outside_table": True})
+            entry.update(
+                {
+                    "approved": True,
+                    "migrate_outside_table": True,
+                    "completeness": "complete",
+                    "hierarchy_status": "match",
+                }
+            )
         structure["tables"][0].update(
             {
                 "kind": "data",
@@ -261,9 +269,12 @@ class V022EffectiveFormatTests(unittest.TestCase):
         document.add_paragraph("表 Synthetic caption without a number")
         document.save(source)
         structure = candidate_structure_map(source)
+        structure["schema_version"] = "1.1"
         structure["status"] = "approved"
-        self.assertEqual("incomplete", structure["captions"][0]["completeness"])
-        structure["captions"][0]["approved"] = True
+        self.assertEqual("candidate", structure["captions"][0]["completeness"])
+        structure["captions"][0].update(
+            {"approved": True, "completeness": "incomplete"}
+        )
         path = self.root / "incomplete-structure.json"
         path.write_text(json.dumps(structure, ensure_ascii=False), encoding="utf-8")
         result = self.run_script(

@@ -37,6 +37,36 @@ CAPTION_PATTERN = re.compile(
     r"^\s*(图|表)\s*(\d+(?:\.\d+){1,3})\s*[-－—–]\s*(\d+)\s*(\S.*)$"
 )
 LOOSE_CAPTION_PATTERN = re.compile(r"^\s*(图|表)\s*(\S.*)?$")
+CAPTION_IDENTIFIER_PATTERN = re.compile(
+    r"^\s*(图|表)\s*([0-9]+(?:[.．-][0-9]+)*)"
+    r"(?:\s+|\s*[-－—–]\s*(?=\D))(\S.*)$"
+)
+DRAWING_MARK_PATTERN = re.compile(
+    r"(?:^|\s)\d+(?:-\d+)+\s*(?:剖面|断面|截面|节点|详图|大样|立面|平面)"
+)
+ARCHITECTURE_TERMS = ("建筑", "平面图", "立面图", "剖面图", "详图", "大样")
+CIVIL_ENGINEERING_TERMS = (
+    "土木",
+    "结构",
+    "钢结构",
+    "混凝土",
+    "梁",
+    "柱",
+    "桁架",
+    "基础",
+    "节点",
+    "截面",
+    "断面",
+)
+STRUCTURE_MAP_VERSIONS = {"1.0", "1.1", "1.2"}
+SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2"}
+CAPTION_ACTIONS = {
+    "preserve",
+    "style_only",
+    "replace_identifier",
+    "convert_to_seq",
+    "move_caption",
+}
 
 ROLE_ALIASES = {
     "body_text": "body",
@@ -71,6 +101,40 @@ ROLE_STYLE_NAMES = {
 
 def text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def has_semantic_structure_map(structure_map: dict[str, Any]) -> bool:
+    return structure_map.get("schema_version") in SEMANTIC_STRUCTURE_MAP_VERSIONS
+
+
+def _caption_domain(value: str, context: str = "") -> tuple[str, str]:
+    evidence = f"{value}\n{context}"
+    architecture = any(term in evidence for term in ARCHITECTURE_TERMS)
+    civil = any(term in evidence for term in CIVIL_ENGINEERING_TERMS)
+    if architecture and civil:
+        return "mixed", "high"
+    if architecture:
+        return "architecture", "high"
+    if civil:
+        return "civil_engineering", "high"
+    return "unknown", "low"
+
+
+def _caption_identifier_semantics(
+    identifier: str | None, title: str | None, domain_context: str
+) -> str:
+    if not identifier:
+        return "unknown"
+    drawing_evidence = bool(DRAWING_MARK_PATTERN.search(title or ""))
+    if drawing_evidence:
+        return "mixed" if "." in identifier or "．" in identifier else "drawing_mark"
+    if domain_context != "unknown" and "-" in identifier and not any(
+        marker in identifier for marker in (".", "．")
+    ):
+        return "drawing_mark"
+    if any(marker in identifier for marker in (".", "．")):
+        return "publication_number"
+    return "unknown"
 
 
 def _paragraph_has_payload(element: Any) -> bool:
@@ -170,7 +234,7 @@ def _verified_locator_paragraph(document: Any, entry: dict[str, Any]) -> Any:
 
 
 def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -> None:
-    if structure_map.get("schema_version") != "1.1":
+    if not has_semantic_structure_map(structure_map):
         return
     cache = getattr(document, "_format_monograph_locator_cache", {})
     verified = getattr(document, "_format_monograph_verified_locators", set())
@@ -196,7 +260,7 @@ def normalized_role(value: str) -> str:
 def approved_role_paragraphs(
     document: Any, structure_map: dict[str, Any], selector: dict[str, str]
 ) -> list[Any]:
-    if structure_map.get("schema_version") != "1.1":
+    if not has_semantic_structure_map(structure_map):
         return []
     wanted = normalized_role(selector["value"])
     caption_roles = {"figure_caption", "table_caption", "equation_caption"}
@@ -218,14 +282,40 @@ def approved_role_paragraphs(
                 paragraph = resolve_paragraph_locator(document, locator)
                 if not paragraph.style or paragraph.style.name != expected_style:
                     raise
-            elif role in caption_roles and locator.get("kind") == "table_cell_paragraph":
-                table_index = int(locator["table"])
-                if not 0 <= table_index < len(document.tables):
+            elif role in caption_roles:
+                caption_entry = next(
+                    (
+                        item
+                        for item in structure_map.get("captions", [])
+                        if item.get("approved")
+                        and item.get("locator", {}).get("kind")
+                        in {"body_paragraph", "table_cell_paragraph"}
+                        and _locator_key(item["locator"])
+                        == _locator_key(locator)
+                    ),
+                    None,
+                )
+                if caption_entry is None:
                     raise
-                previous = document.tables[table_index]._tbl.getprevious()
-                if previous is None or previous.tag != qn("w:p"):
+                if (
+                    structure_map.get("schema_version") == "1.2"
+                    and caption_entry.get("action")
+                    not in {"replace_identifier", "convert_to_seq", "move_caption"}
+                ):
                     raise
-                paragraph = Paragraph(previous, document.tables[table_index]._parent)
+                if (
+                    locator.get("kind") == "table_cell_paragraph"
+                    and caption_entry.get("migrate_outside_table")
+                ):
+                    table_index = int(locator["table"])
+                    if not 0 <= table_index < len(document.tables):
+                        raise
+                    previous = document.tables[table_index]._tbl.getprevious()
+                    if previous is None or previous.tag != qn("w:p"):
+                        raise
+                    paragraph = Paragraph(previous, document.tables[table_index]._parent)
+                else:
+                    paragraph = resolve_paragraph_locator(document, locator)
                 if not paragraph.style or paragraph.style.name != "Caption":
                     raise
             else:
@@ -239,7 +329,7 @@ def approved_role_paragraphs(
 def approved_data_tables(
     document: Any, structure_map: dict[str, Any]
 ) -> list[tuple[Any, dict[str, Any]]]:
-    if structure_map.get("schema_version") != "1.1":
+    if not has_semantic_structure_map(structure_map):
         return []
     result = []
     for entry in structure_map.get("tables", []):
@@ -451,35 +541,59 @@ def _role_for_paragraph(paragraph: Any, detected_level: int | None) -> str:
     return "unknown"
 
 
-def _caption_entry(value: str, locator: dict[str, Any]) -> dict[str, Any] | None:
-    match = CAPTION_PATTERN.match(value)
-    if not match:
-        loose = LOOSE_CAPTION_PATTERN.match(value)
-        if not loose:
-            return None
-        label = loose.group(1)
-        return {
-            "locator": locator,
-            "text_sha256": text_sha256(value),
-            "label": label,
-            "sequence_name": "Figure" if label == "图" else "Table",
-            "completeness": "incomplete",
-            "hierarchy_status": "unresolved",
-            "approved": False,
-        }
-    label, hierarchy, sequence, _ = match.groups()
-    return {
+def _caption_entry(
+    value: str, locator: dict[str, Any], context: str = ""
+) -> dict[str, Any] | None:
+    loose = LOOSE_CAPTION_PATTERN.match(value)
+    if not loose:
+        return None
+
+    label = loose.group(1)
+    domain_context, domain_confidence = _caption_domain(value, context)
+    identifier = CAPTION_IDENTIFIER_PATTERN.match(value)
+    entry: dict[str, Any] = {
         "locator": locator,
         "text_sha256": text_sha256(value),
         "label": label,
         "sequence_name": "Figure" if label == "图" else "Table",
-        "heading_level": len(hierarchy.split(".")),
-        "cached_hierarchy": hierarchy,
-        "cached_sequence": sequence,
-        "completeness": "complete",
-        "hierarchy_status": "pending_qa",
+        "numbering_mode": "manual_text",
+        "identifier_semantics": "unknown",
+        "domain_context": domain_context,
+        "domain_confidence": domain_confidence,
+        "action": "preserve",
+        "completeness": "candidate",
+        "hierarchy_status": "not_evaluated",
         "approved": False,
     }
+    if identifier:
+        raw_identifier = identifier.group(2)
+        start, end = identifier.span(2)
+        title = identifier.group(3)
+        entry.update(
+            {
+                "identifier_span": {"start": start, "end": end},
+                "identifier_sha256": text_sha256(raw_identifier),
+                "identifier_prefix_sha256": text_sha256(value[:start]),
+                "identifier_suffix_sha256": text_sha256(value[end:]),
+                "title_text_sha256": text_sha256(title),
+                "title_span_start": identifier.start(3),
+                "identifier_semantics": _caption_identifier_semantics(
+                    raw_identifier, title, domain_context
+                ),
+            }
+        )
+
+    legacy = CAPTION_PATTERN.match(value)
+    if legacy:
+        _, hierarchy, sequence, _ = legacy.groups()
+        entry.update(
+            {
+                "heading_level": len(hierarchy.split(".")),
+                "cached_hierarchy": hierarchy,
+                "cached_sequence": sequence,
+            }
+        )
+    return entry
 
 
 def _table_text_hash(table: Any) -> str:
@@ -497,7 +611,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
     captions = []
     paragraph_roles = []
     chapter_starts = []
-    current_chapter = None
+    body_values = [paragraph.text for paragraph in document.paragraphs]
     for index, paragraph in enumerate(document.paragraphs):
         value = paragraph.text
         detected_level = None
@@ -519,15 +633,10 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                     chapter = _chapter_number(value)
                     if chapter is not None:
                         chapter_starts.append(chapter)
-                        current_chapter = chapter
                 break
-        caption = _caption_entry(value, _body_locator(index))
+        nearby = "\n".join(body_values[max(0, index - 2) : index + 3])
+        caption = _caption_entry(value, _body_locator(index), nearby)
         if caption:
-            if caption["completeness"] == "complete" and current_chapter is not None:
-                observed = int(caption["cached_hierarchy"].split(".")[0])
-                caption["hierarchy_status"] = (
-                    "match" if observed == current_chapter else "mismatch"
-                )
             caption["paragraph"] = index
             captions.append(caption)
             role = "figure_caption" if caption["label"] == "图" else "table_caption"
@@ -549,6 +658,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
     for table_index, table in enumerate(document.tables):
         caption_row = None
         header_rows: list[int] = []
+        table_text = "\n".join(cell.text for row in table.rows for cell in row.cells)
         seen_cells: set[int] = set()
         for row_index, row in enumerate(table.rows):
             for cell_index, cell in enumerate(row.cells):
@@ -559,17 +669,9 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                     locator = _cell_locator(
                         table_index, row_index, cell_index, paragraph_index
                     )
-                    caption = _caption_entry(paragraph.text, locator)
+                    caption = _caption_entry(paragraph.text, locator, table_text)
                     if not caption:
                         continue
-                    if (
-                        caption["completeness"] == "complete"
-                        and len(set(chapter_starts)) == 1
-                    ):
-                        observed = int(caption["cached_hierarchy"].split(".")[0])
-                        caption["hierarchy_status"] = (
-                            "match" if observed == chapter_starts[0] else "mismatch"
-                        )
                     caption["migrate_outside_table"] = False
                     captions.append(caption)
                     paragraph_roles.append(
@@ -607,7 +709,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         )
 
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "status": "candidate",
         "source_content_fingerprint_sha256": content_fingerprint(path),
         "paragraph_roles": paragraph_roles,
@@ -633,29 +735,118 @@ def load_structure_map(path: Path) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise FormatMonographError(f"Invalid structure map: {path}: {exc}") from exc
-    if value.get("schema_version") not in {"1.0", "1.1"}:
-        raise FormatMonographError("Structure map schema_version must be 1.0 or 1.1.")
+    if value.get("schema_version") not in STRUCTURE_MAP_VERSIONS:
+        raise FormatMonographError(
+            "Structure map schema_version must be 1.0, 1.1, or 1.2."
+        )
     if value.get("status") != "approved":
         raise FormatMonographError("Structure map status must be approved.")
     if value.get("conflicts"):
         raise FormatMonographError("Structure map contains unresolved conflicts.")
-    if value.get("schema_version") == "1.1":
+    if has_semantic_structure_map(value):
         for entry in value.get("paragraph_roles", []):
             if entry.get("approved") and entry.get("role") == "unknown":
                 raise FormatMonographError("Approved paragraph role cannot be unknown.")
             if "locator" not in entry or "text_sha256" not in entry:
                 raise FormatMonographError(
-                    "Structure map 1.1 paragraph roles require locator and text_sha256."
+                    "Semantic structure-map paragraph roles require locator and text_sha256."
                 )
         for entry in value.get("captions", []):
             if not entry.get("approved"):
                 continue
-            if entry.get("completeness") != "complete":
-                raise FormatMonographError("Incomplete captions cannot be approved.")
-            if entry.get("hierarchy_status") not in {"match", "accepted"}:
+            if value.get("schema_version") == "1.1":
+                if entry.get("completeness") != "complete":
+                    raise FormatMonographError("Incomplete captions cannot be approved.")
+                if entry.get("hierarchy_status") not in {"match", "accepted"}:
+                    raise FormatMonographError(
+                        "Caption hierarchy must match or be explicitly accepted."
+                    )
+                continue
+
+            action = entry.get("action")
+            if action not in CAPTION_ACTIONS:
                 raise FormatMonographError(
-                    "Caption hierarchy must match or be explicitly accepted."
+                    f"Structure map 1.2 caption action is invalid: {action}"
                 )
+            if entry.get("numbering_mode") not in {"manual_text", "seq_field"}:
+                raise FormatMonographError(
+                    "Structure map 1.2 captions require numbering_mode."
+                )
+            if entry.get("identifier_semantics") not in {
+                "publication_number",
+                "drawing_mark",
+                "mixed",
+                "unknown",
+            }:
+                raise FormatMonographError(
+                    "Structure map 1.2 caption identifier_semantics is invalid."
+                )
+            if entry.get("domain_context") not in {
+                "general",
+                "architecture",
+                "civil_engineering",
+                "mixed",
+                "unknown",
+            }:
+                raise FormatMonographError(
+                    "Structure map 1.2 caption domain_context is invalid."
+                )
+            if entry.get("domain_confidence") not in {"high", "medium", "low"}:
+                raise FormatMonographError(
+                    "Structure map 1.2 caption domain_confidence is invalid."
+                )
+            if action != "move_caption" and entry.get("migrate_outside_table"):
+                raise FormatMonographError(
+                    "Caption relocation requires the separate move_caption action."
+                )
+            if action == "replace_identifier":
+                required = {
+                    "identifier_span",
+                    "identifier_sha256",
+                    "identifier_prefix_sha256",
+                    "identifier_suffix_sha256",
+                    "title_text_sha256",
+                    "title_span_start",
+                    "replacement_identifier",
+                }
+                missing = sorted(required - set(entry))
+                if missing or entry.get("replacement_confirmed") is not True:
+                    raise FormatMonographError(
+                        "Manual caption identifier replacement requires an exact boundary, "
+                        "hashes, replacement_identifier, and replacement_confirmed=true."
+                    )
+                if entry.get("numbering_mode") != "manual_text":
+                    raise FormatMonographError(
+                        "Manual caption identifier replacement requires numbering_mode=manual_text."
+                    )
+            elif action == "convert_to_seq":
+                required = {
+                    "heading_level",
+                    "cached_hierarchy",
+                    "cached_sequence",
+                    "sequence_name",
+                }
+                if required - set(entry):
+                    raise FormatMonographError(
+                        "SEQ conversion requires an unambiguous legacy caption boundary."
+                    )
+                if entry.get("numbering_mode") != "seq_field":
+                    raise FormatMonographError(
+                        "SEQ conversion requires numbering_mode=seq_field."
+                    )
+                if entry.get("hierarchy_status") not in {"match", "accepted"}:
+                    raise FormatMonographError(
+                        "SEQ conversion hierarchy must match or be explicitly accepted."
+                    )
+            elif action == "move_caption":
+                if not entry.get("migrate_outside_table"):
+                    raise FormatMonographError(
+                        "move_caption requires migrate_outside_table=true."
+                    )
+                if entry.get("numbering_mode") != "manual_text":
+                    raise FormatMonographError(
+                        "move_caption preserves manual text; field conversion is separate."
+                    )
         numbering = value.get("numbering", {})
         if numbering.get("approved"):
             chapter_start = numbering.get("chapter_start")
@@ -685,7 +876,7 @@ def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> 
     from _common import load_document
 
     document = load_document(path)
-    if structure_map.get("schema_version") == "1.1":
+    if has_semantic_structure_map(structure_map):
         prime_structure_map_locators(document, structure_map)
     for key in ("headings", "captions"):
         for entry in structure_map.get(key, []):
@@ -842,8 +1033,83 @@ def _move_caption_before_table(
     return moved
 
 
+def _replace_caption_identifier(paragraph: Any, entry: dict[str, Any]) -> None:
+    span = entry["identifier_span"]
+    start, end = int(span["start"]), int(span["end"])
+    value = paragraph.text
+    if not 0 <= start < end <= len(value):
+        raise FormatMonographError("Approved caption identifier span is out of range.")
+    if text_sha256(value[start:end]) != entry["identifier_sha256"]:
+        raise FormatMonographError("Approved caption identifier hash does not match.")
+    if text_sha256(value[:start]) != entry["identifier_prefix_sha256"]:
+        raise FormatMonographError("Caption text before the identifier changed.")
+    if text_sha256(value[end:]) != entry["identifier_suffix_sha256"]:
+        raise FormatMonographError("Caption title or separator changed before replacement.")
+
+    runs = list(paragraph.runs)
+    if "".join(run.text for run in runs) != value:
+        raise FormatMonographError(
+            "Caption identifier crosses an unsupported inline object or hyperlink."
+        )
+    replacement = str(entry["replacement_identifier"])
+    cursor = 0
+    inserted = False
+    for run in runs:
+        run_start, run_end = cursor, cursor + len(run.text)
+        cursor = run_end
+        overlap_start, overlap_end = max(start, run_start), min(end, run_end)
+        if overlap_start >= overlap_end:
+            continue
+        unsupported = [
+            child
+            for child in run._r
+            if child.tag not in {qn("w:rPr"), qn("w:t")}
+        ]
+        if unsupported:
+            raise FormatMonographError(
+                "Caption identifier shares a run with an unsupported inline object."
+            )
+        local_start, local_end = overlap_start - run_start, overlap_end - run_start
+        before, after = run.text[:local_start], run.text[local_end:]
+        run.text = before + (replacement if not inserted else "") + after
+        inserted = True
+    if not inserted:
+        raise FormatMonographError("Approved caption identifier could not be replaced.")
+
+
+def _convert_caption_to_seq(document: Any, paragraph: Any, entry: dict[str, Any]) -> None:
+    match = CAPTION_PATTERN.match(paragraph.text)
+    if not match:
+        raise FormatMonographError(
+            f"Approved SEQ caption no longer matches at {entry.get('locator', entry.get('paragraph'))}."
+        )
+    label, hierarchy, sequence, _ = match.groups()
+    if label != entry["label"]:
+        raise FormatMonographError("Approved caption label does not match.")
+    description_start = match.start(4)
+    _remove_prefix_from_runs(paragraph, description_start)
+    insertion = 1 if paragraph._p.pPr is not None else 0
+    elements = [
+        _text_run(f"{label} "),
+        _simple_field(
+            f"STYLEREF {int(entry['heading_level'])} \\s",
+            entry.get("cached_hierarchy", hierarchy),
+        ),
+        _text_run("-"),
+        _simple_field(
+            f"SEQ {entry['sequence_name']} \\* ARABIC \\s {int(entry['heading_level'])}",
+            entry.get("cached_sequence", sequence),
+        ),
+        _text_run(" "),
+    ]
+    for element in reversed(elements):
+        paragraph._p.insert(insertion, element)
+    paragraph.style = ensure_paragraph_style(document, "Caption")
+
+
 def _apply_captions(document: Any, structure_map: dict[str, Any]) -> int:
     changed = 0
+    version = structure_map.get("schema_version")
     for entry in structure_map.get("captions", []):
         if not entry.get("approved"):
             continue
@@ -852,37 +1118,29 @@ def _apply_captions(document: Any, structure_map: dict[str, Any]) -> int:
             if entry.get("locator")
             else _verified_paragraph(document, entry)
         )
-        match = CAPTION_PATTERN.match(paragraph.text)
-        if not match:
-            raise FormatMonographError(
-                f"Approved caption no longer matches at paragraph {entry['paragraph']}."
-            )
-        label, hierarchy, sequence, _ = match.groups()
-        if label != entry["label"]:
-            raise FormatMonographError("Approved caption label does not match.")
+        if version == "1.2":
+            action = entry["action"]
+            if action in {"preserve", "style_only"}:
+                continue
+            if action == "replace_identifier":
+                _replace_caption_identifier(paragraph, entry)
+                changed += 1
+                continue
+            if action == "move_caption":
+                paragraph = _move_caption_before_table(
+                    document, paragraph, entry["locator"]
+                )
+                paragraph.style = ensure_paragraph_style(document, "Caption")
+                changed += 1
+                continue
+            if action != "convert_to_seq":
+                raise FormatMonographError(f"Unsupported caption action: {action}")
+
         if entry.get("migrate_outside_table"):
             paragraph = _move_caption_before_table(
                 document, paragraph, entry["locator"]
             )
-        description_start = match.start(4)
-        _remove_prefix_from_runs(paragraph, description_start)
-        insertion = 1 if paragraph._p.pPr is not None else 0
-        elements = [
-            _text_run(f"{label} "),
-            _simple_field(
-                f"STYLEREF {int(entry['heading_level'])} \\s",
-                entry.get("cached_hierarchy", hierarchy),
-            ),
-            _text_run("-"),
-            _simple_field(
-                f"SEQ {entry['sequence_name']} \\* ARABIC \\s {int(entry['heading_level'])}",
-                entry.get("cached_sequence", sequence),
-            ),
-            _text_run(" "),
-        ]
-        for element in reversed(elements):
-            paragraph._p.insert(insertion, element)
-        paragraph.style = ensure_paragraph_style(document, "Caption")
+        _convert_caption_to_seq(document, paragraph, entry)
         changed += 1
     return changed
 
@@ -903,7 +1161,7 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
     for entry in structure_map.get("tables", []):
         if not entry.get("approved"):
             continue
-        if structure_map.get("schema_version") == "1.1" and entry.get("kind") != "data":
+        if has_semantic_structure_map(structure_map) and entry.get("kind") != "data":
             raise FormatMonographError(
                 "Only tables approved with kind=data may receive data-table rules."
             )
@@ -994,7 +1252,7 @@ def _apply_trailing_sections(document: Any, structure_map: dict[str, Any]) -> in
     approved.sort(key=lambda item: int(item["section"]), reverse=True)
     for entry in approved:
         if (
-            structure_map.get("schema_version") == "1.1"
+            has_semantic_structure_map(structure_map)
             and not entry.get("evidence", {}).get("safe_to_delete")
         ):
             raise FormatMonographError(
@@ -1009,11 +1267,30 @@ def _apply_trailing_sections(document: Any, structure_map: dict[str, Any]) -> in
 
 
 def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[dict[str, Any]]:
+    toc_targets = _apply_toc_ranges(document, structure_map)
+    heading_targets = _apply_headings(document, structure_map)
+    table_targets = _apply_tables(document, structure_map)
+    caption_targets = _apply_captions(document, structure_map)
+    caption_actions: dict[str, int] = {}
+    if structure_map.get("schema_version") == "1.2":
+        for entry in structure_map.get("captions", []):
+            if not entry.get("approved") or entry.get("action") not in {
+                "replace_identifier",
+                "convert_to_seq",
+                "move_caption",
+            }:
+                continue
+            action = str(entry["action"])
+            caption_actions[action] = caption_actions.get(action, 0) + 1
     changes = [
-        {"kind": "structure_toc", "targets": _apply_toc_ranges(document, structure_map)},
-        {"kind": "structure_headings", "targets": _apply_headings(document, structure_map)},
-        {"kind": "structure_tables", "targets": _apply_tables(document, structure_map)},
-        {"kind": "structure_captions", "targets": _apply_captions(document, structure_map)},
+        {"kind": "structure_toc", "targets": toc_targets},
+        {"kind": "structure_headings", "targets": heading_targets},
+        {"kind": "structure_tables", "targets": table_targets},
+        {
+            "kind": "structure_captions",
+            "targets": caption_targets,
+            "actions": caption_actions,
+        },
         {
             "kind": "structure_trailing_sections",
             "targets": _apply_trailing_sections(document, structure_map),
@@ -1030,6 +1307,76 @@ def _approved_indexes(structure_map: dict[str, Any], key: str) -> dict[int, dict
     }
 
 
+def _normalize_manual_identifier(
+    value: str, entries: list[dict[str, Any]]
+) -> str:
+    for entry in entries:
+        span = entry["identifier_span"]
+        start, end = int(span["start"]), int(span["end"])
+        if text_sha256(value) == entry["text_sha256"]:
+            if (
+                text_sha256(value[:start]) == entry["identifier_prefix_sha256"]
+                and text_sha256(value[start:end]) == entry["identifier_sha256"]
+                and text_sha256(value[end:]) == entry["identifier_suffix_sha256"]
+            ):
+                return value[:start] + "[[CAPTION_IDENTIFIER]]" + value[end:]
+        replacement = str(entry["replacement_identifier"])
+        replacement_end = start + len(replacement)
+        if (
+            value[start:replacement_end] == replacement
+            and text_sha256(value[:start]) == entry["identifier_prefix_sha256"]
+            and text_sha256(value[replacement_end:])
+            == entry["identifier_suffix_sha256"]
+        ):
+            return value[:start] + "[[CAPTION_IDENTIFIER]]" + value[replacement_end:]
+    return value
+
+
+def audit_caption_identifier_replacements(
+    original_path: Path, formatted_path: Path, structure_map: dict[str, Any]
+) -> list[dict[str, Any]]:
+    if structure_map.get("schema_version") != "1.2":
+        return []
+    from _common import load_document
+
+    original = load_document(original_path)
+    formatted = load_document(formatted_path)
+    results = []
+    for entry in structure_map.get("captions", []):
+        if not entry.get("approved") or entry.get("action") != "replace_identifier":
+            continue
+        source = resolve_paragraph_locator(original, entry["locator"])
+        target = resolve_paragraph_locator(formatted, entry["locator"])
+        span = entry["identifier_span"]
+        start, end = int(span["start"]), int(span["end"])
+        title_start = int(entry["title_span_start"])
+        source_ok = (
+            text_sha256(source.text) == entry["text_sha256"]
+            and text_sha256(source.text[start:end]) == entry["identifier_sha256"]
+            and text_sha256(source.text[title_start:]) == entry["title_text_sha256"]
+        )
+        expected = (
+            source.text[:start]
+            + str(entry["replacement_identifier"])
+            + source.text[end:]
+        )
+        replacement_end = start + len(str(entry["replacement_identifier"]))
+        title_shift = replacement_end - end
+        title_preserved = text_sha256(target.text[title_start + title_shift :]) == entry[
+            "title_text_sha256"
+        ]
+        passed = source_ok and target.text == expected and title_preserved
+        results.append(
+            {
+                "locator": entry["locator"],
+                "status": "pass" if passed else "fail",
+                "identifier_changed_as_approved": target.text == expected,
+                "title_preserved": title_preserved,
+            }
+        )
+    return results
+
+
 def structure_content_inventory(
     path: Path, structure_map: dict[str, Any]
 ) -> dict[str, list[str]]:
@@ -1040,7 +1387,17 @@ def structure_content_inventory(
         for index in range(int(entry["start_paragraph"]), int(entry["end_paragraph"]) + 1)
     }
     headings = _approved_indexes(structure_map, "headings")
-    captions = _approved_indexes(structure_map, "captions")
+    captions = {
+        index: entry
+        for index, entry in _approved_indexes(structure_map, "captions").items()
+        if structure_map.get("schema_version") != "1.2"
+        or entry.get("action") == "convert_to_seq"
+    }
+    identifier_replacements = [
+        entry
+        for entry in structure_map.get("captions", [])
+        if entry.get("approved") and entry.get("action") == "replace_identifier"
+    ]
     migrated_caption_hashes = {
         entry["text_sha256"]
         for entry in structure_map.get("captions", [])
@@ -1048,7 +1405,16 @@ def structure_content_inventory(
         and entry.get("migrate_outside_table")
         and entry.get("locator", {}).get("kind") == "table_cell_paragraph"
     }
-    has_migrated_captions = bool(migrated_caption_hashes)
+    manual_migrated_caption_hashes = {
+        entry["text_sha256"]
+        for entry in structure_map.get("captions", [])
+        if entry.get("approved")
+        and entry.get("action") == "move_caption"
+        and entry.get("migrate_outside_table")
+    }
+    has_migrated_captions = bool(
+        migrated_caption_hashes - manual_migrated_caption_hashes
+    )
     tail_cutoffs = []
     for entry in structure_map.get("trailing_empty_sections", []):
         if not entry.get("approved_delete"):
@@ -1079,8 +1445,11 @@ def structure_content_inventory(
                     continue
                 value = _paragraph_text_without_field_results(paragraph)
                 value = FIELD_MARKER_PATTERN.sub("", value)
+                value = _normalize_manual_identifier(value, identifier_replacements)
                 original_caption = CAPTION_PATTERN.match(value)
-                if text_sha256(value) in migrated_caption_hashes and original_caption:
+                if text_sha256(value) in manual_migrated_caption_hashes:
+                    value = "[[MOVED_MANUAL_CAPTION]]"
+                elif text_sha256(value) in migrated_caption_hashes and original_caption:
                     value = f"{original_caption.group(1)} {original_caption.group(4)}"
                 elif has_migrated_captions and direct_body_paragraph:
                     styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
