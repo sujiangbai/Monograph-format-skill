@@ -529,7 +529,129 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                     "match" if observed == current_chapter else "mismatch"
                 )
             caption["paragraph"] = index
-            cap…1397 tokens truncated… be approved.")
+            captions.append(caption)
+            role = "figure_caption" if caption["label"] == "图" else "table_caption"
+        else:
+            role = _role_for_paragraph(paragraph, detected_level)
+        if value.strip():
+            paragraph_roles.append(
+                {
+                    "locator": _body_locator(index),
+                    "text_sha256": text_sha256(value),
+                    "role": role,
+                    "source_style": paragraph.style.name if paragraph.style else None,
+                    "direct_format_sha256": _paragraph_style_signature(paragraph),
+                    "approved": False,
+                }
+            )
+
+    tables = []
+    for table_index, table in enumerate(document.tables):
+        caption_row = None
+        header_rows: list[int] = []
+        seen_cells: set[int] = set()
+        for row_index, row in enumerate(table.rows):
+            for cell_index, cell in enumerate(row.cells):
+                if id(cell._tc) in seen_cells:
+                    continue
+                seen_cells.add(id(cell._tc))
+                for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                    locator = _cell_locator(
+                        table_index, row_index, cell_index, paragraph_index
+                    )
+                    caption = _caption_entry(paragraph.text, locator)
+                    if not caption:
+                        continue
+                    if (
+                        caption["completeness"] == "complete"
+                        and len(set(chapter_starts)) == 1
+                    ):
+                        observed = int(caption["cached_hierarchy"].split(".")[0])
+                        caption["hierarchy_status"] = (
+                            "match" if observed == chapter_starts[0] else "mismatch"
+                        )
+                    caption["migrate_outside_table"] = False
+                    captions.append(caption)
+                    paragraph_roles.append(
+                        {
+                            "locator": locator,
+                            "text_sha256": text_sha256(paragraph.text),
+                            "role": (
+                                "figure_caption"
+                                if caption["label"] == "图"
+                                else "table_caption"
+                            ),
+                            "source_style": paragraph.style.name if paragraph.style else None,
+                            "direct_format_sha256": _paragraph_style_signature(paragraph),
+                            "approved": False,
+                        }
+                    )
+                    if row_index == 0 and len({id(item._tc) for item in row.cells}) == 1:
+                        caption_row = 0
+                        if len(table.rows) > 1:
+                            header_rows = [1]
+
+        first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
+        tables.append(
+            {
+                "table": table_index,
+                "table_text_sha256": _table_text_hash(table),
+                "first_row_sha256": text_sha256(first_row),
+                "kind": "unknown",
+                "caption_row": caption_row,
+                "header_rows": header_rows,
+                "repeat_header_rows": [],
+                "prevent_normal_row_split": False,
+                "approved": False,
+            }
+        )
+
+    return {
+        "schema_version": "1.1",
+        "status": "candidate",
+        "source_content_fingerprint_sha256": content_fingerprint(path),
+        "paragraph_roles": paragraph_roles,
+        "numbering": {
+            "mode": "single_chapter" if len(set(chapter_starts)) == 1 else "whole_book",
+            "chapter_start": chapter_starts[0] if chapter_starts else None,
+            "heading_levels": 4,
+            "expected_progression": "strict",
+            "approved": False,
+            "anomalies": _numbering_anomalies(headings),
+        },
+        "toc_ranges": [],
+        "headings": headings,
+        "captions": captions,
+        "tables": tables,
+        "trailing_empty_sections": _trailing_empty_sections(document),
+        "conflicts": [],
+    }
+
+
+def load_structure_map(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FormatMonographError(f"Invalid structure map: {path}: {exc}") from exc
+    if value.get("schema_version") not in {"1.0", "1.1"}:
+        raise FormatMonographError("Structure map schema_version must be 1.0 or 1.1.")
+    if value.get("status") != "approved":
+        raise FormatMonographError("Structure map status must be approved.")
+    if value.get("conflicts"):
+        raise FormatMonographError("Structure map contains unresolved conflicts.")
+    if value.get("schema_version") == "1.1":
+        for entry in value.get("paragraph_roles", []):
+            if entry.get("approved") and entry.get("role") == "unknown":
+                raise FormatMonographError("Approved paragraph role cannot be unknown.")
+            if "locator" not in entry or "text_sha256" not in entry:
+                raise FormatMonographError(
+                    "Structure map 1.1 paragraph roles require locator and text_sha256."
+                )
+        for entry in value.get("captions", []):
+            if not entry.get("approved"):
+                continue
+            if entry.get("completeness") != "complete":
+                raise FormatMonographError("Incomplete captions cannot be approved.")
             if entry.get("hierarchy_status") not in {"match", "accepted"}:
                 raise FormatMonographError(
                     "Caption hierarchy must match or be explicitly accepted."
