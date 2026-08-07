@@ -22,6 +22,12 @@ from _common import (
     summarize_rule,
 )
 from validate_profile import validate
+from structure_map import (
+    apply_structure_map,
+    load_structure_map,
+    structure_content_fingerprint,
+    validate_structure_map_source,
+)
 
 
 def output_paths(input_path: Path, output_dir: Path) -> tuple[Path, Path, Path]:
@@ -209,6 +215,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
     parser.add_argument("--profile", required=True, type=Path)
+    parser.add_argument(
+        "--structure-map",
+        type=Path,
+        help="Caller-approved structure map generated during inspection.",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
@@ -224,6 +235,10 @@ def main() -> int:
             raise FormatMonographError("Profile validation failed: " + "; ".join(errors))
         if profile["approval"]["status"] != "approved":
             raise FormatMonographError("Profile approval.status must be approved.")
+        structure_map = None
+        if args.structure_map:
+            structure_map = load_structure_map(args.structure_map)
+            validate_structure_map_source(args.input, structure_map)
 
         formatted_path, review_path, report_path = output_paths(args.input, args.output_dir)
         args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -241,12 +256,20 @@ def main() -> int:
                 + ". Obtain caller QA approval before using --allow-missing-fonts."
             )
         original_objects = protected_object_manifest(args.input)
-        original_fp = content_fingerprint(
-            args.input, normalize_derived=normalize_derived
+        original_fp = (
+            structure_content_fingerprint(args.input, structure_map)
+            if structure_map
+            else content_fingerprint(args.input, normalize_derived=normalize_derived)
         )
         document = load_document(args.input)
         changes: list[dict] = []
         manual: list[dict] = []
+
+        if structure_map:
+            for change in apply_structure_map(document, structure_map):
+                _changes = getattr(document, "_format_monograph_derived_changes", [])
+                _changes.append(change)
+                setattr(document, "_format_monograph_derived_changes", _changes)
 
         for rule in profile["rules"]:
             if rule["status"] != "approved":
@@ -268,8 +291,10 @@ def main() -> int:
             getattr(document, "_format_monograph_derived_changes", [])
         )
         document.save(str(formatted_path))
-        formatted_fp = content_fingerprint(
-            formatted_path, normalize_derived=normalize_derived
+        formatted_fp = (
+            structure_content_fingerprint(formatted_path, structure_map)
+            if structure_map
+            else content_fingerprint(formatted_path, normalize_derived=normalize_derived)
         )
         formatted_objects = protected_object_manifest(formatted_path)
         protected_objects_ok = original_objects == formatted_objects
@@ -300,9 +325,13 @@ def main() -> int:
                 initials="FM",
             )
         review.save(str(review_path))
+        review_fp = (
+            structure_content_fingerprint(review_path, structure_map)
+            if structure_map
+            else content_fingerprint(review_path, normalize_derived=normalize_derived)
+        )
         if (
-            content_fingerprint(review_path, normalize_derived=normalize_derived)
-            != original_fp
+            review_fp != original_fp
             or protected_object_manifest(review_path) != original_objects
         ):
             review_path.unlink(missing_ok=True)

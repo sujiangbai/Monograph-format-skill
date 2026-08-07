@@ -24,6 +24,7 @@ from _common import (
     write_json,
 )
 from validate_profile import validate
+from structure_map import load_structure_map, structure_content_fingerprint
 
 
 def close(actual: Any, expected: Any, tolerance: float = 0.05) -> bool:
@@ -300,6 +301,7 @@ def main() -> int:
     parser.add_argument("original", type=Path)
     parser.add_argument("formatted", type=Path)
     parser.add_argument("--profile", required=True, type=Path)
+    parser.add_argument("--structure-map", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -308,8 +310,17 @@ def main() -> int:
         if profile_errors:
             raise FormatMonographError("Profile validation failed: " + "; ".join(profile_errors))
         normalize = uses_derived_normalization(profile)
-        original_fp = content_fingerprint(args.original, normalize_derived=normalize)
-        formatted_fp = content_fingerprint(args.formatted, normalize_derived=normalize)
+        structure_map = load_structure_map(args.structure_map) if args.structure_map else None
+        original_fp = (
+            structure_content_fingerprint(args.original, structure_map)
+            if structure_map
+            else content_fingerprint(args.original, normalize_derived=normalize)
+        )
+        formatted_fp = (
+            structure_content_fingerprint(args.formatted, structure_map)
+            if structure_map
+            else content_fingerprint(args.formatted, normalize_derived=normalize)
+        )
         original_objects = protected_object_manifest(args.original)
         formatted_objects = protected_object_manifest(args.formatted)
         objects_ok = original_objects == formatted_objects

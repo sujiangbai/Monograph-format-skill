@@ -21,6 +21,7 @@ from _common import (
     word_xml_counts,
     write_json,
 )
+from structure_map import candidate_structure_map
 
 
 def length_points(value) -> float | None:
@@ -161,16 +162,29 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--structure-map-output",
+        type=Path,
+        help="Write a text-free candidate structure map for caller QA.",
+    )
     args = parser.parse_args()
     try:
         result = inventory(args.input)
         write_json(args.output, result)
+        if args.structure_map_output:
+            write_json(args.structure_map_output, candidate_structure_map(args.input))
     except FormatMonographError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(
         json.dumps(
-            {"output": str(args.output), "fingerprint": result["content_fingerprint_sha256"]},
+            {
+                "output": str(args.output),
+                "structure_map_output": (
+                    str(args.structure_map_output) if args.structure_map_output else None
+                ),
+                "fingerprint": result["content_fingerprint_sha256"],
+            },
             ensure_ascii=False,
         )
     )

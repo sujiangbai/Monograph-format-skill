@@ -1,6 +1,6 @@
 # 能力等级
 
-先运行 `scripts/check_environment.py --json`，再选择模式。
+先运行 `scripts/check_environment.py --json`，分别读取 `inspection`、`profile_validation`、`docx_editing` 和 `rendering` 四项能力，再选择模式。某一项缺失不应被误报为其他能力也缺失。
 
 ## 完整模式
 
@@ -8,7 +8,7 @@
 
 - Python 3.11 或更高版本。
 - `python-docx`、`lxml`、`jsonschema` 和 `PyMuPDF`。
-- LibreOffice `soffice` 或等效的 DOCX 渲染器。
+- LibreOffice `soffice` 或当前 Agent 能实际调用并逐页输出图像的等效 DOCX 渲染器。
 - 可读写用户指定的任务目录。
 - 能够保留和验证文档中的可编辑公式对象。
 
@@ -16,13 +16,13 @@
 
 ## 结构模式
 
-需要 Python 和 DOCX 依赖，但没有可用渲染器。允许结构修改和审计，但必须先获得用户接受降级，并在报告中写明未进行视觉 QA。
+需要 `inspection`、`profile_validation` 和 `docx_editing` 能力，但没有可用 `rendering` 能力。允许结构修改和审计，但必须先获得用户接受降级，并在报告中写明未进行视觉 QA。
 
 如果必需字体缺失，`apply_profile.py` 默认阻塞。只有当前调用者完成 QA 并明确接受后，才可使用 `--allow-missing-fonts`；报告必须列出缺失字体且视觉验收仍为未完成。
 
 ## 分析模式
 
-无法执行核心脚本、缺少 DOCX 依赖，或不能保持和验证可编辑公式。只允许分析资料、起草配置、列出冲突和提出 QA。不得修改文件、以图片替代公式或声称验证通过。
+无法执行核心脚本、缺少 `docx_editing` 能力，或不能保持和验证可编辑公式。只允许分析资料、起草配置、列出冲突和提出 QA。仅缺少 `profile_validation` 时可以盘点 DOCX，但不得批准或应用未经模式验证的配置。不得修改文件、以图片替代公式或声称验证通过。
 
 ## 环境原则
 

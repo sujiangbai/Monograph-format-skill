@@ -65,15 +65,17 @@ def main() -> int:
 
     packages = package_status()
     python_ok = sys.version_info >= (3, 11)
-    docx_ok = python_ok and all(
-        packages[name]["available"] for name in ("python-docx", "jsonschema", "lxml")
+    inspection_ok = python_ok and all(
+        packages[name]["available"] for name in ("python-docx", "lxml")
     )
+    validation_ok = python_ok and bool(packages["jsonschema"]["available"])
+    editing_ok = inspection_ok
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     pymupdf_ok = bool(packages["PyMuPDF"]["available"])
 
-    if docx_ok and soffice and pymupdf_ok:
+    if editing_ok and validation_ok and soffice and pymupdf_ok:
         mode = "full"
-    elif docx_ok:
+    elif editing_ok and validation_ok:
         mode = "structural"
     else:
         mode = "analysis"
@@ -92,6 +94,12 @@ def main() -> int:
             "machine": platform.machine(),
         },
         "packages": packages,
+        "capabilities": {
+            "inspection": inspection_ok,
+            "profile_validation": validation_ok,
+            "docx_editing": editing_ok,
+            "rendering": bool(soffice and pymupdf_ok),
+        },
         "rendering": {
             "soffice": soffice,
             "pymupdf": pymupdf_ok,
@@ -102,8 +110,10 @@ def main() -> int:
     }
     if not python_ok:
         result["limitations"].append("Python 3.11 or newer is required.")
-    if not docx_ok:
-        result["limitations"].append("DOCX processing dependencies are incomplete.")
+    if not inspection_ok:
+        result["limitations"].append("DOCX inspection dependencies are incomplete.")
+    if not validation_ok:
+        result["limitations"].append("Profile validation dependency jsonschema was not found.")
     if not soffice:
         result["limitations"].append("LibreOffice soffice was not found.")
     if not pymupdf_ok:
