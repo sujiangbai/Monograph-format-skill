@@ -11,7 +11,7 @@ Apply only approved formatting rules. Preserve the source DOCX and all authored 
 
 1. Locate this skill directory and resolve every referenced path relative to it.
 2. Read [capability-levels.md](references/capability-levels.md).
-3. Run `<python> scripts/check_environment.py --json`.
+3. Run `<python> scripts/check_environment.py --json`. When auto-discovery fails, use `--renderer <path>` or set `FORMAT_MONOGRAPH_RENDERER`.
 4. Select the reported capability mode. Never claim a higher mode.
 5. Keep source materials and generated documents outside this skill directory.
 
@@ -43,8 +43,9 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 1. Read [structure-map.md](references/structure-map.md).
 2. Run:
    `<python> scripts/inspect_docx.py <input.docx> --output <inventory.json> --structure-map-output <candidate-structure-map.json>`
-3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, heading levels, captions, cross-page tables, and trailing sections.
+3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, chapter start and heading progression, captions, table kinds, exact header rows, cross-page tables, and trailing-section evidence.
 4. Ask the caller to approve each proposed structural operation. Keep uncertain entries unapproved and report them; never infer approval from profile approval.
+   For schema 1.1, mark body/title/front-matter roles explicitly, approve only `kind=data` tables for data-table rules, and leave incomplete or hierarchy-mismatched captions report-only.
 5. Set the map status to `approved`, then bind it to the unchanged source:
    `<python> scripts/validate_structure_map.py <approved-structure-map.json> --source <input.docx>`
 6. Run:
@@ -69,13 +70,13 @@ For a whole book, use one source-bound structure map that covers the entire DOCX
 
 ## Fields and numbering
 
-Use real Word fields and linked numbering only when the profile explicitly approves them. Explicit markers are `[[TOC]]`, `[[PAGE]]`, `[[SEQ:name]]`, `[[REF:name]]`, and `[[PAGEREF:name]]`. Remove manual heading prefixes only when they match an approved, unambiguous pattern. Otherwise stop and ask.
+Use real Word fields and linked numbering only when the profile and structure map explicitly approve them. Explicit markers are `[[TOC]]`, `[[PAGE]]`, `[[SEQ:name]]`, `[[REF:name]]`, and `[[PAGEREF:name]]`. Remove manual heading prefixes only when they match an approved, unambiguous pattern. Use the approved `chapter_start` for a chapter excerpt and validate progression across a whole book. Otherwise stop and ask.
 
 ## Render and verify
 
 In full mode, run:
 
-`<python> scripts/render_docx.py <formatted.docx> --output-dir <render-directory>`
+`<python> scripts/render_docx.py <formatted.docx> --output-dir <render-directory> [--renderer <path>]`
 
 Open every generated page image at full readable size. Check every page for clipping, overlap, missing glyphs, broken tables, bad page breaks, misplaced figures, incorrect headers or footers, and visibly rasterized or missing equations. Fix, re-audit, and re-render after every layout-sensitive change.
 
