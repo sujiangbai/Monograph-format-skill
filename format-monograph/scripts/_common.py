@@ -581,7 +581,307 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
             setattr(paragraph_format, attr, bool(properties[key]))
 
 
-…2969 tokens truncated…ld)
+def ensure_paragraph_style(document: Any, style_name: str) -> Any:
+    try:
+        return document.styles[style_name]
+    except KeyError:
+        style = document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        if style_name != "Normal":
+            style.base_style = document.styles["Normal"]
+        return style
+
+
+def _drop_attributes(element: Any, names: tuple[str, ...]) -> None:
+    for name in names:
+        element.attrib.pop(qn(f"w:{name}"), None)
+    if not element.attrib and len(element) == 0 and element.getparent() is not None:
+        element.getparent().remove(element)
+
+
+def clear_controlled_direct_format(paragraph: Any, properties: dict[str, Any]) -> None:
+    p_pr = paragraph._p.pPr
+    if p_pr is not None:
+        if "alignment" in properties:
+            element = p_pr.find(qn("w:jc"))
+            if element is not None:
+                p_pr.remove(element)
+
+        spacing_keys = {
+            "space_before_pt": ("before", "beforeLines", "beforeAutospacing"),
+            "space_after_pt": ("after", "afterLines", "afterAutospacing"),
+            "line_spacing": ("line", "lineRule"),
+            "line_spacing_pt": ("line", "lineRule"),
+            "line_spacing_rule": ("line", "lineRule"),
+        }
+        spacing = p_pr.find(qn("w:spacing"))
+        if spacing is not None:
+            attrs = tuple(
+                attr
+                for key, values in spacing_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(spacing, attrs)
+
+        indent_keys = {
+            "first_line_indent_pt": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "first_line_indent_chars": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "left_indent_pt": ("left", "leftChars", "start", "startChars"),
+            "right_indent_pt": ("right", "rightChars", "end", "endChars"),
+        }
+        indent = p_pr.find(qn("w:ind"))
+        if indent is not None:
+            attrs = tuple(
+                attr
+                for key, values in indent_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(indent, attrs)
+
+        for key, tag in (
+            ("keep_with_next", "keepNext"),
+            ("keep_together", "keepLines"),
+            ("page_break_before", "pageBreakBefore"),
+            ("widow_control", "widowControl"),
+        ):
+            element = p_pr.find(qn(f"w:{tag}"))
+            if key in properties and element is not None:
+                p_pr.remove(element)
+
+    for run in paragraph.runs:
+        r_pr = run._r.rPr
+        if r_pr is None:
+            continue
+        if any(
+            key in properties
+            for key in (
+                "font_name",
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_name_complex_script",
+            )
+        ):
+            r_fonts = r_pr.find(qn("w:rFonts"))
+            if r_fonts is not None:
+                attrs = []
+                if "font_name" in properties:
+                    attrs.extend(("ascii", "hAnsi", "eastAsia", "cs"))
+                if "font_name_ascii" in properties:
+                    attrs.extend(("ascii", "hAnsi"))
+                if "font_name_east_asia" in properties:
+                    attrs.append("eastAsia")
+                if "font_name_complex_script" in properties:
+                    attrs.append("cs")
+                _drop_attributes(r_fonts, tuple(attrs))
+        for key, tags in (
+            ("font_size_pt", ("sz", "szCs")),
+            ("bold", ("b", "bCs")),
+            ("italic", ("i", "iCs")),
+            ("color_hex", ("color",)),
+        ):
+            if key not in properties:
+                continue
+            for tag in tags:
+                element = r_pr.find(qn(f"w:{tag}"))
+                if element is not None:
+                    r_pr.remove(element)
+
+
+def apply_style_rule_to_paragraphs(
+    document: Any, rule: dict[str, Any], paragraphs: Iterable[Any]
+) -> int:
+    style_name = style_name_for_selector(rule["selector"])
+    if style_name is None:
+        raise FormatMonographError(
+            f"Rule {rule['id']} has no paragraph style mapping."
+        )
+    style = ensure_paragraph_style(document, style_name)
+    apply_style_properties(style, rule["properties"])
+    targets = list(paragraphs)
+    for paragraph in targets:
+        paragraph.style = style
+        clear_controlled_direct_format(paragraph, rule["properties"])
+    return len(targets)
+
+
+def _set_document_toggle(document: Any, name: str, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn(f"w:{name}"))
+    if enabled:
+        if element is None:
+            element = OxmlElement(f"w:{name}")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
+    sections = list(document.sections)
+    page_size_policy = properties.get("page_size_policy")
+    if page_size_policy not in {None, "preserve"}:
+        raise FormatMonographError(f"Unsupported page_size_policy: {page_size_policy}")
+
+    explicit_size = "page_width_mm" in properties or "page_height_mm" in properties
+    for section in sections:
+        if "page_width_mm" in properties:
+            section.page_width = Mm(float(properties["page_width_mm"]))
+        if "page_height_mm" in properties:
+            section.page_height = Mm(float(properties["page_height_mm"]))
+        if "orientation" in properties:
+            orientation = str(properties["orientation"]).lower()
+            if orientation not in {"portrait", "landscape"}:
+                raise FormatMonographError(f"Unsupported orientation: {orientation}")
+            target = WD_ORIENT.PORTRAIT if orientation == "portrait" else WD_ORIENT.LANDSCAPE
+            if section.orientation != target and not explicit_size:
+                section.page_width, section.page_height = section.page_height, section.page_width
+            section.orientation = target
+
+        for key, attr in (
+            ("margin_top_mm", "top_margin"),
+            ("margin_bottom_mm", "bottom_margin"),
+            ("margin_left_mm", "left_margin"),
+            ("margin_right_mm", "right_margin"),
+            ("gutter_mm", "gutter"),
+        ):
+            if key in properties:
+                setattr(section, attr, Mm(float(properties[key])))
+
+        width_mm = float(section.page_width.mm)
+        height_mm = float(section.page_height.mm)
+        ratio_values = (
+            ("margin_inner_ratio", "left_margin", width_mm),
+            ("margin_outer_ratio", "right_margin", width_mm),
+            ("margin_top_ratio", "top_margin", height_mm),
+            ("margin_bottom_ratio", "bottom_margin", height_mm),
+            ("header_distance_ratio", "header_distance", height_mm),
+            ("footer_distance_ratio", "footer_distance", height_mm),
+        )
+        for key, attr, basis in ratio_values:
+            if key in properties:
+                ratio = float(properties[key])
+                if not 0 <= ratio < 0.5:
+                    raise FormatMonographError(f"{key} must be between 0 and 0.5.")
+                setattr(section, attr, Mm(basis * ratio))
+
+        if "different_first_page_header_footer" in properties:
+            section.different_first_page_header_footer = bool(
+                properties["different_first_page_header_footer"]
+            )
+
+    if "odd_and_even_pages_header_footer" in properties:
+        document.settings.odd_and_even_pages_header_footer = bool(
+            properties["odd_and_even_pages_header_footer"]
+        )
+    if "mirror_margins" in properties:
+        _set_document_toggle(document, "mirrorMargins", bool(properties["mirror_margins"]))
+
+    return len(sections)
+
+def _set_repeat_table_header(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:tblHeader"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:tblHeader")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def _set_prevent_row_split(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:cantSplit"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:cantSplit")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def apply_table_properties(
+    document: Any,
+    properties: dict[str, Any],
+    targets: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> int:
+    selected = targets if targets is not None else [(table, {}) for table in document.tables]
+    for table, entry in selected:
+        if "table_style" in properties:
+            table.style = properties["table_style"]
+        if "alignment" in properties:
+            value = properties["alignment"]
+            if value not in TABLE_ALIGNMENTS:
+                raise FormatMonographError(f"Unsupported table alignment: {value}")
+            table.alignment = TABLE_ALIGNMENTS[value]
+        if "repeat_header_row" in properties and table.rows:
+            header_rows = entry.get("repeat_header_rows", [0])
+            for row_index in header_rows:
+                if 0 <= int(row_index) < len(table.rows):
+                    _set_repeat_table_header(
+                        table.rows[int(row_index)], bool(properties["repeat_header_row"])
+                    )
+        if "prevent_row_split" in properties:
+            caption_row = entry.get("caption_row")
+            for row_index, row in enumerate(table.rows):
+                if caption_row is not None and row_index == int(caption_row):
+                    continue
+                _set_prevent_row_split(row, bool(properties["prevent_row_split"]))
+        for row in table.rows:
+            for cell in row.cells:
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    return len(selected)
+
+
+
+def _record_derived_change(document: Any, change: dict[str, Any]) -> None:
+    changes = getattr(document, "_format_monograph_derived_changes", None)
+    if changes is None:
+        changes = []
+        setattr(document, "_format_monograph_derived_changes", changes)
+    changes.append(change)
+
+
+def _set_update_fields_on_open(document: Any, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn("w:updateFields"))
+    if enabled:
+        if element is None:
+            element = OxmlElement("w:updateFields")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def _mark_fields_dirty(document: Any) -> int:
+    root = document.element
+    fields = root.xpath(".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']")
+    for field in fields:
+        field.set(qn("w:dirty"), "true")
+    return len(fields)
+
+
+def _clear_paragraph_content(paragraph: Any) -> None:
+    p = paragraph._p
+    for child in list(p):
+        if child.tag != qn("w:pPr"):
+            p.remove(child)
+
+
+def _append_simple_field(paragraph: Any, instruction: str, placeholder: str) -> None:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = placeholder
+    run.append(text)
+    field.append(run)
+    paragraph._p.append(field)
 
 
 def _field_instruction_for_marker(marker: str) -> tuple[str, str] | None:
