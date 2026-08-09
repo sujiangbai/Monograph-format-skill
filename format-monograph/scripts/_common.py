@@ -121,6 +121,20 @@ TABLE_PROPERTIES = {
     "alignment",
     "repeat_header_row",
     "prevent_row_split",
+    "available_width_percent",
+    "preferred_column_widths_percent",
+    "allow_autofit",
+    "cell_margins_mm",
+    "vertical_alignment",
+    "border_preset",
+    "column_roles",
+    "column_alignments",
+    "header_bold",
+    "header_shading_hex",
+    "font_name_ascii",
+    "font_name_east_asia",
+    "font_size_pt",
+    "line_spacing_pt",
 }
 
 FIELD_PROPERTIES = {
@@ -813,6 +827,193 @@ def _set_prevent_row_split(row: Any, enabled: bool) -> None:
         tr_pr.remove(existing)
 
 
+def _table_effective_properties(
+    properties: dict[str, Any], entry: dict[str, Any]
+) -> dict[str, Any]:
+    result = dict(properties)
+    visual = entry.get("visual", {})
+    if visual.get("approved"):
+        result.update(
+            {
+                key: value
+                for key, value in visual.items()
+                if key not in {"approved", "orientation", "landscape_approved"}
+            }
+        )
+    return result
+
+
+def _set_table_width_percent(table: Any, value: float) -> None:
+    if not 1 <= value <= 100:
+        raise FormatMonographError("available_width_percent must be between 1 and 100.")
+    tbl_pr = table._tbl.tblPr
+    width = tbl_pr.find(qn("w:tblW"))
+    if width is None:
+        width = OxmlElement("w:tblW")
+        tbl_pr.insert(0, width)
+    width.set(qn("w:type"), "pct")
+    width.set(qn("w:w"), str(round(value * 50)))
+
+
+def _set_column_widths_percent(table: Any, values: list[Any]) -> None:
+    if len(values) != len(table.columns):
+        raise FormatMonographError(
+            "preferred_column_widths_percent must match the table column count."
+        )
+    widths = [float(value) for value in values]
+    if any(value <= 0 for value in widths) or abs(sum(widths) - 100.0) > 0.25:
+        raise FormatMonographError(
+            "preferred_column_widths_percent must be positive and total 100."
+        )
+    for column_index, percent in enumerate(widths):
+        for row in table.rows:
+            cell = row.cells[column_index]
+            tc_pr = cell._tc.get_or_add_tcPr()
+            width = tc_pr.find(qn("w:tcW"))
+            if width is None:
+                width = OxmlElement("w:tcW")
+                tc_pr.append(width)
+            width.set(qn("w:type"), "pct")
+            width.set(qn("w:w"), str(round(percent * 50)))
+
+
+def _set_table_cell_margins(table: Any, value: Any) -> None:
+    margins = (
+        {name: float(value) for name in ("top", "right", "bottom", "left")}
+        if isinstance(value, (int, float))
+        else {name: float(value.get(name, 0)) for name in ("top", "right", "bottom", "left")}
+    )
+    if any(amount < 0 or amount > 20 for amount in margins.values()):
+        raise FormatMonographError("cell_margins_mm values must be between 0 and 20.")
+    tbl_pr = table._tbl.tblPr
+    container = tbl_pr.find(qn("w:tblCellMar"))
+    if container is None:
+        container = OxmlElement("w:tblCellMar")
+        tbl_pr.append(container)
+    for name, amount in margins.items():
+        element = container.find(qn(f"w:{name}"))
+        if element is None:
+            element = OxmlElement(f"w:{name}")
+            container.append(element)
+        element.set(qn("w:w"), str(round(amount / 25.4 * 1440)))
+        element.set(qn("w:type"), "dxa")
+
+
+def _set_border(element: Any, name: str, *, style: str, size: int = 4) -> None:
+    border = element.find(qn(f"w:{name}"))
+    if border is None:
+        border = OxmlElement(f"w:{name}")
+        element.append(border)
+    border.set(qn("w:val"), style)
+    border.set(qn("w:sz"), str(size))
+    border.set(qn("w:space"), "0")
+    border.set(qn("w:color"), "000000")
+
+
+def _set_table_borders(table: Any, preset: str, header_rows: list[int]) -> None:
+    if preset == "preserve":
+        return
+    tbl_pr = table._tbl.tblPr
+    borders = tbl_pr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    if preset == "full_grid":
+        for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            _set_border(borders, name, style="single", size=4)
+        return
+    if preset != "three_line":
+        raise FormatMonographError(f"Unsupported table border preset: {preset}")
+    for name in ("top", "bottom"):
+        _set_border(borders, name, style="single", size=8)
+    for name in ("left", "right", "insideH", "insideV"):
+        _set_border(borders, name, style="nil", size=0)
+    for row_index in header_rows:
+        if not 0 <= row_index < len(table.rows):
+            continue
+        for cell in table.rows[row_index].cells:
+            tc_pr = cell._tc.get_or_add_tcPr()
+            cell_borders = tc_pr.find(qn("w:tcBorders"))
+            if cell_borders is None:
+                cell_borders = OxmlElement("w:tcBorders")
+                tc_pr.append(cell_borders)
+            _set_border(cell_borders, "bottom", style="single", size=4)
+
+
+def _set_cell_shading(cell: Any, color: str | None) -> None:
+    if not color:
+        return
+    value = str(color).lstrip("#").upper()
+    if not re.fullmatch(r"[0-9A-F]{6}", value):
+        raise FormatMonographError("header_shading_hex must be a six-digit hex color.")
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:fill"), value)
+
+
+def _format_table_text(
+    table: Any, properties: dict[str, Any], header_rows: list[int]
+) -> None:
+    vertical = {
+        "top": WD_CELL_VERTICAL_ALIGNMENT.TOP,
+        "center": WD_CELL_VERTICAL_ALIGNMENT.CENTER,
+        "bottom": WD_CELL_VERTICAL_ALIGNMENT.BOTTOM,
+    }
+    vertical_name = str(properties.get("vertical_alignment", "center"))
+    if vertical_name not in vertical:
+        raise FormatMonographError(
+            f"Unsupported table vertical alignment: {vertical_name}"
+        )
+    roles = list(properties.get("column_roles", []))
+    if roles and len(roles) != len(table.columns):
+        raise FormatMonographError("column_roles must match the table column count.")
+    role_alignments = {
+        "numeric": "right",
+        "unit": "center",
+        "short_code": "center",
+        "narrative": "left",
+    }
+    role_alignments.update(properties.get("column_alignments", {}))
+    for row_index, row in enumerate(table.rows):
+        for column_index, cell in enumerate(row.cells):
+            cell.vertical_alignment = vertical[vertical_name]
+            if row_index in header_rows:
+                _set_cell_shading(cell, properties.get("header_shading_hex"))
+            alignment = "center" if row_index in header_rows else role_alignments.get(
+                roles[column_index] if roles else "narrative", "left"
+            )
+            if alignment not in ALIGNMENTS:
+                raise FormatMonographError(f"Unsupported table cell alignment: {alignment}")
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = ALIGNMENTS[alignment]
+                if "line_spacing_pt" in properties:
+                    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+                    paragraph.paragraph_format.line_spacing = Pt(
+                        float(properties["line_spacing_pt"])
+                    )
+                for run in paragraph.runs:
+                    if "font_name_ascii" in properties:
+                        _set_font_attributes(
+                            run._element,
+                            str(properties["font_name_ascii"]),
+                            ("ascii", "hAnsi"),
+                        )
+                    if "font_name_east_asia" in properties:
+                        _set_font_attributes(
+                            run._element,
+                            str(properties["font_name_east_asia"]),
+                            ("eastAsia",),
+                        )
+                    if "font_size_pt" in properties:
+                        run.font.size = Pt(float(properties["font_size_pt"]))
+                    if row_index in header_rows and "header_bold" in properties:
+                        run.bold = bool(properties["header_bold"])
+
+
 def apply_table_properties(
     document: Any,
     properties: dict[str, Any],
@@ -820,29 +1021,42 @@ def apply_table_properties(
 ) -> int:
     selected = targets if targets is not None else [(table, {}) for table in document.tables]
     for table, entry in selected:
-        if "table_style" in properties:
-            table.style = properties["table_style"]
-        if "alignment" in properties:
-            value = properties["alignment"]
+        effective = _table_effective_properties(properties, entry)
+        if "table_style" in effective:
+            table.style = effective["table_style"]
+        if "alignment" in effective:
+            value = effective["alignment"]
             if value not in TABLE_ALIGNMENTS:
                 raise FormatMonographError(f"Unsupported table alignment: {value}")
             table.alignment = TABLE_ALIGNMENTS[value]
-        if "repeat_header_row" in properties and table.rows:
+        if "available_width_percent" in effective:
+            _set_table_width_percent(table, float(effective["available_width_percent"]))
+        if "preferred_column_widths_percent" in effective:
+            _set_column_widths_percent(
+                table, list(effective["preferred_column_widths_percent"])
+            )
+        if "allow_autofit" in effective:
+            table.autofit = bool(effective["allow_autofit"])
+        if "cell_margins_mm" in effective:
+            _set_table_cell_margins(table, effective["cell_margins_mm"])
+        if "repeat_header_row" in effective and table.rows:
             header_rows = entry.get("repeat_header_rows", [0])
             for row_index in header_rows:
                 if 0 <= int(row_index) < len(table.rows):
                     _set_repeat_table_header(
-                        table.rows[int(row_index)], bool(properties["repeat_header_row"])
+                        table.rows[int(row_index)], bool(effective["repeat_header_row"])
                     )
-        if "prevent_row_split" in properties:
+        if "prevent_row_split" in effective:
             caption_row = entry.get("caption_row")
             for row_index, row in enumerate(table.rows):
                 if caption_row is not None and row_index == int(caption_row):
                     continue
-                _set_prevent_row_split(row, bool(properties["prevent_row_split"]))
-        for row in table.rows:
-            for cell in row.cells:
-                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                _set_prevent_row_split(row, bool(effective["prevent_row_split"]))
+        header_rows = [int(value) for value in entry.get("header_rows", [0])]
+        _set_table_borders(
+            table, str(effective.get("border_preset", "preserve")), header_rows
+        )
+        _format_table_text(table, effective, header_rows)
     return len(selected)
 
 

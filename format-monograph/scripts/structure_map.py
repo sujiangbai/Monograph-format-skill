@@ -26,6 +26,7 @@ from _common import (
     content_fingerprint,
     ensure_paragraph_style,
 )
+from docx_pagination import apply_pagination_sections
 
 
 HEADING_PATTERNS = (
@@ -59,8 +60,8 @@ CIVIL_ENGINEERING_TERMS = (
     "截面",
     "断面",
 )
-STRUCTURE_MAP_VERSIONS = {"1.0", "1.1", "1.2", "1.3"}
-SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2", "1.3"}
+STRUCTURE_MAP_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4"}
+SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2", "1.3", "1.4"}
 CAPTION_ACTIONS = {
     "preserve",
     "style_only",
@@ -114,7 +115,7 @@ def has_semantic_structure_map(structure_map: dict[str, Any]) -> bool:
 
 
 def has_caption_actions_map(structure_map: dict[str, Any]) -> bool:
-    return structure_map.get("schema_version") in {"1.2", "1.3"}
+    return structure_map.get("schema_version") in {"1.2", "1.3", "1.4"}
 
 
 def _caption_domain(value: str, context: str = "") -> tuple[str, str]:
@@ -351,7 +352,7 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
         key = _locator_key(entry["locator"])
         cache[key] = paragraph
         verified.add(key)
-    if structure_map.get("schema_version") == "1.3":
+    if structure_map.get("schema_version") in {"1.3", "1.4"}:
         for group in structure_map.get("pagination_groups", []):
             if not group.get("approved"):
                 continue
@@ -368,6 +369,32 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
                 key = _locator_key(locator)
                 cache[key] = paragraph
                 verified.add(key)
+    if structure_map.get("schema_version") == "1.4":
+        pagination = structure_map.get("pagination_sections", {})
+        if pagination.get("approved"):
+            for name in ("toc_start", "body_start"):
+                locator = pagination.get(name)
+                if not isinstance(locator, dict):
+                    continue
+                paragraph = resolve_paragraph_locator(document, locator)
+                expected = locator.get("text_sha256")
+                if expected and text_sha256(paragraph.text) != expected:
+                    raise FormatMonographError(
+                        f"Pagination-section locator hash mismatch at {_locator_key(locator)}."
+                    )
+                key = _locator_key(locator)
+                cache[key] = paragraph
+                verified.add(key)
+        for entry in structure_map.get("trailing_empty_sections", []):
+            if not entry.get("approved_delete"):
+                continue
+            locator = entry.get("previous_boundary_locator")
+            if not isinstance(locator, dict):
+                continue
+            paragraph = resolve_paragraph_locator(document, locator)
+            key = _locator_key(locator)
+            cache[key] = paragraph
+            verified.add(key)
     setattr(document, "_format_monograph_locator_cache", cache)
     setattr(document, "_format_monograph_verified_locators", verified)
 
@@ -551,6 +578,11 @@ def _section_evidence(document: Any, sect_pr: Any) -> dict[str, Any]:
     return independent
 
 
+def _section_properties_sha256(sect_pr: Any) -> str:
+    canonical = etree.tostring(sect_pr, method="c14n", exclusive=True)
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _trailing_empty_sections(document: Any) -> list[dict[str, Any]]:
     body = document.element.body
     children = list(body)
@@ -573,19 +605,53 @@ def _trailing_empty_sections(document: Any) -> list[dict[str, Any]]:
             break
         previous_boundary = boundaries[section_index - 1][1]
         paragraph = document.paragraphs[previous_boundary]
-        final_sect_pr = document.element.body.sectPr
-        evidence = _section_evidence(document, final_sect_pr)
+        candidate_sect_pr = list(document.sections)[section_index]._sectPr
+        evidence = _section_evidence(document, candidate_sect_pr)
         candidates.append(
             {
                 "section": section_index,
                 "previous_boundary_paragraph": previous_boundary,
                 "previous_boundary_sha256": text_sha256(paragraph.text),
+                "previous_boundary_locator": _body_locator(
+                    previous_boundary, [item.text for item in document.paragraphs]
+                ),
+                "section_properties_sha256": _section_properties_sha256(candidate_sect_pr),
                 "approved_delete": False,
                 "confidence": "high" if evidence["safe_to_delete"] else "low",
                 "evidence": evidence,
             }
         )
     return candidates
+
+
+def _candidate_pagination_sections(
+    document: Any, headings: list[dict[str, Any]]
+) -> dict[str, Any]:
+    body_start = next(
+        (entry["locator"] for entry in headings if int(entry["level"]) == 1), None
+    )
+    toc_start = None
+    for index, paragraph in enumerate(document.paragraphs):
+        style_name = paragraph.style.name if paragraph.style else ""
+        instructions = " ".join(
+            paragraph._p.xpath(".//w:fldSimple/@w:instr | .//w:instrText/text()")
+        ).upper()
+        if "[[TOC]]" in paragraph.text or "TOC" in instructions or style_name.upper().startswith("TOC"):
+            toc_start = _body_locator(
+                index, [item.text for item in document.paragraphs]
+            )
+            break
+    return {
+        "approved": False,
+        "toc_start": toc_start,
+        "body_start": body_start,
+        "number_format": "decimal",
+        "start_at": {"toc": 1, "body": 1},
+        "continue_after_body_start": True,
+        "odd_position": "outer_right",
+        "even_position": "outer_left",
+        "show_on_first_page": True,
+    }
 
 
 def _chapter_number(value: str) -> int | None:
@@ -876,6 +942,18 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                             header_rows = [1]
 
         first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
+        unique_cells = {
+            id(cell._tc) for row in table.rows for cell in row.cells
+        }
+        visible_controls = sum(
+            1
+            for character in table_text
+            if 0x2400 <= ord(character) <= 0x2426
+            or (ord(character) < 32 and character not in "\t\n\r")
+        )
+        has_floating_objects = bool(
+            table._tbl.xpath(".//wp:anchor | .//w:object | .//w:pict")
+        )
         tables.append(
             {
                 "table": table_index,
@@ -886,12 +964,32 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                 "header_rows": header_rows,
                 "repeat_header_rows": [],
                 "prevent_normal_row_split": False,
+                "complex_merge": len(unique_cells)
+                < sum(len(row.cells) for row in table.rows),
+                "has_floating_objects": has_floating_objects,
+                "visible_control_mark_candidates": visible_controls,
+                "visual": {
+                    "approved": False,
+                    "available_width_percent": 100,
+                    "allow_autofit": True,
+                    "cell_margins_mm": {
+                        "top": 1.0,
+                        "right": 1.5,
+                        "bottom": 1.0,
+                        "left": 1.5,
+                    },
+                    "vertical_alignment": "center",
+                    "border_preset": "preserve",
+                    "column_roles": ["unknown"] * len(table.columns),
+                    "orientation": "portrait",
+                    "landscape_approved": False,
+                },
                 "approved": False,
             }
         )
 
     return {
-        "schema_version": "1.3",
+        "schema_version": "1.4",
         "status": "candidate",
         "source_content_fingerprint_sha256": content_fingerprint(path),
         "paragraph_roles": paragraph_roles,
@@ -908,6 +1006,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         "captions": captions,
         "tables": tables,
         "pagination_groups": _candidate_pagination_groups(document, captions, body_values),
+        "pagination_sections": _candidate_pagination_sections(document, headings),
         "trailing_empty_sections": _trailing_empty_sections(document),
         "conflicts": [],
     }
@@ -920,7 +1019,7 @@ def load_structure_map(path: Path) -> dict[str, Any]:
         raise FormatMonographError(f"Invalid structure map: {path}: {exc}") from exc
     if value.get("schema_version") not in STRUCTURE_MAP_VERSIONS:
         raise FormatMonographError(
-            "Structure map schema_version must be 1.0, 1.1, 1.2, or 1.3."
+            "Structure map schema_version must be 1.0, 1.1, 1.2, 1.3, or 1.4."
         )
     if value.get("status") != "approved":
         raise FormatMonographError("Structure map status must be approved.")
@@ -1046,7 +1145,7 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                 raise FormatMonographError(
                     "Approved numbering contains unresolved progression anomalies."
                 )
-        if value.get("schema_version") == "1.3":
+        if value.get("schema_version") in {"1.3", "1.4"}:
             for entry in value.get("paragraph_roles", []):
                 if not entry.get("approved"):
                     continue
@@ -1088,6 +1187,75 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Approved pagination group requires an anchor locator."
                     )
+        if value.get("schema_version") == "1.4":
+            pagination = value.get("pagination_sections", {})
+            if pagination.get("approved"):
+                required = {
+                    "toc_start",
+                    "body_start",
+                    "number_format",
+                    "start_at",
+                    "continue_after_body_start",
+                    "odd_position",
+                    "even_position",
+                    "show_on_first_page",
+                }
+                if required - set(pagination):
+                    raise FormatMonographError(
+                        "Approved pagination_sections is missing required settings."
+                    )
+                if pagination.get("number_format") != "decimal":
+                    raise FormatMonographError(
+                        "V0.2.5 technical-textbook pagination requires decimal numbering."
+                    )
+                starts = pagination.get("start_at", {})
+                if starts != {"toc": 1, "body": 1}:
+                    raise FormatMonographError(
+                        "TOC and body pagination must each start at 1."
+                    )
+                if pagination.get("odd_position") != "outer_right" or pagination.get(
+                    "even_position"
+                ) != "outer_left":
+                    raise FormatMonographError(
+                        "Mirrored pagination requires odd outer-right and even outer-left."
+                    )
+                if pagination.get("show_on_first_page") is not True:
+                    raise FormatMonographError(
+                        "Approved TOC and body first pages must show page numbers."
+                    )
+                for name in ("toc_start", "body_start"):
+                    if not isinstance(pagination.get(name), dict):
+                        raise FormatMonographError(
+                            f"Approved pagination_sections requires {name} locator."
+                        )
+            for table in value.get("tables", []):
+                visual = table.get("visual", {})
+                if not table.get("approved") or not visual.get("approved"):
+                    continue
+                if table.get("kind") != "data":
+                    raise FormatMonographError(
+                        "Only approved data tables may receive visual formatting."
+                    )
+                roles = visual.get("column_roles", [])
+                if not roles or any(
+                    role not in {"numeric", "unit", "short_code", "narrative"}
+                    for role in roles
+                ):
+                    raise FormatMonographError(
+                        "Approved table visuals require a known role for every column."
+                    )
+                if visual.get("border_preset") not in {
+                    "preserve",
+                    "three_line",
+                    "full_grid",
+                }:
+                    raise FormatMonographError("Invalid approved table border preset.")
+                if visual.get("orientation") == "landscape" and visual.get(
+                    "landscape_approved"
+                ) is not True:
+                    raise FormatMonographError(
+                        "Landscape table layout requires landscape_approved=true."
+                    )
     return value
 
 
@@ -1119,6 +1287,18 @@ def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> 
             raise FormatMonographError(f"Structure-map table is out of range: {index}")
         if entry.get("table_text_sha256") and _table_text_hash(document.tables[index]) != entry["table_text_sha256"]:
             raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
+    pagination = structure_map.get("pagination_sections", {})
+    if pagination.get("approved"):
+        starts = [
+            resolve_paragraph_locator(document, pagination[name])
+            for name in ("toc_start", "body_start")
+        ]
+        if starts[0]._p.getparent().index(starts[0]._p) >= starts[1]._p.getparent().index(
+            starts[1]._p
+        ):
+            raise FormatMonographError(
+                "Approved TOC pagination start must precede the body start."
+            )
     numbering = structure_map.get("numbering", {})
     if numbering.get("approved"):
         chapter_start = int(numbering["chapter_start"])
@@ -1396,7 +1576,7 @@ def _apply_captions(document: Any, structure_map: dict[str, Any]) -> int:
             if entry.get("locator")
             else _verified_paragraph(document, entry)
         )
-        if version in {"1.2", "1.3"}:
+        if version in {"1.2", "1.3", "1.4"}:
             action = entry["action"]
             if action in {"preserve", "style_only"}:
                 continue
@@ -1449,7 +1629,7 @@ def _set_paragraph_property(paragraph: Any, name: str, enabled: bool) -> bool:
 
 
 def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
-    if structure_map.get("schema_version") != "1.3":
+    if structure_map.get("schema_version") not in {"1.3", "1.4"}:
         return 0
     changed = 0
     for entry in structure_map.get("paragraph_roles", []):
@@ -1479,7 +1659,7 @@ def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
 
 
 def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> int:
-    if structure_map.get("schema_version") != "1.3":
+    if structure_map.get("schema_version") not in {"1.3", "1.4"}:
         return 0
     changed = 0
     for group in structure_map.get("pagination_groups", []):
@@ -1506,6 +1686,60 @@ def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> in
     return changed
 
 
+def _section_properties_for_body_child(document: Any, child: Any) -> Any:
+    children = list(document.element.body)
+    position = children.index(child)
+    for candidate in children[position:]:
+        if candidate.tag == qn("w:p"):
+            p_pr = candidate.find(qn("w:pPr"))
+            sect_pr = None if p_pr is None else p_pr.find(qn("w:sectPr"))
+            if sect_pr is not None:
+                return sect_pr
+        elif candidate.tag == qn("w:sectPr"):
+            return candidate
+    raise FormatMonographError("Table section properties could not be resolved.")
+
+
+def _section_boundary(properties: Any) -> Any:
+    paragraph = OxmlElement("w:p")
+    p_pr = OxmlElement("w:pPr")
+    sect_pr = copy.deepcopy(properties)
+    section_type = sect_pr.find(qn("w:type"))
+    if section_type is None:
+        section_type = OxmlElement("w:type")
+        sect_pr.insert(0, section_type)
+    section_type.set(qn("w:val"), "nextPage")
+    pg_num = sect_pr.find(qn("w:pgNumType"))
+    if pg_num is not None:
+        pg_num.attrib.pop(qn("w:start"), None)
+    p_pr.append(sect_pr)
+    paragraph.append(p_pr)
+    return paragraph
+
+
+def _wrap_table_landscape(document: Any, table: Any) -> None:
+    body = document.element.body
+    if table._tbl.getparent() is not body:
+        raise FormatMonographError(
+            "A landscape table must be a top-level body table, not a nested layout table."
+        )
+    source = _section_properties_for_body_child(document, table._tbl)
+    portrait_boundary = _section_boundary(source)
+    landscape_boundary = _section_boundary(source)
+    landscape = landscape_boundary.find("./w:pPr/w:sectPr", namespaces=NS)
+    page_size = landscape.find(qn("w:pgSz"))
+    if page_size is None:
+        raise FormatMonographError("Landscape table requires explicit page size properties.")
+    width, height = page_size.get(qn("w:w")), page_size.get(qn("w:h"))
+    if width and height:
+        page_size.set(qn("w:w"), height)
+        page_size.set(qn("w:h"), width)
+    page_size.set(qn("w:orient"), "landscape")
+    position = list(body).index(table._tbl)
+    body.insert(position, portrait_boundary)
+    body.insert(position + 2, landscape_boundary)
+
+
 def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
     changed = 0
     for entry in structure_map.get("tables", []):
@@ -1515,7 +1749,7 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
             has_semantic_structure_map(structure_map)
             and entry.get("kind") != "data"
             and not (
-                structure_map.get("schema_version") == "1.3"
+                structure_map.get("schema_version") in {"1.3", "1.4"}
                 and entry.get("kind") == "layout"
                 and entry.get("pagination_only")
             )
@@ -1551,6 +1785,9 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
                 if caption_row is not None and row_index == int(caption_row):
                     continue
                 _set_row_property(row, "cantSplit", True)
+        visual = entry.get("visual", {})
+        if visual.get("approved") and visual.get("orientation") == "landscape":
+            _wrap_table_landscape(document, table)
         changed += 1
     return changed
 
@@ -1564,10 +1801,26 @@ def _final_section_is_empty(document: Any, boundary_index: int) -> bool:
 
 
 def _remove_final_empty_section(document: Any, entry: dict[str, Any]) -> None:
-    boundary_index = int(entry["previous_boundary_paragraph"])
-    if not 0 <= boundary_index < len(document.paragraphs):
-        raise FormatMonographError("Trailing-section boundary is out of range.")
-    boundary = document.paragraphs[boundary_index]
+    locator = entry.get("previous_boundary_locator")
+    if isinstance(locator, dict):
+        boundary = resolve_paragraph_locator(document, locator)
+        boundary_index = next(
+            (
+                index
+                for index, paragraph in enumerate(document.paragraphs)
+                if paragraph._p is boundary._p
+            ),
+            -1,
+        )
+        if boundary_index < 0:
+            raise FormatMonographError(
+                "Trailing-section boundary no longer belongs to the document."
+            )
+    else:
+        boundary_index = int(entry["previous_boundary_paragraph"])
+        if not 0 <= boundary_index < len(document.paragraphs):
+            raise FormatMonographError("Trailing-section boundary is out of range.")
+        boundary = document.paragraphs[boundary_index]
     if text_sha256(boundary.text) != entry["previous_boundary_sha256"]:
         raise FormatMonographError("Trailing-section boundary hash mismatch.")
     if not _final_section_is_empty(document, boundary_index):
@@ -1578,6 +1831,9 @@ def _remove_final_empty_section(document: Any, entry: dict[str, Any]) -> None:
     final = document.element.body.sectPr
     if previous is None or final is None:
         raise FormatMonographError("Trailing-section boundary is missing section properties.")
+    expected_section_hash = entry.get("section_properties_sha256")
+    if expected_section_hash and _section_properties_sha256(final) != expected_section_hash:
+        raise FormatMonographError("Trailing-section properties hash mismatch.")
     blocked = ("pgNumType", "titlePg")
     has_header_footer_refs = any(
         final.find(qn(f"w:{name}")) is not None
@@ -1626,13 +1882,39 @@ def _apply_trailing_sections(document: Any, structure_map: dict[str, Any]) -> in
     return len(approved)
 
 
+def _cleanup_orphan_header_footer_relationships(document: Any) -> int:
+    referenced = {
+        rel_id
+        for sect_pr in document.element.xpath(".//w:sectPr")
+        for rel_id in sect_pr.xpath(
+            "./w:headerReference/@r:id | ./w:footerReference/@r:id"
+        )
+    }
+    removable = [
+        rel_id
+        for rel_id, relationship in document.part.rels.items()
+        if relationship.reltype.rsplit("/", 1)[-1] in {"header", "footer"}
+        and rel_id not in referenced
+    ]
+    for rel_id in removable:
+        document.part.drop_rel(rel_id)
+    return len(removable)
+
+
 def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[dict[str, Any]]:
+    trailing_targets = _apply_trailing_sections(document, structure_map)
+    orphan_parts = _cleanup_orphan_header_footer_relationships(document)
     toc_targets = _apply_toc_ranges(document, structure_map)
     heading_targets = _apply_headings(document, structure_map)
     outline_targets = _apply_outline_cleanup(document, structure_map)
     table_targets = _apply_tables(document, structure_map)
     caption_targets = _apply_captions(document, structure_map)
     pagination_targets = _apply_pagination_groups(document, structure_map)
+    pagination_sections = apply_pagination_sections(
+        document,
+        structure_map.get("pagination_sections", {}),
+        resolve_paragraph_locator,
+    )
     caption_actions: dict[str, int] = {}
     if has_caption_actions_map(structure_map):
         for entry in structure_map.get("captions", []):
@@ -1657,7 +1939,16 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         {"kind": "structure_pagination", "targets": pagination_targets},
         {
             "kind": "structure_trailing_sections",
-            "targets": _apply_trailing_sections(document, structure_map),
+            "targets": trailing_targets,
+        },
+        {
+            "kind": "structure_orphan_header_footer_cleanup",
+            "targets": orphan_parts,
+        },
+        {
+            "kind": "structure_pagination_sections",
+            "targets": 1 if pagination_sections else 0,
+            "details": pagination_sections,
         },
     ]
     return [change for change in changes if change["targets"]]
@@ -1786,6 +2077,8 @@ def _legacy_toc_empty_anchors(
     structure_map: dict[str, Any],
 ) -> set[Any]:
     """Recognize empty anchors left by pre-1.3 static-TOC migration."""
+    if structure_map.get("schema_version") in {"1.3", "1.4"}:
+        return set()
     if not toc_field_paragraphs:
         return set()
     approved_lengths = [
@@ -1816,6 +2109,51 @@ def _legacy_toc_empty_anchors(
             break
         result.add(child)
         remaining -= 1
+    return result
+
+
+def _pagination_boundary_paragraphs(
+    root: etree._Element, structure_map: dict[str, Any]
+) -> set[Any]:
+    pagination = structure_map.get("pagination_sections", {})
+    if structure_map.get("schema_version") != "1.4":
+        return set()
+    result = set()
+    has_landscape_table = any(
+        entry.get("approved")
+        and entry.get("visual", {}).get("approved")
+        and entry.get("visual", {}).get("orientation") == "landscape"
+        for entry in structure_map.get("tables", [])
+    )
+    if has_landscape_table:
+        result.update(
+            paragraph
+            for paragraph in root.xpath("/w:document/w:body/w:p", namespaces=NS)
+            if paragraph.find("./w:pPr/w:sectPr", namespaces=NS) is not None
+            and not _paragraph_text_without_field_results(paragraph)
+        )
+    if not pagination.get("approved"):
+        return result
+    body_locator = pagination.get("body_start", {})
+    expected = body_locator.get("text_sha256")
+    if not expected:
+        return result
+    paragraphs = root.xpath("/w:document/w:body/w:p", namespaces=NS)
+    matches = [
+        paragraph
+        for paragraph in paragraphs
+        if text_sha256(_paragraph_text_without_field_results(paragraph)) == expected
+    ]
+    if len(matches) != 1:
+        return result
+    previous = matches[0].getprevious()
+    if (
+        previous is not None
+        and previous.tag == qn("w:p")
+        and previous.find("./w:pPr/w:sectPr", namespaces=NS) is not None
+        and not _paragraph_text_without_field_results(previous)
+    ):
+        result.add(previous)
     return result
 
 
@@ -1985,6 +2323,11 @@ def structure_content_inventory(
                 if name == "word/document.xml"
                 else set()
             )
+            pagination_boundaries = (
+                _pagination_boundary_paragraphs(root, structure_map)
+                if name == "word/document.xml"
+                else set()
+            )
             values = []
             body_index = -1
             for paragraph in root.xpath(".//w:p", namespaces=NS):
@@ -1996,7 +2339,7 @@ def structure_content_inventory(
                 if direct_body_paragraph:
                     body_index += 1
                 current_index = body_index if direct_body_paragraph else None
-                if paragraph in approved_tail_paragraphs:
+                if paragraph in approved_tail_paragraphs or paragraph in pagination_boundaries:
                     continue
                 if paragraph in toc_field_paragraphs or paragraph in legacy_toc_anchors:
                     continue
@@ -2052,7 +2395,8 @@ def structure_content_inventory(
                     else:
                         value = re.sub(r"^(图|表)\s+[-－—–]?\s*", r"\1 ", value)
                 values.append(value)
-            result[name] = values
+            if name == "word/document.xml" or any(values):
+                result[name] = values
     return result
 
 

@@ -10,7 +10,31 @@ Use a source-bound structure map for operations that reinterpret document struct
 4. Pass the same map to `apply_profile.py` and `audit_docx.py`.
 5. Regenerate the map and repeat QA whenever the source fingerprint changes.
 
-New maps use schema `1.3`; readers continue to accept `1.0`, `1.1`, and `1.2`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. Version 1.2 adds domain-aware manual caption actions and semantic paragraph roles.
+New maps use schema `1.4`; readers continue to accept `1.0` through `1.3`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. Version 1.2 adds domain-aware manual caption actions and semantic paragraph roles. Version 1.3 adds stable locators and pagination-only groups.
+
+## Schema 1.4
+
+Schema 1.4 adds approved page-number sections, stable trailing-section evidence, and per-table visual decisions.
+
+### Pagination sections
+
+`pagination_sections` requires separate stable locators for `toc_start` and `body_start`. Approval also records decimal numbering, `start_at={"toc":1,"body":1}`, continuation after the body start, odd outer-right/even outer-left placement, and visible first-page numbers.
+
+Application inserts a real next-page section before the body when needed. It starts the TOC and body independently at 1, removes later unapproved restarts, disables first-page hiding, enables odd/even footers, and ensures editable `PAGE` fields in both default and even footers. Audit fails for missing even footers, hidden first-page numbers, body restarts, or unreachable header/footer parts. Physical page counts still require target-software repagination or PDF export.
+
+### Table visuals
+
+Each table candidate reports complex merges, floating objects, and visible control-mark candidates. A `visual` block remains unapproved until the caller confirms every column role (`numeric`, `unit`, `short_code`, or `narrative`), preferred widths, cell margins, border preset, autofit, and orientation.
+
+- Only `kind=data` may receive visual formatting.
+- `border_preset` is `preserve`, `three_line`, or `full_grid`.
+- Landscape requires `orientation=landscape` and `landscape_approved=true`; application creates real sections before and after the table and keeps body numbering continuous.
+- Complex merges, floating objects, unknown roles, and visible control marks stay report-only until individually resolved.
+- Formatting never changes cell text, merge relationships, row/column counts, or media payloads.
+
+### Stable cleanup
+
+Trailing-section candidates add a boundary locator and section-properties hash. Delete approved empty tail sections from the end inward before physical TOC migration, then remove only header/footer relationships that are unreachable from every retained section. Legacy empty TOC-anchor normalization is limited to schema 1.0 through 1.2; a legitimate separator in 1.3 or later remains authored structure.
 
 ## Schema 1.3
 
@@ -60,15 +84,16 @@ Each table has `kind`: `data`, `layout`, `callout`, or `unknown`. Only approved 
 
 ### Trailing sections
 
-Candidates report visible payload, header/footer references and payload, page-number start, first-page behavior, section type, and page geometry. Delete only an approved candidate whose evidence says `safe_to_delete`. Independent or ambiguous settings block deletion.
+Candidates report visible payload, header/footer references and payload, page-number start, first-page behavior, section type, page geometry, stable boundary context, and section-properties hash. Delete only an approved candidate whose evidence says `safe_to_delete`. Independent or ambiguous settings block deletion.
 
 ## Operations
 
 - `toc_ranges`: replace an approved static directory range with a real `TOC` field.
 - `headings`: assign approved body paragraphs to Heading 1-4 and remove only verified prefixes.
 - `captions`: preserve or style manual identifiers by default; perform only explicitly approved identifier replacement, relocation, or field conversion.
-- `tables`: apply exact approved header and row-split controls to data tables.
+- `tables`: apply exact approved header, row-split, visual, and landscape controls to data tables.
 - `pagination_groups`: apply only approved `keepNext`/`cantSplit` relationships to figures, captions, and tables.
+- `pagination_sections`: create and audit approved TOC/body numbering sections and odd/even PAGE footers.
 - `trailing_empty_sections`: remove safe approved final sections from the end inward.
 
 Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, and revisions.

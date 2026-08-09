@@ -12,6 +12,9 @@
 - 字体缺失或单位不明确。
 - 公式图片、旧版 Equation Editor 对象、无法验证的 LaTeX 转换或公式对象哈希变化。
 - `REF/PAGEREF` 指向不存在的书签。
+- 目录或正文起点不明确，偶数页脚缺失，正文存在意外页码重启，或其他前置页是否显示页码未确定。
+- 表格列角色不明、复杂合并、浮动对象、可见控制标记、超宽溢出或横向分节未经逐表确认。
+- 目标软件自动化未授权、受保护视图阻止、字段后端失败或后端返回未经批准的字段类型。
 - 规则适用范围不清、结构模式交付或自动规则超出脚本能力。
 - PR 合并授权。
 
@@ -27,9 +30,11 @@
 4. 批准的派生字段变更清单、逐项批准的人工题注标识替换，以及 TOC、SEQ、REF、PAGEREF、PAGE 和书签状态。
 5. 正文指纹、OMML、嵌入对象和媒体哈希对比结果。
 6. 公式对象分类、公式图片候选和旧版公式对象状态。
-7. 冲突、QA 决定、字段刷新、兼容性和其他限制。
-8. 渲染页数、逐页检查状态和发现的问题。
-9. 最终结论：通过、带限制通过或失败。
+7. 目录/正文页码分区、每个重启点、奇偶 PAGE 页脚、首页显示状态和孤立页眉页脚清理数量。
+8. 每个获批数据表的列角色、宽度、边距、边框、跨页、横向分节及未决视觉 QA。
+9. 冲突、QA 决定、字段刷新后端、目标软件版本、兼容性和其他限制。
+10. 渲染页数、PDF 来源、逐页检查状态和发现的问题。
+11. 最终结论：通过、带限制通过或失败。
 
 ## 审阅标注稿
 
@@ -45,6 +50,8 @@
 
 ## Finalization evidence
 
-Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; the updater backend; and content/protected-object audit outcomes. Do not include manuscript text in the status file.
+Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; updated field types and counts; repagination, save, reopen, and cache-verification status; optional target PDF; and content/protected-object audit outcomes. Do not include manuscript text in the status file.
 
 `deferred` is a limitation, not a refresh success. State who approved it and require the target application to update fields before final visual QA. If the renderer and target software differ, report both and set target layout to unverified until that application is checked.
+
+`refreshed_target_word` requires a successful Microsoft Word backend plus core integrity audits. `target_pdf_ready_for_visual_qa` only means Word exported a PDF. Promote to `target_layout_verified` only after every PDF page has been inspected; never infer the physical page count from PAGE-field count.

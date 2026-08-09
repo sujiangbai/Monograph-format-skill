@@ -41,6 +41,11 @@ def main() -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--renderer", help="Explicit LibreOffice-compatible renderer path.")
     parser.add_argument(
+        "--target-pdf",
+        type=Path,
+        help="Render an already exported target-software PDF instead of converting with LibreOffice.",
+    )
+    parser.add_argument(
         "--target-software",
         help="Publisher-designated target application used to qualify visual QA.",
     )
@@ -50,15 +55,20 @@ def main() -> int:
         ensure_docx(args.input)
         if args.dpi < 72 or args.dpi > 300:
             raise FormatMonographError("--dpi must be between 72 and 300.")
-        soffice, renderer_source = locate_soffice(args.renderer)
-        version_result = subprocess.run(
-            [soffice, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        renderer_version = (version_result.stdout or version_result.stderr).strip() or None
+        if args.target_pdf:
+            if not args.target_pdf.is_file() or args.target_pdf.suffix.lower() != ".pdf":
+                raise FormatMonographError("--target-pdf must name an existing PDF file.")
+            soffice, renderer_source, renderer_version = None, "target_pdf", None
+        else:
+            soffice, renderer_source = locate_soffice(args.renderer)
+            version_result = subprocess.run(
+                [soffice, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            renderer_version = (version_result.stdout or version_result.stderr).strip() or None
         try:
             import fitz
         except ImportError as exc:
@@ -86,30 +96,33 @@ def main() -> int:
             env["HOME"] = str(temp_dir / "home")
             Path(env["HOME"]).mkdir()
 
-            command = [
-                soffice,
-                "--headless",
-                f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(conversion_dir),
-                str(args.input.resolve()),
-            ]
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=300,
-                check=False,
-            )
-            pdf_path = conversion_dir / f"{args.input.stem}.pdf"
-            if completed.returncode != 0 or not pdf_path.is_file() or pdf_path.stat().st_size == 0:
-                raise FormatMonographError(
-                    "LibreOffice conversion failed. "
-                    f"stdout={completed.stdout.strip()} stderr={completed.stderr.strip()}"
+            if args.target_pdf:
+                pdf_path = args.target_pdf.resolve()
+            else:
+                command = [
+                    soffice,
+                    "--headless",
+                    f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(conversion_dir),
+                    str(args.input.resolve()),
+                ]
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=300,
+                    check=False,
                 )
+                pdf_path = conversion_dir / f"{args.input.stem}.pdf"
+                if completed.returncode != 0 or not pdf_path.is_file() or pdf_path.stat().st_size == 0:
+                    raise FormatMonographError(
+                        "LibreOffice conversion failed. "
+                        f"stdout={completed.stdout.strip()} stderr={completed.stderr.strip()}"
+                    )
 
             pdf = fitz.open(pdf_path)
             page_paths = []
@@ -125,7 +138,8 @@ def main() -> int:
             kept_pdf = None
             if args.keep_pdf:
                 kept_pdf_path = args.output_dir / f"{args.input.stem}.pdf"
-                shutil.copy2(pdf_path, kept_pdf_path)
+                if pdf_path.resolve() != kept_pdf_path.resolve():
+                    shutil.copy2(pdf_path, kept_pdf_path)
                 kept_pdf = str(kept_pdf_path)
 
         result = {
@@ -138,8 +152,10 @@ def main() -> int:
             "renderer_version": renderer_version,
             "renderer_source": renderer_source,
             "target_software": args.target_software,
+            "target_pdf_source": str(args.target_pdf.resolve()) if args.target_pdf else None,
             "target_layout_unverified": bool(
                 args.target_software
+                and not args.target_pdf
                 and "libreoffice" not in args.target_software.casefold()
             ),
             "visual_review": "pending",

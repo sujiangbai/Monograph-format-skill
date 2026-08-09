@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shutil
+import shlex
 import socket
 import subprocess
 import sys
@@ -205,6 +206,87 @@ def use_deferred_output(input_path: Path, output_path: Path, reason: str) -> dic
     return {"backend": "deferred_on_open", "fallback_from": reason}
 
 
+def _external_command(value: str) -> list[str]:
+    stripped = value.strip()
+    if stripped.startswith("["):
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, list) or not parsed or not all(
+            isinstance(item, str) and item for item in parsed
+        ):
+            raise FormatMonographError(
+                "--field-updater-command JSON must be a non-empty string array."
+            )
+        return parsed
+    parts = shlex.split(stripped, posix=os.name != "nt")
+    if not parts:
+        raise FormatMonographError("--field-updater-command cannot be empty.")
+    return parts
+
+
+def external_refresh(
+    input_path: Path,
+    output_path: Path,
+    command: str,
+    profile_path: Path,
+    structure_map_path: Path,
+    pdf_output: Path | None,
+    target_software: str,
+) -> dict:
+    request = {
+        "protocol_version": "1.0",
+        "input_path": str(input_path.resolve()),
+        "output_path": str(output_path.resolve()),
+        "profile_path": str(profile_path.resolve()),
+        "structure_map_path": str(structure_map_path.resolve()),
+        "allowed_field_types": ["TOC", "PAGE", "REF", "PAGEREF"],
+        "target_software": target_software,
+        "pdf_output_path": str(pdf_output.resolve()) if pdf_output else None,
+    }
+    completed = subprocess.run(
+        _external_command(command),
+        input=json.dumps(request, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise FormatMonographError(
+            "External field updater failed. "
+            f"stdout={completed.stdout.strip()} stderr={completed.stderr.strip()}"
+        )
+    try:
+        response = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise FormatMonographError(
+            "External field updater did not return one JSON response."
+        ) from exc
+    if not isinstance(response, dict):
+        raise FormatMonographError("External field updater response must be an object.")
+    if not str(response.get("software", "")).strip():
+        raise FormatMonographError(
+            "External field updater must report its target software."
+        )
+    required_true = ("repaginated", "saved", "field_cache_verified")
+    if response.get("status") != "success" or any(
+        response.get(name) is not True for name in required_true
+    ):
+        raise FormatMonographError(
+            "External field updater did not confirm repagination, save, and cache verification."
+        )
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise FormatMonographError("External field updater did not create the output DOCX.")
+    updated_types = set(response.get("updated_field_types", []))
+    allowed_types = set(request["allowed_field_types"])
+    if not updated_types <= allowed_types:
+        raise FormatMonographError(
+            "External field updater reported a non-approved field type."
+        )
+    response.setdefault("backend", "external")
+    response["command"] = _external_command(command)[0]
+    return response
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
@@ -215,8 +297,21 @@ def main() -> int:
     parser.add_argument("--status-output", type=Path)
     parser.add_argument(
         "--field-updater",
-        choices=("auto", "libreoffice", "deferred"),
+        choices=("auto", "external", "libreoffice", "deferred"),
         default="auto",
+    )
+    parser.add_argument(
+        "--field-updater-command",
+        help="External updater command or a JSON array of command arguments.",
+    )
+    parser.add_argument(
+        "--pdf-output",
+        type=Path,
+        help="Optional target-software PDF path requested from an external backend.",
+    )
+    parser.add_argument(
+        "--target-software",
+        help="Target application requested from an external field backend.",
     )
     parser.add_argument("--renderer")
     parser.add_argument("--approve-deferred", action="store_true")
@@ -242,6 +337,11 @@ def main() -> int:
         ):
             raise FormatMonographError("Finalization must not overwrite an input DOCX.")
         args.output.parent.mkdir(parents=True, exist_ok=True)
+        if args.pdf_output:
+            args.pdf_output.parent.mkdir(parents=True, exist_ok=True)
+            if args.pdf_output.exists() and not args.force:
+                raise FormatMonographError("PDF output exists; use --force to replace it.")
+            args.pdf_output.unlink(missing_ok=True)
         args.output.unlink(missing_ok=True)
 
         baseline = args.source or args.input
@@ -256,7 +356,37 @@ def main() -> int:
         backend: dict = {"backend": "not_needed"}
         delivery_status = input_fields["status"]
 
-        if input_fields["status"] in {"absent", "refreshed"}:
+        external_requested = args.field_updater == "external" or (
+            args.field_updater == "auto" and bool(args.field_updater_command)
+        )
+        if external_requested:
+            if not args.field_updater_command:
+                raise FormatMonographError(
+                    "External field update requires --field-updater-command."
+                )
+            try:
+                backend = external_refresh(
+                    args.input,
+                    args.output,
+                    args.field_updater_command,
+                    args.profile,
+                    args.structure_map,
+                    args.pdf_output,
+                    args.target_software or profile["target_applications"][0],
+                )
+                delivery_status = (
+                    "refreshed_target_word"
+                    if "microsoft word" in str(backend.get("software", "")).casefold()
+                    else "refreshed_external"
+                )
+            except FormatMonographError:
+                if args.field_updater != "auto" or not args.approve_deferred:
+                    raise
+                backend = use_deferred_output(
+                    args.input, args.output, "external_error"
+                )
+                delivery_status = "deferred"
+        elif input_fields["status"] in {"absent", "refreshed"}:
             shutil.copy2(args.input, args.output)
         elif args.field_updater == "deferred":
             if not args.approve_deferred:
@@ -279,12 +409,24 @@ def main() -> int:
                 delivery_status = "deferred"
 
         output_fields = field_cache_inventory(args.output)
-        if backend.get("backend") == "libreoffice_uno":
+        strict_backend = backend.get("backend") not in {
+            "not_needed",
+            "deferred_on_open",
+        }
+        if strict_backend:
             delivery_status = output_fields["status"]
+            if backend.get("backend") not in {"libreoffice_uno"}:
+                delivery_status = (
+                    "refreshed_target_word"
+                    if "microsoft word" in str(backend.get("software", "")).casefold()
+                    else "refreshed_external"
+                )
             field_contract_ok = field_contract_preserved(input_fields, output_fields)
             refreshed_ok = (
                 not input_fields["main_toc_fields"] or delivery_status == "refreshed"
             )
+            if backend.get("backend") not in {"libreoffice_uno"}:
+                refreshed_ok = bool(backend.get("field_cache_verified"))
         else:
             field_contract_ok = True
             refreshed_ok = True
@@ -293,7 +435,7 @@ def main() -> int:
         output_objects = protected_payload_manifest(args.output)
         content_ok = baseline_fp == output_fp
         objects_ok = baseline_objects == output_objects
-        if backend.get("backend") == "libreoffice_uno" and not (
+        if strict_backend and not (
             field_contract_ok and refreshed_ok and content_ok and objects_ok
         ):
             if args.field_updater == "auto" and args.approve_deferred:
@@ -309,7 +451,7 @@ def main() -> int:
             else:
                 args.output.unlink(missing_ok=True)
                 raise FormatMonographError(
-                    "LibreOffice field refresh did not preserve the editable-field "
+                    "Field refresh did not preserve the editable-field "
                     "contract and document integrity."
                 )
         if not content_ok or not objects_ok:
@@ -336,6 +478,16 @@ def main() -> int:
                 "output_sha256": file_sha256(args.output),
                 "stage": "finalized",
             },
+            "target_pdf": (
+                str(args.pdf_output)
+                if args.pdf_output and args.pdf_output.is_file()
+                else None
+            ),
+            "target_layout_status": (
+                "target_pdf_ready_for_visual_qa"
+                if args.pdf_output and args.pdf_output.is_file()
+                else "not_verified"
+            ),
             "output": str(args.output),
         }
         if args.status_output:
@@ -350,6 +502,8 @@ def main() -> int:
         zipfile.BadZipFile,
     ) as exc:
         args.output.unlink(missing_ok=True)
+        if args.pdf_output:
+            args.pdf_output.unlink(missing_ok=True)
         print(str(exc), file=sys.stderr)
         return 1
 
