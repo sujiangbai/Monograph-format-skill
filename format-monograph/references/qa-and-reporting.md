@@ -42,3 +42,9 @@
 比较时排除字段结果显示文本，并仅对明确批准的字段标记、无歧义标题前缀和逐项确认的题注标识替换进行规范化。题注替换必须证明标签、分隔符和标题不变。其余正文、表格文字、脚注、尾注、长引文、引用、答案、索引词和公式语义必须一致。
 
 审计失败时不得交付为通过。若用户批准的派生字段在 Word 打开后更新，只在报告中记录，不将其视为正文修改。任何公式栅格化、嵌入对象变化或媒体替换均视为失败。
+
+## Finalization evidence
+
+Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; the updater backend; and content/protected-object audit outcomes. Do not include manuscript text in the status file.
+
+`deferred` is a limitation, not a refresh success. State who approved it and require the target application to update fields before final visual QA. If the renderer and target software differ, report both and set target layout to unverified until that application is checked.

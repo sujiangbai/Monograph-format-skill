@@ -15,6 +15,7 @@ from _common import (
     FormatMonographError,
     content_fingerprint,
     equation_inventory,
+    field_cache_inventory,
     field_inventory,
     load_document,
     protected_object_manifest,
@@ -80,6 +81,12 @@ def inventory(path: Path) -> dict:
         for index, paragraph in enumerate(document.paragraphs)
         if paragraph.style and paragraph.style.name.startswith("Heading")
     ]
+    outline_paragraphs = [
+        index
+        for index, paragraph in enumerate(document.paragraphs)
+        if paragraph._p.pPr is not None
+        and paragraph._p.pPr.find(qn("w:outlineLvl")) is not None
+    ]
     sections = []
     for index, section in enumerate(document.sections):
         sections.append(
@@ -112,6 +119,11 @@ def inventory(path: Path) -> dict:
                 "repeat_header_row": bool(
                     table.rows and row_has_property(table.rows[0], "tblHeader")
                 ),
+                "repeat_header_rows": [
+                    row_index
+                    for row_index, row in enumerate(table.rows)
+                    if row_has_property(row, "tblHeader")
+                ],
                 "prevent_split_rows": [
                     row_index
                     for row_index, row in enumerate(table.rows)
@@ -134,6 +146,7 @@ def inventory(path: Path) -> dict:
             if name in document.styles
         },
         "headings": headings,
+        "direct_outline_level_paragraphs": outline_paragraphs,
         "section_count": len(document.sections),
         "sections": sections,
         "table_count": len(document.tables),
@@ -147,6 +160,7 @@ def inventory(path: Path) -> dict:
             "update_fields_on_open": settings.find(qn("w:updateFields")) is not None,
         },
         "fields": field_inventory(path),
+        "field_cache": field_cache_inventory(path),
         "equations": equation_inventory(path),
         "protected_objects": {
             "embedding_count": len(object_manifest["embeddings"]),

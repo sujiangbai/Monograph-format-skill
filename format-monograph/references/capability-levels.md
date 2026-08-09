@@ -32,3 +32,14 @@
 - 找到公式图片、断链字段或旧版 Equation Editor 对象时停止并提问。
 - LaTeX 只有在能够转换并验证为可编辑 OMML 时才可进入 DOCX。
 - 渲染器缺失可以降级；渲染器存在但转换失败时应修复错误，不能直接降级掩盖问题。
+
+## Field finalization
+
+Treat field finalization as an independent capability. `field_finalization=true` means an executable LibreOffice/UNO candidate exists; it does not guarantee that the candidate preserves Word fields or layout for a particular DOCX.
+
+- `refreshed`: field instructions remain editable, cached results are present, and final content/object audits pass.
+- `deferred`: fields are marked dirty and Word-compatible update-on-open is enabled. This state requires explicit caller QA and is not a completed refresh.
+- `code_only` or `stale`: do not deliver as finalized.
+- `absent`: acceptable only when the approved document contains no fields that require refresh.
+
+If a field updater removes field instructions, changes authored content, or changes protected payloads, reject its output. In `auto` mode, an explicitly approved deferred fallback may be used; otherwise stop.

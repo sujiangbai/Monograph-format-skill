@@ -111,6 +111,7 @@ def main() -> int:
             "inspection": inspection_ok,
             "profile_validation": validation_ok,
             "docx_editing": editing_ok,
+            "field_finalization": bool(editing_ok and soffice),
             "rendering": bool(soffice and pymupdf_ok),
         },
         "rendering": {
@@ -119,6 +120,7 @@ def main() -> int:
             "source": renderer_source,
             "pymupdf": pymupdf_ok,
             "available": bool(soffice and pymupdf_ok),
+            "field_refresh_candidate": bool(soffice),
         },
         "font_directories": font_directories(),
         "limitations": [],

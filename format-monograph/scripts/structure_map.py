@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import posixpath
 import re
 import zipfile
 from pathlib import Path
@@ -58,8 +59,8 @@ CIVIL_ENGINEERING_TERMS = (
     "æˆªé¢",
     "æ–­é¢",
 )
-STRUCTURE_MAP_VERSIONS = {"1.0", "1.1", "1.2"}
-SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2"}
+STRUCTURE_MAP_VERSIONS = {"1.0", "1.1", "1.2", "1.3"}
+SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2", "1.3"}
 CAPTION_ACTIONS = {
     "preserve",
     "style_only",
@@ -103,8 +104,17 @@ def text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _heading_authored_text_hash(value: str, level: int) -> str:
+    match = _heading_prefix_pattern(level).match(value)
+    return text_sha256(value[match.end() :] if match else value)
+
+
 def has_semantic_structure_map(structure_map: dict[str, Any]) -> bool:
     return structure_map.get("schema_version") in SEMANTIC_STRUCTURE_MAP_VERSIONS
+
+
+def has_caption_actions_map(structure_map: dict[str, Any]) -> bool:
+    return structure_map.get("schema_version") in {"1.2", "1.3"}
 
 
 def _caption_domain(value: str, context: str = "") -> tuple[str, str]:
@@ -157,8 +167,28 @@ def _paragraph_style_signature(paragraph: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _body_locator(index: int) -> dict[str, Any]:
-    return {"kind": "body_paragraph", "paragraph": index}
+def _nearest_nonempty_hash(values: list[str], index: int, step: int) -> str | None:
+    cursor = index + step
+    while 0 <= cursor < len(values):
+        if values[cursor].strip():
+            return text_sha256(values[cursor])
+        cursor += step
+    return None
+
+
+def _body_locator(
+    index: int, values: list[str] | None = None
+) -> dict[str, Any]:
+    locator: dict[str, Any] = {"kind": "body_paragraph", "paragraph": index}
+    if values is not None:
+        locator.update(
+            {
+                "text_sha256": text_sha256(values[index]),
+                "previous_nonempty_sha256": _nearest_nonempty_hash(values, index, -1),
+                "next_nonempty_sha256": _nearest_nonempty_hash(values, index, 1),
+            }
+        )
+    return locator
 
 
 def _cell_locator(table: int, row: int, cell: int, paragraph: int) -> dict[str, Any]:
@@ -194,9 +224,51 @@ def resolve_paragraph_locator(document: Any, locator: dict[str, Any]) -> Any:
     kind = locator.get("kind")
     if kind == "body_paragraph":
         index = int(locator["paragraph"])
-        if not 0 <= index < len(document.paragraphs):
+        expected = locator.get("text_sha256")
+        if 0 <= index < len(document.paragraphs):
+            paragraph = document.paragraphs[index]
+            if expected is None or text_sha256(paragraph.text) == expected:
+                return paragraph
+        if expected is None:
             raise FormatMonographError(f"Body paragraph locator is out of range: {index}")
-        return document.paragraphs[index]
+
+        values = [paragraph.text for paragraph in document.paragraphs]
+        candidates = [
+            candidate
+            for candidate, value in enumerate(values)
+            if text_sha256(value) == expected
+        ]
+        before = locator.get("previous_nonempty_sha256")
+        after = locator.get("next_nonempty_sha256")
+
+        def context_score(candidate: int) -> int:
+            return int(
+                before is not None
+                and _nearest_nonempty_hash(values, candidate, -1) == before
+            ) + int(
+                after is not None
+                and _nearest_nonempty_hash(values, candidate, 1) == after
+            )
+
+        if len(candidates) > 1:
+            scored = [(context_score(candidate), candidate) for candidate in candidates]
+            best = max(score for score, _ in scored)
+            candidates = [candidate for score, candidate in scored if score == best]
+        if len(candidates) == 1:
+            return document.paragraphs[candidates[0]]
+
+        # A caller-approved identifier replacement changes the paragraph hash. Its
+        # unchanged neighboring paragraphs still provide a stable, text-free anchor.
+        contextual = [
+            candidate
+            for candidate in range(len(values))
+            if context_score(candidate) == int(before is not None) + int(after is not None)
+        ]
+        if len(contextual) == 1:
+            return document.paragraphs[contextual[0]]
+        raise FormatMonographError(
+            f"Stable body paragraph locator is ambiguous or missing: {index}"
+        )
     if kind == "table_cell_paragraph":
         table_index = int(locator["table"])
         row_index = int(locator["row"])
@@ -220,17 +292,47 @@ def resolve_paragraph_locator(document: Any, locator: dict[str, Any]) -> Any:
 
 
 def _verified_locator_paragraph(document: Any, entry: dict[str, Any]) -> Any:
-    key = _locator_key(entry["locator"])
+    locator = copy.deepcopy(entry["locator"])
+    if locator.get("kind") == "body_paragraph" and entry.get("text_sha256"):
+        locator.setdefault("text_sha256", entry["text_sha256"])
+    key = _locator_key(locator)
     verified = getattr(document, "_format_monograph_verified_locators", set())
     if key in verified:
-        return resolve_paragraph_locator(document, entry["locator"])
-    paragraph = resolve_paragraph_locator(document, entry["locator"])
+        return resolve_paragraph_locator(document, locator)
+    paragraph = resolve_paragraph_locator(document, locator)
     expected = entry.get("text_sha256")
     if expected and text_sha256(paragraph.text) != expected:
         raise FormatMonographError(
             f"Structure-map paragraph hash mismatch at {key}."
         )
     return paragraph
+
+
+def _replacement_target_matches(value: str, entry: dict[str, Any]) -> bool:
+    span = entry["identifier_span"]
+    start, end = int(span["start"]), int(span["end"])
+    replacement = str(entry["replacement_identifier"])
+    replacement_end = start + len(replacement)
+    title_start = int(entry["title_span_start"]) + replacement_end - end
+    return bool(
+        value[start:replacement_end] == replacement
+        and text_sha256(value[:start]) == entry["identifier_prefix_sha256"]
+        and text_sha256(value[replacement_end:]) == entry["identifier_suffix_sha256"]
+        and text_sha256(value[title_start:]) == entry["title_text_sha256"]
+    )
+
+
+def _resolve_replaced_caption_target(document: Any, entry: dict[str, Any]) -> Any:
+    candidates = [
+        paragraph
+        for paragraph in document.paragraphs
+        if _replacement_target_matches(paragraph.text, entry)
+    ]
+    if len(candidates) != 1:
+        raise FormatMonographError(
+            "Approved caption replacement target is ambiguous or missing."
+        )
+    return candidates[0]
 
 
 def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -> None:
@@ -249,6 +351,23 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
         key = _locator_key(entry["locator"])
         cache[key] = paragraph
         verified.add(key)
+    if structure_map.get("schema_version") == "1.3":
+        for group in structure_map.get("pagination_groups", []):
+            if not group.get("approved"):
+                continue
+            for name in ("anchor", "caption"):
+                locator = group.get(name)
+                if not isinstance(locator, dict):
+                    continue
+                paragraph = resolve_paragraph_locator(document, locator)
+                expected = locator.get("text_sha256")
+                if expected and text_sha256(paragraph.text) != expected:
+                    raise FormatMonographError(
+                        f"Pagination locator hash mismatch at {_locator_key(locator)}."
+                    )
+                key = _locator_key(locator)
+                cache[key] = paragraph
+                verified.add(key)
     setattr(document, "_format_monograph_locator_cache", cache)
     setattr(document, "_format_monograph_verified_locators", verified)
 
@@ -279,1201 +398,10 @@ def approved_role_paragraphs(
             locator = entry.get("locator", {})
             expected_style = ROLE_STYLE_NAMES.get(role)
             if role.startswith("heading_") and locator.get("kind") == "body_paragraph":
-                paragraph = resolve_paragraph_locator(document, locator)
-                if not paragraph.style or paragraph.style.name != expected_style:
-                    raise
-            elif role in caption_roles:
-                caption_entry = next(
-                    (
-                        item
-                        for item in structure_map.get("captions", [])
-                        if item.get("approved")
-                        and item.get("locator", {}).get("kind")
-                        in {"body_paragraph", "table_cell_paragraph"}
-                        and _locator_key(item["locator"])
-                        == _locator_key(locator)
-                    ),
-                    None,
-                )
-                if caption_entry is None:
-                    raise
-                if (
-                    structure_map.get("schema_version") == "1.2"
-                    and caption_entry.get("action")
-                    not in {"replace_identifier", "convert_to_seq", "move_caption"}
-                ):
-                    raise
-                if (
-                    locator.get("kind") == "table_cell_paragraph"
-                    and caption_entry.get("migrate_outside_table")
-                ):
-                    table_index = int(locator["table"])
-                    if not 0 <= table_index < len(document.tables):
-                        raise
-                    previous = document.tables[table_index]._tbl.getprevious()
-                    if previous is None or previous.tag != qn("w:p"):
-                        raise
-                    paragraph = Paragraph(previous, document.tables[table_index]._parent)
-                else:
-                    paragraph = resolve_paragraph_locator(document, locator)
-                if not paragraph.style or paragraph.style.name != "Caption":
-                    raise
-            else:
-                raise
-        if id(paragraph._p) not in seen:
-            result.append(paragraph)
-            seen.add(id(paragraph._p))
-    return result
-
-
-def approved_data_tables(
-    document: Any, structure_map: dict[str, Any]
-) -> list[tuple[Any, dict[str, Any]]]:
-    if not has_semantic_structure_map(structure_map):
-        return []
-    result = []
-    for entry in structure_map.get("tables", []):
-        if not entry.get("approved") or entry.get("kind") != "data":
-            continue
-        index = int(entry["table"])
-        if not 0 <= index < len(document.tables):
-            raise FormatMonographError(f"Structure-map table is out of range: {index}")
-        normalized = copy.deepcopy(entry)
-        deleted = getattr(document, "_format_monograph_deleted_table_rows", {}).get(index)
-        if deleted is None:
-            deleted = next(
-                (
-                    int(caption["locator"]["row"])
-                    for caption in structure_map.get("captions", [])
-                    if caption.get("approved")
-                    and caption.get("migrate_outside_table")
-                    and caption.get("locator", {}).get("kind")
-                    == "table_cell_paragraph"
-                    and int(caption["locator"]["table"]) == index
-                ),
-                None,
-            )
-        if deleted is not None:
-            normalized["repeat_header_rows"] = [
-                int(row) - 1 if int(row) > deleted else int(row)
-                for row in normalized.get("repeat_header_rows", [])
-                if int(row) != deleted
-            ]
-            normalized["header_rows"] = [
-                int(row) - 1 if int(row) > deleted else int(row)
-                for row in normalized.get("header_rows", [])
-                if int(row) != deleted
-            ]
-            normalized["caption_row"] = None
-        result.append((document.tables[index], normalized))
-    return result
-
-
-def _section_evidence(document: Any, sect_pr: Any) -> dict[str, Any]:
-    header_ids = sect_pr.xpath("./w:headerReference/@r:id")
-    footer_ids = sect_pr.xpath("./w:footerReference/@r:id")
-
-    def related_has_payload(rel_id: str) -> bool:
-        part = document.part.related_parts.get(rel_id)
-        if part is None:
-            return True
-        try:
-            root = etree.fromstring(part.blob)
-        except (ValueError, etree.XMLSyntaxError):
-            return True
-        return bool(
-            "".join(root.xpath(".//w:t/text()", namespaces=NS)).strip()
-            or root.xpath(".//w:drawing | .//w:object | .//w:pict", namespaces=NS)
-        )
-
-    independent = {
-        "header_reference_count": len(header_ids),
-        "footer_reference_count": len(footer_ids),
-        "header_footer_has_payload": any(
-            related_has_payload(rel_id) for rel_id in header_ids + footer_ids
-        ),
-        "page_number_start": (
-            sect_pr.xpath("string(./w:pgNumType/@w:start)") or None
-        ),
-        "different_first_page": bool(sect_pr.find(qn("w:titlePg")) is not None),
-        "section_type": (
-            sect_pr.xpath("string(./w:type/@w:val)") or None
-        ),
-        "has_page_geometry": bool(
-            sect_pr.find(qn("w:pgSz")) is not None
-            or sect_pr.find(qn("w:pgMar")) is not None
-        ),
-    }
-    independent["empty_header_footer_references"] = bool(
-        independent["header_reference_count"] or independent["footer_reference_count"]
-    ) and not independent["header_footer_has_payload"]
-    independent["safe_to_delete"] = not any(
-        (
-            independent["header_footer_has_payload"],
-            independent["page_number_start"],
-            independent["different_first_page"],
-        )
-    )
-    return independent
-
-
-def _trailing_empty_sections(document: Any) -> list[dict[str, Any]]:
-    body = document.element.body
-    children = list(body)
-    paragraph_index = {id(p._p): index for index, p in enumerate(document.paragraphs)}
-    boundaries: list[tuple[int, int]] = []
-    for child_index, child in enumerate(children):
-        if child.tag != qn("w:p"):
-            continue
-        p_pr = child.find(qn("w:pPr"))
-        if p_pr is not None and p_pr.find(qn("w:sectPr")) is not None:
-            boundaries.append((child_index, paragraph_index[id(child)]))
-
-    candidates = []
-    starts = [0] + [child_index + 1 for child_index, _ in boundaries]
-    ends = [child_index for child_index, _ in boundaries] + [len(children) - 2]
-    for section_index in range(len(starts) - 1, 0, -1):
-        start, end = starts[section_index], ends[section_index]
-        span = children[start : end + 1] if end >= start else []
-        if any(_paragraph_has_payload(element) for element in span):
-            break
-        previous_boundary = boundaries[section_index - 1][1]
-        paragraph = document.paragraphs[previous_boundary]
-        final_sect_pr = document.element.body.sectPr
-        evidence = _section_evidence(document, final_sect_pr)
-        candidates.append(
-            {
-                "section": section_index,
-                "previous_boundary_paragraph": previous_boundary,
-                "previous_boundary_sha256": text_sha256(paragraph.text),
-                "approved_delete": False,
-                "confidence": "high" if evidence["safe_to_delete"] else "low",
-                "evidence": evidence,
-            }
-        )
-    return candidates
-
-
-def _chapter_number(value: str) -> int | None:
-    match = re.match(r"^\s*ç¬¬\s*([0-9ä¸€äºŒä¸‰å››äº”å…­ä¸ƒå…«ä¹åç™¾]+)\s*ç« ", value)
-    if not match:
-        return None
-    token = match.group(1)
-    if token.isdigit():
-        return int(token)
-    digits = {"ä¸€": 1, "äºŒ": 2, "ä¸‰": 3, "å››": 4, "äº”": 5, "å…­": 6, "ä¸ƒ": 7, "å…«": 8, "ä¹": 9}
-    if token == "å":
-        return 10
-    if "å" in token:
-        left, right = token.split("å", 1)
-        return (digits.get(left, 1) * 10) + digits.get(right, 0)
-    return digits.get(token)
-
-
-def _heading_number(value: str, level: int) -> tuple[int, ...] | None:
-    if level == 1:
-        chapter = _chapter_number(value)
-        return None if chapter is None else (chapter,)
-    match = re.match(r"^\s*(\d+(?:[.-]\d+){%d})" % (level - 1), value)
-    if not match:
-        return None
-    return tuple(int(part) for part in re.split(r"[.-]", match.group(1)))
-
-
-def _numbering_anomalies(headings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    anomalies = []
-    seen: set[tuple[int, ...]] = set()
-    last_by_parent: dict[tuple[int, ...], int] = {}
-    for entry in headings:
-        number = tuple(entry.get("cached_number", []))
-        if not number:
-            continue
-        locator = entry.get("locator", _body_locator(int(entry["paragraph"])))
-        if number in seen:
-            anomalies.append(
-                {
-                    "kind": "duplicate_number",
-                    "locator": locator,
-                    "observed": list(number),
-                    "status": "open",
-                }
-            )
-        parent = number[:-1]
-        if len(number) > 1 and parent not in seen:
-            anomalies.append(
-                {
-                    "kind": "missing_parent",
-                    "locator": locator,
-                    "observed": list(number),
-                    "status": "open",
-                }
-            )
-        previous = last_by_parent.get(parent)
-        expected_last = previous + 1 if previous is not None else 1
-        if len(number) > 1 and number[-1] != expected_last:
-            anomalies.append(
-                {
-                    "kind": "sequence_gap",
-                    "locator": locator,
-                    "observed": list(number),
-                    "expected_last": expected_last,
-                    "status": "open",
-                }
-            )
-        seen.add(number)
-        last_by_parent[parent] = number[-1]
-    return anomalies
-
-
-def _role_for_paragraph(paragraph: Any, detected_level: int | None) -> str:
-    if detected_level:
-        return f"heading_{detected_level}"
-    style_name = paragraph.style.name if paragraph.style else ""
-    if style_name == "Title":
-        return "title"
-    match = re.fullmatch(r"Heading (\d+)", style_name)
-    if match and 1 <= int(match.group(1)) <= 4:
-        return f"heading_{match.group(1)}"
-    if style_name == "Quote":
-        return "long_quote"
-    if style_name == "Bibliography":
-        return "reference_entry"
-    return "unknown"
-
-
-def _caption_entry(
-    value: str, locator: dict[str, Any], context: str = ""
-) -> dict[str, Any] | None:
-    loose = LOOSE_CAPTION_PATTERN.match(value)
-    if not loose:
-        return None
-
-    label = loose.group(1)
-    domain_context, domain_confidence = _caption_domain(value, context)
-    identifier = CAPTION_IDENTIFIER_PATTERN.match(value)
-    entry: dict[str, Any] = {
-        "locator": locator,
-        "text_sha256": text_sha256(value),
-        "label": label,
-        "sequence_name": "Figure" if label == "å›¾" else "Table",
-        "numbering_mode": "manual_text",
-        "identifier_semantics": "unknown",
-        "domain_context": domain_context,
-        "domain_confidence": domain_confidence,
-        "action": "preserve",
-        "completeness": "candidate",
-        "hierarchy_status": "not_evaluated",
-        "approved": False,
-    }
-    if identifier:
-        raw_identifier = identifier.group(2)
-        start, end = identifier.span(2)
-        title = identifier.group(3)
-        entry.update(
-            {
-                "identifier_span": {"start": start, "end": end},
-                "identifier_sha256": text_sha256(raw_identifier),
-                "identifier_prefix_sha256": text_sha256(value[:start]),
-                "identifier_suffix_sha256": text_sha256(value[end:]),
-                "title_text_sha256": text_sha256(title),
-                "title_span_start": identifier.start(3),
-                "identifier_semantics": _caption_identifier_semantics(
-                    raw_identifier, title, domain_context
-                ),
-            }
-        )
-
-    legacy = CAPTION_PATTERN.match(value)
-    if legacy:
-        _, hierarchy, sequence, _ = legacy.groups()
-        entry.update(
-            {
-                "heading_level": len(hierarchy.split(".")),
-                "cached_hierarchy": hierarchy,
-                "cached_sequence": sequence,
-            }
-        )
-    return entry
-
-
-def _table_text_hash(table: Any) -> str:
-    value = "\u241e".join(
-        "\u241f".join(cell.text for cell in row.cells) for row in table.rows
-    )
-    return text_sha256(value)
-
-
-def candidate_structure_map(path: Path) -> dict[str, Any]:
-    from _common import load_document
-
-    document = load_document(path)
-    headings = []
-    captions = []
-    paragraph_roles = []
-    chapter_starts = []
-    body_values = [paragraph.text for paragraph in document.paragraphs]
-    for index, paragraph in enumerate(document.paragraphs):
-        value = paragraph.text
-        detected_level = None
-        for level, pattern in HEADING_PATTERNS:
-            if pattern.match(value):
-                detected_level = level
-                entry = {
-                    "paragraph": index,
-                    "locator": _body_locator(index),
-                    "text_sha256": text_sha256(value),
-                    "level": level,
-                    "cached_number": list(_heading_number(value, level) or ()),
-                    "source_style": paragraph.style.name if paragraph.style else None,
-                    "direct_format_sha256": _paragraph_style_signature(paragraph),
-                    "approved": False,
-                }
-                headings.append(entry)
-                if level == 1:
-                    chapter = _chapter_number(value)
-                    if chapter is not None:
-                        chapter_starts.append(chapter)
-                break
-        nearby = "\n".join(body_values[max(0, index - 2) : index + 3])
-        caption = _caption_entry(value, _body_locator(index), nearby)
-        if caption:
-            caption["paragraph"] = index
-            captions.append(caption)
-            role = "figure_caption" if caption["label"] == "å›¾" else "table_caption"
-        else:
-            role = _role_for_paragraph(paragraph, detected_level)
-        if value.strip():
-            paragraph_roles.append(
-                {
-                    "locator": _body_locator(index),
-                    "text_sha256": text_sha256(value),
-                    "role": role,
-                    "source_style": paragraph.style.name if paragraph.style else None,
-                    "direct_format_sha256": _paragraph_style_signature(paragraph),
-                    "approved": False,
-                }
-            )
-
-    tables = []
-    for table_index, table in enumerate(document.tables):
-        caption_row = None
-        header_rows: list[int] = []
-        table_text = "\n".join(cell.text for row in table.rows for cell in row.cells)
-        seen_cells: set[int] = set()
-        for row_index, row in enumerate(table.rows):
-            for cell_index, cell in enumerate(row.cells):
-                if id(cell._tc) in seen_cells:
-                    continue
-                seen_cells.add(id(cell._tc))
-                for paragraph_index, paragraph in enumerate(cell.paragraphs):
-                    locator = _cell_locator(
-                        table_index, row_index, cell_index, paragraph_index
-                    )
-                    caption = _caption_entry(paragraph.text, locator, table_text)
-                    if not caption:
-                        continue
-                    caption["migrate_outside_table"] = False
-                    captions.append(caption)
-                    paragraph_roles.append(
-                        {
-                            "locator": locator,
-                            "text_sha256": text_sha256(paragraph.text),
-                            "role": (
-                                "figure_caption"
-                                if caption["label"] == "å›¾"
-                                else "table_caption"
-                            ),
-                            "source_style": paragraph.style.name if paragraph.style else None,
-                            "direct_format_sha256": _paragraph_style_signature(paragraph),
-                            "approved": False,
-                        }
-                    )
-                    if row_index == 0 and len({id(item._tc) for item in row.cells}) == 1:
-                        caption_row = 0
-                        if len(table.rows) > 1:
-                            header_rows = [1]
-
-        first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
-        tables.append(
-            {
-                "table": table_index,
-                "table_text_sha256": _table_text_hash(table),
-                "first_row_sha256": text_sha256(first_row),
-                "kind": "unknown",
-                "caption_row": caption_row,
-                "header_rows": header_rows,
-                "repeat_header_rows": [],
-                "prevent_normal_row_split": False,
-                "approved": False,
-            }
-        )
-
-    return {
-        "schema_version": "1.2",
-        "status": "candidate",
-        "source_content_fingerprint_sha256": content_fingerprint(path),
-        "paragraph_roles": paragraph_roles,
-        "numbering": {
-            "mode": "single_chapter" if len(set(chapter_starts)) == 1 else "whole_book",
-            "chapter_start": chapter_starts[0] if chapter_starts else None,
-            "heading_levels": 4,
-            "expected_progression": "strict",
-            "approved": False,
-            "anomalies": _numbering_anomalies(headings),
-        },
-        "toc_ranges": [],
-        "headings": headings,
-        "captions": captions,
-        "tables": tables,
-        "trailing_empty_sections": _trailing_empty_sections(document),
-        "conflicts": [],
-    }
-
-
-def load_structure_map(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise FormatMonographError(f"Invalid structure map: {path}: {exc}") from exc
-    if value.get("schema_version") not in STRUCTURE_MAP_VERSIONS:
-        raise FormatMonographError(
-            "Structure map schema_version must be 1.0, 1.1, or 1.2."
-        )
-    if value.get("status") != "approved":
-        raise FormatMonographError("Structure map status must be approved.")
-    if value.get("conflicts"):
-        raise FormatMonographError("Structure map contains unresolved conflicts.")
-    if has_semantic_structure_map(value):
-        for entry in value.get("paragraph_roles", []):
-            if entry.get("approved") and entry.get("role") == "unknown":
-                raise FormatMonographError("Approved paragraph role cannot be unknown.")
-            if "locator" not in entry or "text_sha256" not in entry:
-                raise FormatMonographError(
-                    "Semantic structure-map paragraph roles require locator and text_sha256."
-                )
-        for entry in value.get("captions", []):
-            if not entry.get("approved"):
-                continue
-            if value.get("schema_version") == "1.1":
-                if entry.get("completeness") != "complete":
-                    raise FormatMonographError("Incomplete captions cannot be approved.")
-                if entry.get("hierarchy_status") not in {"match", "accepted"}:
-                    raise FormatMonographError(
-                        "Caption hierarchy must match or be explicitly accepted."
-                    )
-                continue
-
-            action = entry.get("action")
-            if action not in CAPTION_ACTIONS:
-                raise FormatMonographError(
-                    f"Structure map 1.2 caption action is invalid: {action}"
-                )
-            if entry.get("numbering_mode") not in {"manual_text", "seq_field"}:
-                raise FormatMonographError(
-                    "Structure map 1.2 captions require numbering_mode."
-                )
-            if entry.get("identifier_semantics") not in {
-                "publication_number",
-                "drawing_mark",
-                "mixed",
-                "unknown",
-            }:
-                raise FormatMonographError(
-                    "Structure map 1.2 caption identifier_semantics is invalid."
-                )
-            if entry.get("domain_context") not in {
-                "general",
-                "architecture",
-                "civil_engineering",
-                "mixed",
-                "unknown",
-            }:
-                raise FormatMonographError(
-                    "Structure map 1.2 caption domain_context is invalid."
-                )
-            if entry.get("domain_confidence") not in {"high", "medium", "low"}:
-                raise FormatMonographError(
-                    "Structure map 1.2 caption domain_confidence is invalid."
-                )
-            if action != "move_caption" and entry.get("migrate_outside_table"):
-                raise FormatMonographError(
-                    "Caption relocation requires the separate move_caption action."
-                )
-            if action == "replace_identifier":
-                required = {
-                    "identifier_span",
-                    "identifier_sha256",
-                    "identifier_prefix_sha256",
-                    "identifier_suffix_sha256",
-                    "title_text_sha256",
-                    "title_span_start",
-                    "replacement_identifier",
-                }
-                missing = sorted(required - set(entry))
-                if missing or entry.get("replacement_confirmed") is not True:
-                    raise FormatMonographError(
-                        "Manual caption identifier replacement requires an exact boundary, "
-                        "hashes, replacement_identifier, and replacement_confirmed=true."
-                    )
-                if entry.get("numbering_mode") != "manual_text":
-                    raise FormatMonographError(
-                        "Manual caption identifier replacement requires numbering_mode=manual_text."
-                    )
-            elif action == "convert_to_seq":
-                required = {
-                    "heading_level",
-                    "cached_hierarchy",
-                    "cached_sequence",
-                    "sequence_name",
-                }
-                if required - set(entry):
-                    raise FormatMonographError(
-                        "SEQ conversion requires an unambiguous legacy caption boundary."
-                    )
-                if entry.get("numbering_mode") != "seq_field":
-                    raise FormatMonographError(
-                        "SEQ conversion requires numbering_mode=seq_field."
-                    )
-                if entry.get("hierarchy_status") not in {"match", "accepted"}:
-                    raise FormatMonographError(
-                        "SEQ conversion hierarchy must match or be explicitly accepted."
-                    )
-            elif action == "move_caption":
-                if not entry.get("migrate_outside_table"):
-                    raise FormatMonographError(
-                        "move_caption requires migrate_outside_table=true."
-                    )
-                if entry.get("numbering_mode") != "manual_text":
-                    raise FormatMonographError(
-                        "move_caption preserves manual text; field conversion is separate."
-                    )
-        numbering = value.get("numbering", {})
-        if numbering.get("approved"):
-            chapter_start = numbering.get("chapter_start")
-            if not isinstance(chapter_start, int) or chapter_start < 1:
-                raise FormatMonographError(
-                    "Approved numbering requires a positive integer chapter_start."
-                )
-            unresolved = [
-                item
-                for item in numbering.get("anomalies", [])
-                if item.get("status", "open") != "accepted"
-            ]
-            if unresolved:
-                raise FormatMonographError(
-                    "Approved numbering contains unresolved progression anomalies."
-                )
-    return value
-
-
-def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> None:
-    actual = content_fingerprint(path)
-    expected = structure_map.get("source_content_fingerprint_sha256")
-    if actual != expected:
-        raise FormatMonographError(
-            "Structure map source fingerprint does not match the input DOCX."
-        )
-    from _common import load_document
-
-    document = load_document(path)
-    if has_semantic_structure_map(structure_map):
-        prime_structure_map_locators(document, structure_map)
-    for key in ("headings", "captions"):
-        for entry in structure_map.get(key, []):
-            if not entry.get("approved"):
-                continue
-            if entry.get("locator"):
-                _verified_locator_paragraph(document, entry)
-            else:
-                _verified_paragraph(document, entry)
-    for entry in structure_map.get("tables", []):
-        if not entry.get("approved"):
-            continue
-        index = int(entry["table"])
-        if not 0 <= index < len(document.tables):
-            raise FormatMonographError(f"Structure-map table is out of range: {index}")
-        if entry.get("table_text_sha256") and _table_text_hash(document.tables[index]) != entry["table_text_sha256"]:
-            raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
-    numbering = structure_map.get("numbering", {})
-    if numbering.get("approved"):
-        chapter_start = int(numbering["chapter_start"])
-        approved_chapters = [
-            _verified_locator_paragraph(document, entry).text
-            for entry in structure_map.get("headings", [])
-            if entry.get("approved") and int(entry.get("level", 0)) == 1
-        ]
-        detected = [_chapter_number(value) for value in approved_chapters]
-        if detected and detected[0] != chapter_start:
-            raise FormatMonographError(
-                "Approved chapter_start does not match the first approved chapter heading."
-            )
-
-
-def _verified_paragraph(document: Any, entry: dict[str, Any]) -> Any:
-    index = int(entry["paragraph"])
-    if not 0 <= index < len(document.paragraphs):
-        raise FormatMonographError(f"Structure-map paragraph is out of range: {index}")
-    paragraph = document.paragraphs[index]
-    if text_sha256(paragraph.text) != entry["text_sha256"]:
-        raise FormatMonographError(
-            f"Structure-map paragraph hash mismatch at paragraph {index}."
-        )
-    return paragraph
-
-
-def _clear_paragraph(paragraph: Any) -> None:
-    for child in list(paragraph._p):
-        if child.tag != qn("w:pPr"):
-            paragraph._p.remove(child)
-
-
-def _text_run(value: str) -> Any:
-    run = OxmlElement("w:r")
-    text = OxmlElement("w:t")
-    if value[:1].isspace() or value[-1:].isspace():
-        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-    text.text = value
-    run.append(text)
-    return run
-
-
-def _simple_field(instruction: str, placeholder: str) -> Any:
-    field = OxmlElement("w:fldSimple")
-    field.set(qn("w:instr"), instruction)
-    field.set(qn("w:dirty"), "true")
-    field.append(_text_run(placeholder))
-    return field
-
-
-def _apply_toc_ranges(document: Any, structure_map: dict[str, Any]) -> int:
-    changed = 0
-    for entry in structure_map.get("toc_ranges", []):
-        if not entry.get("approved"):
-            continue
-        start, end = int(entry["start_paragraph"]), int(entry["end_paragraph"])
-        hashes = entry.get("paragraph_sha256", [])
-        if start < 0 or end < start or end >= len(document.paragraphs):
-            raise FormatMonographError("Approved TOC range is out of bounds.")
-        if len(hashes) != end - start + 1:
-            raise FormatMonographError("Approved TOC range hash count is invalid.")
-        for offset, index in enumerate(range(start, end + 1)):
-            if text_sha256(document.paragraphs[index].text) != hashes[offset]:
-                raise FormatMonographError(
-                    f"Approved TOC range hash mismatch at paragraph {index}."
-                )
-            _clear_paragraph(document.paragraphs[index])
-        levels = int(entry.get("levels", 4))
-        document.paragraphs[start]._p.append(
-            _simple_field(
-                f'TOC \\o "1-{levels}" \\h \\z \\u',
-                "Update table of contents",
-            )
-        )
-        changed += end - start + 1
-    return changed
-
-
-def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
-    changed = 0
-    for entry in structure_map.get("headings", []):
-        if not entry.get("approved"):
-            continue
-        level = int(entry["level"])
-        if level not in {1, 2, 3, 4}:
-            raise FormatMonographError(f"Invalid approved heading level: {level}")
-        paragraph = (
-            _verified_locator_paragraph(document, entry)
-            if entry.get("locator")
-            else _verified_paragraph(document, entry)
-        )
-        paragraph.style = ensure_paragraph_style(document, f"Heading {level}")
-        changed += 1
-    return changed
-
-
-def _remove_prefix_from_runs(paragraph: Any, length: int) -> None:
-    remaining = length
-    for run in paragraph.runs:
-        if remaining <= 0:
-            break
-        take = min(len(run.text), remaining)
-        run.text = run.text[take:]
-        remaining -= take
-    if remaining:
-        raise FormatMonographError("Caption prefix spans an unsupported object.")
-
-
-def _move_caption_before_table(
-    document: Any, paragraph: Any, locator: dict[str, Any]
-) -> Any:
-    if locator.get("kind") != "table_cell_paragraph":
-        return paragraph
-    table_index = int(locator["table"])
-    row_index = int(locator["row"])
-    table = document.tables[table_index]
-    row = table.rows[row_index]
-    unique_cells = {id(cell._tc): cell for cell in row.cells}
-    if len(unique_cells) != 1:
-        raise FormatMonographError("Approved caption row must contain one merged cell.")
-    cell = next(iter(unique_cells.values()))
-    other_text = [item.text for item in cell.paragraphs if item._p is not paragraph._p]
-    if any(value.strip() for value in other_text):
-        raise FormatMonographError("Approved caption row contains additional authored text.")
-
-    key = _locator_key(locator)
-    table._tbl.addprevious(paragraph._p)
-    moved = Paragraph(paragraph._p, table._parent)
-    table._tbl.remove(row._tr)
-    cache = getattr(document, "_format_monograph_locator_cache", {})
-    cache[key] = moved
-    setattr(document, "_format_monograph_locator_cache", cache)
-    deleted_rows = getattr(document, "_format_monograph_deleted_table_rows", {})
-    deleted_rows[table_index] = row_index
-    setattr(document, "_format_monograph_deleted_table_rows", deleted_rows)
-    return moved
-
-
-def _replace_caption_identifier(paragraph: Any, entry: dict[str, Any]) -> None:
-    span = entry["identifier_span"]
-    start, end = int(span["start"]), int(span["end"])
-    value = paragraph.text
-    if not 0 <= start < end <= len(value):
-        raise FormatMonographError("Approved caption identifier span is out of range.")
-    if text_sha256(value[start:end]) != entry["identifier_sha256"]:
-        raise FormatMonographError("Approved caption identifier hash does not match.")
-    if text_sha256(value[:start]) != entry["identifier_prefix_sha256"]:
-        raise FormatMonographError("Caption text before the identifier changed.")
-    if text_sha256(value[end:]) != entry["identifier_suffix_sha256"]:
-        raise FormatMonographError("Caption title or separator changed before replacement.")
-
-    runs = list(paragraph.runs)
-    if "".join(run.text for run in runs) != value:
-        raise FormatMonographError(
-            "Caption identifier crosses an unsupported inline object or hyperlink."
-        )
-    replacement = str(entry["replacement_identifier"])
-    cursor = 0
-    inserted = False
-    for run in runs:
-        run_start, run_end = cursor, cursor + len(run.text)
-        cursor = run_end
-        overlap_start, overlap_end = max(start, run_start), min(end, run_end)
-        if overlap_start >= overlap_end:
-            continue
-        unsupported = [
-            child
-            for child in run._r
-            if child.tag not in {qn("w:rPr"), qn("w:t")}
-        ]
-        if unsupported:
-            raise FormatMonographError(
-                "Caption identifier shares a run with an unsupported inline object."
-            )
-        local_start, local_end = overlap_start - run_start, overlap_end - run_start
-        before, after = run.text[:local_start], run.text[local_end:]
-        run.text = before + (replacement if not inserted else "") + after
-        inserted = True
-    if not inserted:
-        raise FormatMonographError("Approved caption identifier could not be replaced.")
-
-
-def _convert_caption_to_seq(document: Any, paragraph: Any, entry: dict[str, Any]) -> None:
-    match = CAPTION_PATTERN.match(paragraph.text)
-    if not match:
-        raise FormatMonographError(
-            f"Approved SEQ caption no longer matches at {entry.get('locator', entry.get('paragraph'))}."
-        )
-    label, hierarchy, sequence, _ = match.groups()
-    if label != entry["label"]:
-        raise FormatMonographError("Approved caption label does not match.")
-    description_start = match.start(4)
-    _remove_prefix_from_runs(paragraph, description_start)
-    insertion = 1 if paragraph._p.pPr is not None else 0
-    elements = [
-        _text_run(f"{label} "),
-        _simple_field(
-            f"STYLEREF {int(entry['heading_level'])} \\s",
-            entry.get("cached_hierarchy", hierarchy),
-        ),
-        _text_run("-"),
-        _simple_field(
-            f"SEQ {entry['sequence_name']} \\* ARABIC \\s {int(entry['heading_level'])}",
-            entry.get("cached_sequence", sequence),
-        ),
-        _text_run(" "),
-    ]
-    for element in reversed(elements):
-        paragraph._p.insert(insertion, element)
-    paragraph.style = ensure_paragraph_style(document, "Caption")
-
-
-def _apply_captions(document: Any, structure_map: dict[str, Any]) -> int:
-    changed = 0
-    version = structure_map.get("schema_version")
-    for entry in structure_map.get("captions", []):
-        if not entry.get("approved"):
-            continue
-        paragraph = (
-            _verified_locator_paragraph(document, entry)
-            if entry.get("locator")
-            else _verified_paragraph(document, entry)
-        )
-        if version == "1.2":
-            action = entry["action"]
-            if action in {"preserve", "style_only"}:
-                continue
-            if action == "replace_identifier":
-                _replace_caption_identifier(paragraph, entry)
-                changed += 1
-                continue
-            if action == "move_caption":
-                paragraph = _move_caption_before_table(
-                    document, paragraph, entry["locator"]
-                )
-                paragraph.style = ensure_paragraph_style(document, "Caption")
-                changed += 1
-                continue
-            if action != "convert_to_seq":
-                raise FormatMonographError(f"Unsupported caption action: {action}")
-
-        if entry.get("migrate_outside_table"):
-            paragraph = _move_caption_before_table(
-                document, paragraph, entry["locator"]
-            )
-        _convert_caption_to_seq(document, paragraph, entry)
-        changed += 1
-    return changed
-
-
-def _set_row_property(row: Any, name: str, enabled: bool) -> None:
-    tr_pr = row._tr.get_or_add_trPr()
-    element = tr_pr.find(qn(f"w:{name}"))
-    if enabled and element is None:
-        element = OxmlElement(f"w:{name}")
-        element.set(qn("w:val"), "true")
-        tr_pr.append(element)
-    elif not enabled and element is not None:
-        tr_pr.remove(element)
-
-
-def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
-    changed = 0
-    for entry in structure_map.get("tables", []):
-        if not entry.get("approved"):
-            continue
-        if has_semantic_structure_map(structure_map) and entry.get("kind") != "data":
-            raise FormatMonographError(
-                "Only tables approved with kind=data may receive data-table rules."
-            )
-        index = int(entry["table"])
-        if not 0 <= index < len(document.tables):
-            raise FormatMonographError(f"Structure-map table is out of range: {index}")
-        table = document.tables[index]
-        expected_table_hash = entry.get("table_text_sha256")
-        if expected_table_hash and _table_text_hash(table) != expected_table_hash:
-            raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
-        first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
-        if text_sha256(first_row) != entry["first_row_sha256"]:
-            raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
-        repeat_rows = entry.get("repeat_header_rows", [])
-        if not repeat_rows and entry.get("repeat_header"):
-            repeat_rows = [0]
-        for row_index in repeat_rows:
-            row_index = int(row_index)
-            if not 0 <= row_index < len(table.rows):
-                raise FormatMonographError(
-                    f"Approved repeat-header row is out of range: {index}:{row_index}"
-                )
-            _set_row_property(table.rows[row_index], "tblHeader", True)
-        if entry.get("prevent_normal_row_split"):
-            caption_row = entry.get("caption_row")
-            for row_index, row in enumerate(table.rows):
-                if caption_row is not None and row_index == int(caption_row):
-                    continue
-                _set_row_property(row, "cantSplit", True)
-        changed += 1
-    return changed
-
-
-def _final_section_is_empty(document: Any, boundary_index: int) -> bool:
-    body = document.element.body
-    boundary = document.paragraphs[boundary_index]._p
-    children = list(body)
-    start = children.index(boundary) + 1
-    return not any(_paragraph_has_payload(element) for element in children[start:-1])
-
-
-def _remove_final_empty_section(document: Any, entry: dict[str, Any]) -> None:
-    boundary_index = int(entry["previous_boundary_paragraph"])
-    if not 0 <= boundary_index < len(document.paragraphs):
-        raise FormatMonographError("Trailing-section boundary is out of range.")
-    boundary = document.paragraphs[boundary_index]
-    if text_sha256(boundary.text) != entry["previous_boundary_sha256"]:
-        raise FormatMonographError("Trailing-section boundary hash mismatch.")
-    if not _final_section_is_empty(document, boundary_index):
-        raise FormatMonographError("Approved trailing section is no longer empty.")
-
-    p_pr = boundary._p.pPr
-    previous = None if p_pr is None else p_pr.find(qn("w:sectPr"))
-    final = document.element.body.sectPr
-    if previous is None or final is None:
-        raise FormatMonographError("Trailing-section boundary is missing section properties.")
-    blocked = ("pgNumType", "titlePg")
-    has_header_footer_refs = any(
-        final.find(qn(f"w:{name}")) is not None
-        for name in ("headerReference", "footerReference")
-    )
-    evidence = entry.get("evidence", {})
-    if (
-        any(final.find(qn(f"w:{name}")) is not None for name in blocked)
-        or (has_header_footer_refs and evidence.get("header_footer_has_payload", True))
-    ):
-        raise FormatMonographError(
-            "Trailing section has independent header, footer, or page-number settings."
-        )
-
-    body = document.element.body
-    children = list(body)
-    boundary_position = children.index(boundary._p)
-    for child in list(children[boundary_position + 1 : -1]):
-        body.remove(child)
-    body.replace(final, copy.deepcopy(previous))
-    p_pr.remove(previous)
-    if not _paragraph_has_payload(boundary._p) and len(p_pr) == 0:
-        body.remove(boundary._p)
-
-
-def _apply_trailing_sections(document: Any, structure_map: dict[str, Any]) -> int:
-    approved = [
-        entry
-        for entry in structure_map.get("trailing_empty_sections", [])
-        if entry.get("approved_delete")
-    ]
-    approved.sort(key=lambda item: int(item["section"]), reverse=True)
-    for entry in approved:
-        if (
-            has_semantic_structure_map(structure_map)
-            and not entry.get("evidence", {}).get("safe_to_delete")
-        ):
-            raise FormatMonographError(
-                "Approved trailing section lacks safe deletion evidence."
-            )
-        if int(entry["section"]) != len(document.sections) - 1:
-            raise FormatMonographError(
-                "Trailing empty sections must be approved and removed from the end inward."
-            )
-        _remove_final_empty_section(document, entry)
-    return len(approved)
-
-
-def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[dict[str, Any]]:
-    toc_targets = _apply_toc_ranges(document, structure_map)
-    heading_targets = _apply_headings(document, structure_map)
-    table_targets = _apply_tables(document, structure_map)
-    caption_targets = _apply_captions(document, structure_map)
-    caption_actions: dict[str, int] = {}
-    if structure_map.get("schema_version") == "1.2":
-        for entry in structure_map.get("captions", []):
-            if not entry.get("approved") or entry.get("action") not in {
-                "replace_identifier",
-                "convert_to_seq",
-                "move_caption",
-            }:
-                continue
-            action = str(entry["action"])
-            caption_actions[action] = caption_actions.get(action, 0) + 1
-    changes = [
-        {"kind": "structure_toc", "targets": toc_targets},
-        {"kind": "structure_headings", "targets": heading_targets},
-        {"kind": "structure_tables", "targets": table_targets},
-        {
-            "kind": "structure_captions",
-            "targets": caption_targets,
-            "actions": caption_actions,
-        },
-        {
-            "kind": "structure_trailing_sections",
-            "targets": _apply_trailing_sections(document, structure_map),
-        },
-    ]
-    return [change for change in changes if change["targets"]]
-
-
-def _approved_indexes(structure_map: dict[str, Any], key: str) -> dict[int, dict[str, Any]]:
-    return {
-        int(entry["paragraph"]): entry
-        for entry in structure_map.get(key, [])
-        if entry.get("approved") and "paragraph" in entry
-    }
-
-
-def _normalize_manual_identifier(
-    value: str, entries: list[dict[str, Any]]
-) -> str:
-    for entry in entries:
-        span = entry["identifier_span"]
-        start, end = int(span["start"]), int(span["end"])
-        if text_sha256(value) == entry["text_sha256"]:
-            if (
-                text_sha256(value[:start]) == entry["identifier_prefix_sha256"]
-                and text_sha256(value[start:end]) == entry["identifier_sha256"]
-                and text_sha256(value[end:]) == entry["identifier_suffix_sha256"]
-            ):
-                return value[:start] + "[[CAPTION_IDENTIFIER]]" + value[end:]
-        replacement = str(entry["replacement_identifier"])
-        replacement_end = start + len(replacement)
-        if (
-            value[start:replacement_end] == replacement
-            and text_sha256(value[:start]) == entry["identifier_prefix_sha256"]
-            and text_sha256(value[replacement_end:])
-            == entry["identifier_suffix_sha256"]
-        ):
-            return value[:start] + "[[CAPTION_IDENTIFIER]]" + value[replacement_end:]
-    return value
-
-
-def audit_caption_identifier_replacements(
-    original_path: Path, formatted_path: Path, structure_map: dict[str, Any]
-) -> list[dict[str, Any]]:
-    if structure_map.get("schema_version") != "1.2":
-        return []
-    from _common import load_document
-
-    original = load_document(original_path)
-    formatted = load_document(formatted_path)
-    results = []
-    for entry in structure_map.get("captions", []):
-        if not entry.get("approved") or entry.get("action") != "replace_identifier":
-            continue
-        source = resolve_paragraph_locator(original, entry["locator"])
-        target = resolve_paragraph_locator(formatted, entry["locator"])
-        span = entry["identifier_span"]
-        start, end = int(span["start"]), int(span["end"])
-        title_start = int(entry["title_span_start"])
-        source_ok = (
-            text_sha256(source.text) == entry["text_sha256"]
-            and text_sha256(source.text[start:end]) == entry["identifier_sha256"]
-            and text_sha256(source.text[title_start:]) == entry["title_text_sha256"]
-        )
-        expected = (
-            source.text[:start]
-            + str(entry["replacement_identifier"])
-            + source.text[end:]
-        )
-        replacement_end = start + len(str(entry["replacement_identifier"]))
-        title_shift = replacement_end - end
-        title_preserved = text_sha256(target.text[title_start + title_shift :]) == entry[
-            "title_text_sha256"
-        ]
-        passed = source_ok and target.text == expected and title_preserved
-        results.append(
-            {
-                "locator": entry["locator"],
-                "status": "pass" if passed else "fail",
-                "identifier_changed_as_approved": target.text == expected,
-                "title_preserved": title_preserved,
-            }
-        )
-    return results
-
-
-def structure_content_inventory(
-    path: Path, structure_map: dict[str, Any]
-) -> dict[str, list[str]]:
-    toc_indexes = {
-        index
-        for entry in structure_map.get("toc_ranges", [])
-        if entry.get("approved")
-        for index in range(int(entry["start_paragraph"]), int(entry["end_paragraph"]) + 1)
-    }
-    headings = _approved_indexes(structure_map, "headings")
-    captions = {
-        index: entry
-        for index, entry in _approved_indexes(structure_map, "captions").items()
-        if structure_map.get("schema_version") != "1.2"
-        or entry.get("action") == "convert_to_seq"
-    }
-    identifier_replacements = [
-        entry
-        for entry in structure_map.get("captions", [])
-        if entry.get("approved") and entry.get("action") == "replace_identifier"
-    ]
-    migrated_caption_hashes = {
-        entry["text_sha256"]
-        for entry in structure_map.get("captions", [])
-        if entry.get("approved")
-        and entry.get("migrate_outside_table")
-        and entry.get("locator", {}).get("kind") == "table_cell_paragraph"
-    }
-    manual_migrated_caption_hashes = {
-        entry["text_sha256"]
-        for entry in structure_map.get("captions", [])
-        if entry.get("approved")
-        and entry.get("action") == "move_caption"
-        and entry.get("migrate_outside_table")
-    }
-    has_migrated_captions = bool(
-        migrated_caption_hashes - manual_migrated_caption_hashes
-    )
-    tail_cutoffs = []
-    for entry in structure_map.get("trailing_empty_sections", []):
-        if not entry.get("approved_delete"):
-            continue
-        boundary = int(entry["previous_boundary_paragraph"])
-        boundary_is_empty = entry.get("previous_boundary_sha256") == text_sha256("")
-        tail_cutoffs.append(boundary if boundary_is_empty else boundary + 1)
-    tail_cutoff = min(tail_cutoffs, default=None)
-
-    result: dict[str, list[str]] = {}
-    with zipfile.ZipFile(path) as package:
-        for name in sorted(package.namelist()):
-            if not CONTENT_PART.match(name):
-                continue
-            root = etree.fromstring(package.read(name))
-            values = []
-            body_index = -1
-            for paragraph in root.xpath(".//w:p", namespaces=NS):
-                direct_body_paragraph = (
-                    name == "word/document.xml"
-                    and paragraph.getparent() is not None
-                    and paragraph.getparent().tag == qn("w:body")
-                )
-                if direct_body_paragraph:
-                    body_index += 1
-                current_index = body_index if direct_body_paragraph else None
-                if current_index is not None and tail_cutoff is not None and current_index >= tail_cutoff:
-                    continue
-                value = _paragraph_text_without_field_results(paragraph)
-                value = FIELD_MARKER_PATTERN.sub("", value)
-                value = _normalize_manual_identifier(value, identifier_replacements)
-                original_caption = CAPTION_PATTERN.match(value)
-                if text_sha256(value) in manual_migrated_caption_hashes:
-                    value = "[[MOVED_MANUAL_CAPTION]]"
-                elif text_sha256(value) in migrated_caption_hashes and original_caption:
-                    value = f"{original_caption.group(1)} {original_caption.group(4)}"
-                elif has_migrated_captions and direct_body_paragraph:
-                    styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
-                    generated = re.match(r"^\s*(å›¾|è¡¨)\s*[-ï¼â€”â€“]\s*(.*)$", value)
-                    if styles == ["Caption"] and generated:
-                        value = f"{generated.group(1)} {generated.group(2)}"
-                if current_index in toc_indexes:
-                    value = ""
-                elif current_index in headings:
-                    match = _heading_prefix_pattern(int(headings[current_index]["level"])).match(value)
-                    if match:
-                        value = value[match.end() :]
-                elif current_index in captions:
-                    match = CAPTION_PATTERN.match(value)
-                    if match:
-                        value = f"{match.group(1)} {match.group(4)}"
-                    else:
-                        value = re.sub(r"^(å›¾|è¡¨)\s+[-ï¼â€”â€“]?\s*", r"\1 ", value)
-                values.append(value)
-            result[name] = values
-    return result
-
-
-def structure_content_fingerprint(path: Path, structure_map: dict[str, Any]) -> str:
-    result = structure_content_inventory(path, structure_map)
-    encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+                normalized_hash = entry.get("normalized_text_sha256")
+                candidates = [
+                    paragraph
+                    for paragraph in document.paragraphs
+                    if paragraph.style
+                    and paragraph.style.name == expected_style
+  ×Í}îÚ$z{-®éÜj×÷&–v–æÅ÷Fƒ¢F‚Âf÷&ÖGFVE÷Fƒ¢F‚Â7G'V7GW&UöÖ¢F–7E·7G"Âç•Ğ¢’ÓâÆ—7E¶F–7E·7G"Âç•ÕÓ ¢–bæ÷B†5ö6F–öåö7F–öç5öÖ‡7G'V7GW&UöÖ“ ¢&WGW&âµĞ¢g&öÒö6öÖÖöâ–×÷'BÆöEöFö7VÖVç@ ¢÷&–v–æÂÒÆöEöFö7VÖVçB†÷&–v–æÅ÷F‚¢f÷&ÖGFVBÒÆöEöFö7VÖVçB†f÷&ÖGFVE÷F‚¢&W7VÇG2ÒµĞ¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚&6F–öç2"ÂµÒ“ ¢–bæ÷BVçG'’ævWB‚&&÷fVB"’÷"VçG'’ævWB‚&7F–öâ"’Ò'&WÆ6Uö–FVçF–f–W"# ¢6öçF–çVP¢6÷W&6UöÆö6F÷"Ò6÷’æFVW6÷’†VçG'•²&Æö6F÷"%Ò¢–b6÷W&6UöÆö6F÷"ævWB‚&¶–æB"’ÓÒ&&öG•÷&w&‚"æBVçG'’ævWB‚'FW‡E÷6†#Sb"“ ¢6÷W&6UöÆö6F÷"ç6WFFVfVÇB‚'FW‡E÷6†#Sb"ÂVçG'•²'FW‡E÷6†#Sb%Ò¢6÷W&6RÒ&W6öÇfU÷&w&…öÆö6F÷"†÷&–v–æÂÂ6÷W&6UöÆö6F÷"¢F&vWBÒ÷&W6öÇfU÷&WÆ6VEö6F–öå÷F&vWB†f÷&ÖGFVBÂVçG'’¢7âÒVçG'•²&–FVçF–f–W%÷7â%Ğ¢7F'BÂVæBÒ–çB‡7å²'7F'B%Ò’Â–çB‡7å²&VæB%Ò¢F—FÆU÷7F'BÒ–çB†VçG'•²'F—FÆU÷7å÷7F'B%Ò¢6÷W&6Uöö²Ò€¢FW‡E÷6†#Sb‡6÷W&6RçFW‡B’ÓÒVçG'•²'FW‡E÷6†#Sb%Ğ¢æBFW‡E÷6†#Sb‡6÷W&6RçFW‡E·7F'C¦VæEÒ’ÓÒVçG'•²&–FVçF–f–W%÷6†#Sb%Ğ¢æBFW‡E÷6†#Sb‡6÷W&6RçFW‡E·F—FÆU÷7F'C¥Ò’ÓÒVçG'•²'F—FÆU÷FW‡E÷6†#Sb%Ğ¢¢W‡V7FVBÒ€¢6÷W&6RçFW‡E³§7F'EĞ¢²7G"†VçG'•²'&WÆ6VÖVçEö–FVçF–f–W"%Ò¢²6÷W&6RçFW‡E¶VæC¥Ğ¢¢&WÆ6VÖVçEöVæBÒ7F'B²ÆVâ‡7G"†VçG'•²'&WÆ6VÖVçEö–FVçF–f–W"%Ò’¢F—FÆU÷6†–gBÒ&WÆ6VÖVçEöVæBÒVæ@¢F—FÆU÷&W6W'fVBÒFW‡E÷6†#Sb‡F&vWBçFW‡E·F—FÆU÷7F'B²F—FÆU÷6†–gB¥Ò’ÓÒVçG'•°¢'F—FÆU÷FW‡E÷6†#Sb ¢Ğ¢76VBÒ6÷W&6Uöö²æBF&vWBçFW‡BÓÒW‡V7FVBæBF—FÆU÷&W6W'fV@¢&W7VÇG2æVæB€¢°¢&Æö6F÷"#¢VçG'•²&Æö6F÷"%ÒÀ¢'7FGW2#¢'72"–b76VBVÇ6R&f–Â"À¢&–FVçF–f–W%ö6†ævVEö5ö&÷fVB#¢F&vWBçFW‡BÓÒW‡V7FVBÀ¢'F—FÆU÷&W6W'fVB#¢F—FÆU÷&W6W'fVBÀ¢Ğ¢¢&WGW&â&W7VÇG0  ¦FVb÷Fö5öf–VÆE÷&w&‡2‡&ö÷C¢WG&VRåôVÆVÖVçB’Óâ6WE´ç•Ó ¢&öF–W2Ò&ö÷Bç‡F‚‚"÷s¦Fö7VÖVçB÷s¦&öG’"ÂæÖW76W3Ôå2¢–bæ÷B&öF–W3 ¢&WGW&â6WB‚¢&W7VÇC¢6WE´ç•ÒÒ6WB‚¢7F6³¢Æ—7E¶F–7E·7G"Âç•ÕÒÒµĞ¢f÷"&w&‚–â&öF–W5³Òç‡F‚‚"â÷s§"ÂæÖW76W3Ôå2“ ¢–b&w&‚ç‡F‚€¢râò÷s¦fÆE6–×ÆU·7F'G2×v—F‚‡G&ç6ÆFR†æ÷&ÖÆ—¦R×76R„s¦–ç7G"’Â'Fö2"Â%Dô2"’Â%Dô2"•ÒrÀ¢æÖW76W3Ôå2À¢“ ¢&W7VÇBæFB‡&w&‚¢–bç’†—FVÒævWB‚&—5÷Fö2"’æB—FVÒævWB‚'&W7VÇB"’f÷"—FVÒ–â7F6²“ ¢&W7VÇBæFB‡&w&‚¢f÷"VÆVÖVçB–â&w&‚æ—FW"‚“ ¢–bVÆVÖVçBçFrÓÒâ‚'s¦fÆD6†""“ ¢¶–æBÒVÆVÖVçBævWB‡â‚'s¦fÆD6†%G—R"’¢–b¶–æBÓÒ&&Vv–â# ¢7F6²æVæB‡²''G2#¢µÒÂ&—5÷Fö2#¢fÇ6RÂ'&W7VÇB#¢fÇ6WÒ¢VÆ–b¶–æBÓÒ'6W&FR"æB7F6³ ¢–ç7G'V7F–öâÒ""æ¦ö–â‡7F6µ²ÓÕ²''G2%Ò’ç7G&—‚’çWW"‚¢7F6µ²ÓÕ²&—5÷Fö2%ÒÒ–ç7G'V7F–öâç7F'G7v—F‚‚%Dô2"¢7F6µ²ÓÕ²'&W7VÇB%ÒÒG'VP¢–b7F6µ²ÓÕ²&—5÷Fö2%Ó ¢&W7VÇBæFB‡&w&‚¢VÆ–b¶–æBÓÒ&VæB"æB7F6³ ¢–bç’†—FVÒævWB‚&—5÷Fö2"’æB—FVÒævWB‚'&W7VÇB"’f÷"—FVÒ–â7F6²“ ¢&W7VÇBæFB‡&w&‚¢7F6²ç÷‚¢VÆ–bVÆVÖVçBçFrÓÒâ‚'s¦–ç7G%FW‡B"’æB7F6²æBæ÷B7F6µ²ÓÕ²'&W7VÇB%Ó ¢7F6µ²ÓÕ²''G2%ÒæVæB†VÆVÖVçBçFW‡B÷"""¢–bç’†—FVÒævWB‚&—5÷Fö2"’æB—FVÒævWB‚'&W7VÇB"’f÷"—FVÒ–â7F6²“ ¢&W7VÇBæFB‡&w&‚¢&WGW&â&W7VÇ@  ¦FVböÆVv7•÷Fö5öV×G•öæ6†÷'2€¢&ö÷C¢WG&VRåôVÆVÖVçBÀ¢Fö5öf–VÆE÷&w&‡3¢6WE´ç•ÒÀ¢7G'V7GW&UöÖ¢F–7E·7G"Âç•ÒÀ¢’Óâ6WE´ç•Ó ¢""%&V6övæ—¦RV×G’æ6†÷'2ÆVgB'’&RÓã27FF–2ÕDô2Ö–w&F–öââ"" ¢–bæ÷BFö5öf–VÆE÷&w&‡3 ¢&WGW&â6WB‚¢&÷fVEöÆVæwF‡2Ò°¢–çB†VçG'•²&VæE÷&w&‚%Ò’Ò–çB†VçG'•²'7F'E÷&w&‚%Ò¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚'Fö5÷&ævW2"ÂµÒ¢–bVçG'’ævWB‚&&÷fVB"¢Ğ¢&VÖ–æ–ærÒÖ‚†&÷fVEöÆVæwF‡2ÂFVfVÇCÓ¢–b&VÖ–æ–ærÃÒ ¢&WGW&â6WB‚¢&öG’Ò&ö÷Bæf–æB‡â‚'s¦&öG’"’¢–b&öG’—2æöæS ¢&WGW&â6WB‚¢6†–ÆG&VâÒÆ—7B†&öG’¢f–VÆE÷÷6—F–öç2Ò°¢–æFW‚f÷"–æFW‚Â6†–ÆB–âVçVÖW&FR†6†–ÆG&Vâ’–b6†–ÆB–âFö5öf–VÆE÷&w&‡0¢Ğ¢–bæ÷Bf–VÆE÷÷6—F–öç3 ¢&WGW&â6WB‚¢&W7VÇBÒ6WB‚¢f÷"6†–ÆB–â6†–ÆG&Vå¶Ö‚†f–VÆE÷÷6—F–öç2’²¥Ó ¢–b&VÖ–æ–ærÃÒ÷"6†–ÆBçFrÒâ‚'s§"“ ¢'&V°¢fÇVRÒd”TÄEôÔ$´U%õEDU$âç7V"€¢""Â÷&w&…÷FW‡E÷v—F†÷WEöf–VÆE÷&W7VÇG2†6†–ÆB¢¢–bfÇVS ¢'&V°¢&W7VÇBæFB†6†–ÆB¢&VÖ–æ–ærÓÒ¢&WGW&â&W7VÇ@  ¦FVbö&÷fVE÷F–Å÷&w&‡2€¢&ö÷C¢WG&VRåôVÆVÖVçBÂ7G'V7GW&UöÖ¢F–7E·7G"Âç•Ğ¢’Óâ6WE´ç•Ó ¢&÷fVBÒ°¢VçG'¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚'G&–Æ–æuöV×G•÷6V7F–öç2"ÂµÒ¢–bVçG'’ævWB‚&&÷fVEöFVÆWFR"¢Ğ¢–bæ÷B&÷fVC ¢&WGW&â6WB‚¢&öG’Ò&ö÷Bæf–æB‡â‚'s¦&öG’"’¢–b&öG’—2æöæS ¢&WGW&â6WB‚¢F—&V7E÷&w&‡2Ò¶6†–ÆBf÷"6†–ÆB–â&öG’–b6†–ÆBçFrÓÒâ‚'s§"•Ğ¢f—'7E÷&VÖ÷fVE÷÷6—F–öç2ÒµĞ¢6†–ÆG&VâÒÆ—7B†&öG’¢f÷"VçG'’–â&÷fVC ¢W‡V7FVEö†6‚ÒVçG'’ævWB‚'&Wf–÷W5ö&÷VæF'•÷6†#Sb"¢&÷VæF'•ö—5öV×G’ÒW‡V7FVEö†6‚ÓÒFW‡E÷6†#Sb‚""¢ÖF6†–ærÒ°¢&w&€¢f÷"&w&‚–âF—&V7E÷&w&‡0¢–bW‡V7FVEö†6‚æBFW‡E÷6†#Sb…÷&w&…÷FW‡E÷v—F†÷WEöf–VÆE÷&W7VÇG2‡&w&‚’¢ÓÒW‡V7FVEö†6€¢Ğ¢–bÆVâ†ÖF6†–ær’ÓÒ ¢&÷VæF'•÷&w&‚ÒÖF6†–æu³Ğ¢VÇ6S ¢&÷VæF'’Ò–çB†VçG'•²'&Wf–÷W5ö&÷VæF'•÷&w&‚%Ò¢–bæ÷BÃÒ&÷VæF'’ÂÆVâ†F—&V7E÷&w&‡2“ ¢6öçF–çVP¢6æF–FFRÒF—&V7E÷&w&‡5¶&÷VæF'•Ğ¢–bW‡V7FVEö†6‚æBFW‡E÷6†#Sb€¢÷&w&…÷FW‡E÷v—F†÷WEöf–VÆE÷&W7VÇG2†6æF–FFR¢’ÒW‡V7FVEö†6ƒ ¢6öçF–çVP¢&÷VæF'•÷&w&‚Ò6æF–FFP¢–b&÷VæF'•ö—5öV×G’æBç’€¢—FVÒævWB‚'&Wf–÷W5ö&÷VæF'•÷6†#Sb"’ÒFW‡E÷6†#Sb‚""¢f÷"—FVÒ–â&÷fV@¢“ ¢6öçF–çVP¢&÷VæF'•÷÷6—F–öâÒ6†–ÆG&Vâæ–æFW‚†&÷VæF'•÷&w&‚¢f—'7E÷&VÖ÷fVE÷÷6—F–öç2æVæB€¢&÷VæF'•÷÷6—F–öâ–b&÷VæF'•ö—5öV×G’VÇ6R&÷VæF'•÷÷6—F–öâ²¢¢–bæ÷Bf—'7E÷&VÖ÷fVE÷÷6—F–öç3 ¢&WGW&â6WB‚¢f—'7E÷&VÖ÷fVBÒÖ–â†f—'7E÷&VÖ÷fVE÷÷6—F–öç2¢&WGW&â°¢&w&€¢f÷"6†–ÆB–â6†–ÆG&Vå¶f—'7E÷&VÖ÷fVC¥Ğ¢f÷"&w&‚–â6†–ÆBç‡F‚‚"âò÷s§Â6VÆc£§s§"ÂæÖW76W3Ôå2¢Ğ  ¦FVbö&÷fVEöFVÆWFVEö†VFW%öfö÷FW%÷'G2€¢6¶vS¢¦—f–ÆRå¦—f–ÆRÀ¢Fö7VÖVçE÷&ö÷C¢WG&VRåôVÆVÖVçBÀ¢7G'V7GW&UöÖ¢F–7E·7G"Âç•ÒÀ¢’Óâ6WE·7G%Ó ¢FVÆWFVE÷6V7F–öç2Ò°¢–çB†VçG'•²'6V7F–öâ%Ò¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚'G&–Æ–æuöV×G•÷6V7F–öç2"ÂµÒ¢–bVçG'’ævWB‚&&÷fVEöFVÆWFR"¢Ğ¢–bæ÷BFVÆWFVE÷6V7F–öç3 ¢&WGW&â6WB‚¢6V7F–öç2ÒFö7VÖVçE÷&ö÷Bç‡F‚‚"âò÷s§6V7E""ÂæÖW76W3Ôå2¢FVÆWFVEö–G3¢6WE·7G%ÒÒ6WB‚¢&WF–æVEö–G3¢6WE·7G%ÒÒ6WB‚¢&VÆF–öç6†—öGG&–'WFRÒâ‚'#¦–B"¢f÷"–æFW‚Â6V7F–öâ–âVçVÖW&FR‡6V7F–öç2“ ¢F&vWBÒFVÆWFVEö–G2–b–æFW‚–âFVÆWFVE÷6V7F–öç2VÇ6R&WF–æVEö–G0¢f÷"&VfW&Væ6R–â6V7F–öâç‡F‚€¢"â÷s¦†VFW%&VfW&Væ6RÂâ÷s¦fö÷FW%&VfW&Væ6R"ÂæÖW76W3Ôå0¢“ ¢&VÆF–öç6†—ö–BÒ&VfW&Væ6RævWB‡&VÆF–öç6†—öGG&–'WFR¢–b&VÆF–öç6†—ö–C ¢F&vWBæFB‡&VÆF–öç6†—ö–B¢&VÖ÷f&ÆUö–G2ÒFVÆWFVEö–G2Ò&WF–æVEö–G0¢–bæ÷B&VÖ÷f&ÆUö–G3 ¢&WGW&â6WB‚¢&VÆF–öç6†—5öæÖRÒ'v÷&Bõ÷&VÇ2öFö7VÖVçBç†ÖÂç&VÇ2 ¢–b&VÆF–öç6†—5öæÖRæ÷B–â6¶vRææÖVÆ—7B‚“ ¢&WGW&â6WB‚¢&VÆF–öç6†—2ÒWG&VRæg&ö×7G&–ær‡6¶vRç&VB‡&VÆF–öç6†—5öæÖR’¢&W7VÇBÒ6WB‚¢f÷"&VÆF–öç6†—–â&VÆF–öç6†—3 ¢–b&VÆF–öç6†—ævWB‚$–B"’æ÷B–â&VÖ÷f&ÆUö–G3 ¢6öçF–çVP¢F&vWBÒ&VÆF–öç6†—ævWB‚%F&vWB"Â""¢æ÷&ÖÆ—¦VBÒ÷6—‡F‚ææ÷&×F‚‡÷6—‡F‚æ¦ö–â‚'v÷&B"ÂF&vWB’¢–b&RægVÆÆÖF6‚‡"'v÷&Bòƒó¦†VFW'Æfö÷FW"•ÆBµÂç†ÖÂ"Âæ÷&ÖÆ—¦VB“ ¢&W7VÇBæFB†æ÷&ÖÆ—¦VB¢&WGW&â&W7VÇ@  ¦FVb7G'V7GW&Uö6öçFVçEö–çfVçF÷'’€¢Fƒ¢F‚Â7G'V7GW&UöÖ¢F–7E·7G"Âç•ĞĞ¢’ÓâF–7E·7G"ÂÆ—7E·7G%ÕÓ Ğ¢Fö5ö–æFW†W2Ò°Ğ¢–æFW€Ğ¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚'Fö5÷&ævW2"ÂµÒĞ¢–bVçG'’ævWB‚&&÷fVB"Ğ¢f÷"–æFW‚–â&ævR†–çB†VçG'•²'7F'E÷&w&‚%Ò’Â–çB†VçG'•²&VæE÷&w&‚%Ò’²Ğ¢ĞĞ¢†VF–æuöVçG&–W2Ò°¢VçG'’f÷"VçG'’–â7G'V7GW&UöÖævWB‚&†VF–æw2"ÂµÒ’–bVçG'’ævWB‚&&÷fVB"¢Ğ¢6F–öåöVçG&–W2Ò°¢VçG'¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚&6F–öç2"ÂµÒ¢–bVçG'’ævWB‚&&÷fVB"¢æB€¢æ÷B†5ö6F–öåö7F–öç5öÖ‡7G'V7GW&UöÖ¢÷"VçG'’ævWB‚&7F–öâ"’ÓÒ&6öçfW'E÷Fõ÷6W ¢¢Ğ¢–FVçF–f–W%÷&WÆ6VÖVçG2Ò°¢VçG'¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚&6F–öç2"ÂµÒ¢–bVçG'’ævWB‚&&÷fVB"’æBVçG'’ævWB‚&7F–öâ"’ÓÒ'&WÆ6Uö–FVçF–f–W" ¢Ğ¢Ö–w&FVEö6F–öåö†6†W2Ò°Ğ¢VçG'•²'FW‡E÷6†#Sb%ĞĞ¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚&6F–öç2"ÂµÒĞ¢–bVçG'’ævWB‚&&÷fVB"Ğ¢æBVçG'’ævWB‚&Ö–w&FUö÷WG6–FU÷F&ÆR"Ğ¢æBVçG'’ævWB‚&Æö6F÷""Â·Ò’ævWB‚&¶–æB"’ÓÒ'F&ÆUö6VÆÅ÷&w&‚ Ğ¢ĞĞ¢ÖçVÅöÖ–w&FVEö6F–öåö†6†W2Ò°¢VçG'•²'FW‡E÷6†#Sb%Ğ¢f÷"VçG'’–â7G'V7GW&UöÖævWB‚&6F–öç2"ÂµÒ¢–bVçG'’ævWB‚&&÷fVB"¢æBVçG'’ævWB‚&7F–öâ"’ÓÒ&Ö÷fUö6F–öâ ¢æBVçG'’ævWB‚&Ö–w&FUö÷WG6–FU÷F&ÆR"¢Ğ¢†5öÖ–w&FVEö6F–öç2Ò&ööÂ€¢Ö–w&FVEö6F–öåö†6†W2ÒÖçVÅöÖ–w&FVEö6F–öåö†6†W0¢¢&W7VÇC¢F–7E·7G"ÂÆ—7E·7G%ÕÒÒ·Ğ¢v—F‚¦—f–ÆRå¦—f–ÆR‡F‚’26¶vS ¢Fö7VÖVçE÷&ö÷BÒWG&VRæg&ö×7G&–ær‡6¶vRç&VB‚'v÷&BöFö7VÖVçBç†ÖÂ"’¢–væ÷&VE÷'G2Òö&÷fVEöFVÆWFVEö†VFW%öfö÷FW%÷'G2€¢6¶vRÂFö7VÖVçE÷&ö÷BÂ7G'V7GW&UöÖ ¢¢f÷"æÖR–â6÷'FVB‡6¶vRææÖVÆ—7B‚’“ ¢–bæ÷B4ôåDTåEõ%BæÖF6‚†æÖR’÷"æÖR–â–væ÷&VE÷'G3 ¢6öçF–çVP¢&ö÷BÒFö7VÖVçE÷&ö÷B–bæÖRÓÒ'v÷&BöFö7VÖVçBç†ÖÂ"VÇ6RWG&VRæg&ö×7G&–ær€¢6¶vRç&VB†æÖR¢¢Fö5öf–VÆE÷&w&‡2Ò€¢÷Fö5öf–VÆE÷&w&‡2‡&ö÷B’–bæÖRÓÒ'v÷&BöFö7VÖVçBç†ÖÂ"VÇ6R6WB‚¢¢ÆVv7•÷Fö5öæ6†÷'2Ò€¢öÆVv7•÷Fö5öV×G•öæ6†÷'2‡&ö÷BÂFö5öf–VÆE÷&w&‡2Â7G'V7GW&UöÖ¢–bæÖRÓÒ'v÷&BöFö7VÖVçBç†ÖÂ ¢VÇ6R6WB‚¢¢&÷fVE÷F–Å÷&w&‡2Ò€¢ö&÷fVE÷F–Å÷&w&‡2‡&ö÷BÂ7G'V7GW&UöÖ¢–bæÖRÓÒ'v÷&BöFö7VÖVçBç†ÖÂ ¢VÇ6R6WB‚¢¢fÇVW2ÒµĞ¢&öG•ö–æFW‚ÒÓ¢f÷"&w&‚–â&ö÷Bç‡F‚‚"âò÷s§"ÂæÖW76W3Ôå2“ ¢F—&V7Eö&öG•÷&w&‚Ò€Ğ¢æÖRÓÒ'v÷&BöFö7VÖVçBç†ÖÂ Ğ¢æB&w&‚ævWG&VçB‚’—2æ÷BæöæPĞ¢æB&w&‚ævWG&VçB‚’çFrÓÒâ‚'s¦&öG’"Ğ¢Ğ¢–bF—&V7Eö&öG•÷&w&ƒ Ğ¢&öG•ö–æFW‚³ÒĞ¢7W'&VçEö–æFW‚Ò&öG•ö–æFW‚–bF—&V7Eö&öG•÷&w&‚VÇ6RæöæPĞ¢–b&w&‚–â&÷fVE÷F–Å÷&w&‡3 ¢6öçF–çVP¢–b&w&‚–âFö5öf–VÆE÷&w&‡2÷"&w&‚–âÆVv7•÷Fö5öæ6†÷'3 ¢6öçF–çVP¢–b€¢7W'&VçEö–æFW‚—2æ÷BæöæP¢æBæ÷BFö5öf–VÆE÷&w&‡0¢æB7W'&VçEö–æFW‚–âFö5ö–æFW†W0¢“ ¢6öçF–çVP¢fÇVRÒ÷&w&…÷FW‡E÷v—F†÷WEöf–VÆE÷&W7VÇG2‡&w&‚¢fÇVRÒd”TÄEôÔ$´U%õEDU$âç7V"‚""ÂfÇVR¢fÇVRÒöæ÷&ÖÆ—¦UöÖçVÅö–FVçF–f–W"‡fÇVRÂ–FVçF–f–W%÷&WÆ6VÖVçG2¢÷&–v–æÅö6F–öâÒ4D”ôåõEDU$âæÖF6‚‡fÇVR¢–bFW‡E÷6†#Sb‡fÇVR’–âÖçVÅöÖ–w&FVEö6F–öåö†6†W3 ¢fÇVRÒ%µ´ÔõdTEôÔåTÅô4D”ôåÕÒ ¢VÆ–bFW‡E÷6†#Sb‡fÇVR’–âÖ–w&FVEö6F–öåö†6†W2æB÷&–v–æÅö6F–öã ¢fÇVRÒb'¶÷&–v–æÅö6F–öâæw&÷Wƒ—Ò¶÷&–v–æÅö6F–öâæw&÷WƒB—Ò Ğ¢VÆ–b††5öÖ–w&FVEö6F–öç2÷"6F–öåöVçG&–W2’æBF—&V7Eö&öG•÷&w&ƒ ¢7G–ÆW2Ò&w&‚ç‡F‚‚"â÷s§"÷s§7G–ÆRôs§fÂ"ÂæÖW76W3Ôå2Ğ¢vVæW&FVBÒ&RæÖF6‚‡"%åÇ2¢Y»çÎŠ‚•Ç2¥²ŞûÈŞ(	N(	5ÕÇ2¢‚â¢’B"ÂfÇVRĞ¢–b7G–ÆW2ÓÒ²$6F–öâ%ÒæBvVæW&FVC Ğ¢fÇVRÒb'¶vVæW&FVBæw&÷Wƒ—Ò¶vVæW&FVBæw&÷Wƒ"—Ò Ğ¢†VF–æuöVçG'’ÒæW‡B€¢€¢VçG'¢f÷"VçG'’–â†VF–æuöVçG&–W0¢–bFW‡E÷6†#Sb‡fÇVR’ÓÒVçG'’ævWB‚'FW‡E÷6†#Sb"¢’À¢æöæRÀ¢¢–b†VF–æuöVçG'’—2æ÷BæöæS ¢ÖF6‚Òö†VF–æu÷&Vf—…÷GFW&â†–çB††VF–æuöVçG'•²&ÆWfVÂ%Ò’’æÖF6‚‡fÇVR¢–bÖF6ƒ ¢fÇVRÒfÇVU¶ÖF6‚æVæB‚’¥Ğ¢VÇ6S ¢7G–ÆW2Ò&w&‚ç‡F‚‚"â÷s§"÷s§7G–ÆRôs§fÂ"ÂæÖW76W3Ôå2¢7G–ÆUöÖF6‚Ò€¢&RægVÆÆÖF6‚‡"$†VF–ær…³ÓEÒ’"Â7G–ÆW5³Ò’–b7G–ÆW2VÇ6RæöæP¢¢–b7G–ÆUöÖF6ƒ ¢ÖF6‚Òö†VF–æu÷&Vf—…÷GFW&â†–çB‡7G–ÆUöÖF6‚æw&÷Wƒ’’’æÖF6‚€¢fÇVP¢¢–bÖF6ƒ ¢fÇVRÒfÇVU¶ÖF6‚æVæB‚’¥Ğ¢–bç’€¢FW‡E÷6†#Sb‡fÇVR’ÓÒVçG'’ævWB‚'FW‡E÷6†#Sb"¢f÷"VçG'’–â6F–öåöVçG&–W0¢“ ¢ÖF6‚Ò4D”ôåõEDU$âæÖF6‚‡fÇVR¢–bÖF6ƒ Ğ¢fÇVRÒb'¶ÖF6‚æw&÷Wƒ—Ò¶ÖF6‚æw&÷WƒB—Ò Ğ¢VÇ6S Ğ¢fÇVRÒ&Rç7V"‡"%âY»çÎŠ‚•Ç2µ²ŞûÈŞ(	N(	5ÓõÇ2¢"Â"%Ã"ÂfÇVRĞ¢fÇVW2æVæB‡fÇVRĞ¢&W7VÇE¶æÖUÒÒfÇVW0Ğ¢&WGW&â&W7VÇ@Ğ Ğ Ğ¦FVb7G'V7GW&Uö6öçFVçEöf–ævW'&–çB‡Fƒ¢F‚Â7G'V7GW&UöÖ¢F–7E·7G"Âç•Ò’Óâ7G# Ğ¢&W7VÇBÒ7G'V7GW&Uö6öçFVçEö–çfVçF÷'’‡F‚Â7G'V7GW&UöÖĞ¢Væ6öFVBÒ§6öâæGV×2‡&W7VÇBÂVç7W&Uö66–“ÔfÇ6RÂ6W&F÷'3Ò‚"Â"Â#¢"’Â6÷'Eö¶W—3ÕG'VRĞ¢&WGW&â†6†Æ–"ç6†#Sb†Væ6öFVBæVæ6öFR‚'WFbÓ‚"’’æ†W†F–vW7B‚Ğ

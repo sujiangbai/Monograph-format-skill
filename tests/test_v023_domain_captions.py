@@ -83,7 +83,7 @@ class V023DomainCaptionTests(unittest.TestCase):
         document.save(source)
 
         structure = candidate_structure_map(source)
-        self.assertEqual("1.2", structure["schema_version"])
+        self.assertEqual("1.3", structure["schema_version"])
         self.assertEqual(2, len(structure["captions"]))
         figure, table = structure["captions"]
         self.assertEqual("preserve", figure["action"])
@@ -306,7 +306,7 @@ class V023DomainCaptionTests(unittest.TestCase):
             self.assertIn(b"SEQ Figure", package.read("word/document.xml"))
 
     def test_legacy_structure_maps_remain_readable(self) -> None:
-        for version in ("1.0", "1.1"):
+        for version in ("1.0", "1.1", "1.2"):
             value = {
                 "schema_version": version,
                 "status": "approved",
