@@ -470,4 +470,987 @@ def style_name_for_selector(selector: dict[str, str]) -> str | None:
 
 
 def supported_properties(rule: dict[str, Any]) -> set[str]:
-    kind = rule["selecï­¶¶‰žËkºwµçQ¥¹}ÁÉ•™¥àˆ°€‰Á…É…É…Á ˆè¥¹‘•à°€‰É•µ½Ù•ˆèÁÉ•™¥áô°(€€€€€€€€¤(€€€€€€€¡…¹•€¬ô€Ä(€€€É•ÑÕÉ¸¡…¹•(()‘•˜}¹•áÑ}¹Õµ‰•É¥¹}¥¡É½½Ðè¹ä°Ñ…œèÍÑÈ°…ÑÑÉ¥‰ÕÑ”èÍÑÈ¤€´ø¥¹Ðè(€€€Ù…±Õ•Ì€ômt(€€€™½È•±•µ•¹Ð¥¸É½½Ð¹™¥¹‘…±°¡Å¸¡˜‰ÜéíÑ…ôˆ¤¤è(€€€€€€€Ù…±Õ”€ô•±•µ•¹Ð¹•Ð¡Å¸¡˜‰Üéí…ÑÑÉ¥‰ÕÑ•ôˆ¤¤(€€€€€€€¥˜Ù…±Õ”¥Ì¹½Ð9½¹”…¹Ù…±Õ”¹¥Í‘¥¥Ð ¤è(€€€€€€€€€€€Ù…±Õ•Ì¹…ÁÁ•¹¡¥¹Ð¡Ù…±Õ”¤¤(€€€É•ÑÕÉ¸µ…à¡Ù…±Õ•Ì°‘•™…Õ±ÐôÀ¤€¬€Ä(()‘•˜}•¹ÍÕÉ•}¡•…‘¥¹}¹Õµ‰•É¥¹œ¡‘½Õµ•¹Ðè¹ä°±•Ù•±Ìè¥¹Ð°¡…ÁÑ•É}ÍÑ…ÉÐè¥¹Ð€ô€Ä¤€´ø¥¹Ðè(€€€¥˜¹½Ð€Ä€ðô±•Ù•±Ì€ðô€Ðè(€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È ‰¡•…‘¥¹}±•Ù•±ÌµÕÍÐ‰”‰•ÑÝ••¸€Ä…¹€Ð¸ˆ¤(€€€¥˜¡…ÁÑ•É}ÍÑ…ÉÐ€ð€Äè(€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È ‰¡…ÁÑ•É}ÍÑ…ÉÐµÕÍÐ‰”„Á½Í¥Ñ¥Ù”¥¹Ñ••È¸ˆ¤(€€€É½½Ð€ô‘½Õµ•¹Ð¹Á…ÉÐ¹¹Õµ‰•É¥¹}Á…ÉÐ¹•±•µ•¹Ð(€€€…‰ÍÑÉ…Ñ}¥€ô}¹•áÑ}¹Õµ‰•É¥¹}¥¡É½½Ð°€‰…‰ÍÑÉ…Ñ9Õ´ˆ°€‰…‰ÍÑÉ…Ñ9Õµ%ˆ¤(€€€¹Õµ}¥€ô}¹•áÑ}¹Õµ‰•É¥¹}¥¡É½½Ð°€‰¹Õ´ˆ°€‰¹Õµ%ˆ¤((€€€…‰ÍÑÉ…Ð€ô=áµ±±•µ•¹Ð ‰Üé…‰ÍÑÉ…Ñ9Õ´ˆ¤(€€€…‰ÍÑÉ…Ð¹Í•Ð¡Å¸ ‰Üé…‰ÍÑÉ…Ñ9Õµ%ˆ¤°ÍÑÈ¡…‰ÍÑÉ…Ñ}¥¤¤(€€€µÕ±Ñ¤€ô=áµ±±•µ•¹Ð ‰ÜéµÕ±Ñ¥1•Ù•±QåÁ”ˆ¤(€€€µÕ±Ñ¤¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°€‰µÕ±Ñ¥±•Ù•°ˆ¤(€€€…‰ÍÑÉ…Ð¹…ÁÁ•¹¡µÕ±Ñ¤¤((€€€™½È±•Ù•°¥¸É…¹”¡±•Ù•±Ì¤è(€€€€€€€±Ù°€ô=áµ±±•µ•¹Ð ‰Üé±Ù°ˆ¤(€€€€€€€±Ù°¹Í•Ð¡Å¸ ‰Üé¥±Ù°ˆ¤°ÍÑÈ¡±•Ù•°¤¤(€€€€€€€ÍÑ…ÉÐ€ô=áµ±±•µ•¹Ð ‰ÜéÍÑ…ÉÐˆ¤(€€€€€€€ÍÑ…ÉÐ¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°ÍÑÈ¡¡…ÁÑ•É}ÍÑ…ÉÐ¥˜±•Ù•°€ôô€À•±Í”€Ä¤¤(€€€€€€€¹Õµ}™µÐ€ô=áµ±±•µ•¹Ð ‰Üé¹ÕµµÐˆ¤(€€€€€€€¹Õµ}™µÐ¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°€‰‘•¥µ…°ˆ¤(€€€€€€€Á}ÍÑå±”€ô=áµ±±•µ•¹Ð ‰ÜéÁMÑå±”ˆ¤(€€€€€€€Á}ÍÑå±”¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°˜‰!•…‘¥¹í±•Ù•°€¬€Åôˆ¤(€€€€€€€±Ù±}Ñ•áÐ€ô=áµ±±•µ•¹Ð ‰Üé±Ù±Q•áÐˆ¤(€€€€€€€¥˜±•Ù•°€ôô€Àè(€€€€€€€€€€€±Ù±}Ñ•áÐ¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°€‹ž²°”Çž®€ˆ¤(€€€€€€€•±Í”è(€€€€€€€€€€€±Ù±}Ñ•áÐ¹Í•Ð (€€€€€€€€€€€€€€€Å¸ ‰ÜéÙ…°ˆ¤°(€€€€€€€€€€€€€€€€ˆ¸ˆ¹©½¥¸¡˜ˆ•í¹Õµ‰•Éôˆ™½È¹Õµ‰•È¥¸É…¹” Ä°±•Ù•°€¬€È¤¤°(€€€€€€€€€€€€¤(€€€€€€€ÍÕ™˜€ô=áµ±±•µ•¹Ð ‰ÜéÍÕ™˜ˆ¤(€€€€€€€ÍÕ™˜¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°€‰ÍÁ…”ˆ¤(€€€€€€€±Ù°¹•áÑ•¹¡mÍÑ…ÉÐ°¹Õµ}™µÐ°Á}ÍÑå±”°±Ù±}Ñ•áÐ°ÍÕ™™t¤(€€€€€€€…‰ÍÑÉ…Ð¹…ÁÁ•¹¡±Ù°¤(€€€É½½Ð¹¥¹Í•ÉÐ À°…‰ÍÑÉ…Ð¤((€€€¹Õ´€ô=áµ±±•µ•¹Ð ‰Üé¹Õ´ˆ¤(€€€¹Õ´¹Í•Ð¡Å¸ ‰Üé¹Õµ%ˆ¤°ÍÑÈ¡¹Õµ}¥¤¤(€€€…‰ÍÑÉ…Ñ}É•˜€ô=áµ±±•µ•¹Ð ‰Üé…‰ÍÑÉ…Ñ9Õµ%ˆ¤(€€€…‰ÍÑÉ…Ñ}É•˜¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°ÍÑÈ¡…‰ÍÑÉ…Ñ}¥¤¤(€€€¹Õ´¹…ÁÁ•¹¡…‰ÍÑÉ…Ñ}É•˜¤(€€€¥˜¡…ÁÑ•É}ÍÑ…ÉÐ€„ô€Äè(€€€€€€€½Ù•ÉÉ¥‘”€ô=áµ±±•µ•¹Ð ‰Üé±Ù±=Ù•ÉÉ¥‘”ˆ¤(€€€€€€€½Ù•ÉÉ¥‘”¹Í•Ð¡Å¸ ‰Üé¥±Ù°ˆ¤°€ˆÀˆ¤(€€€€€€€ÍÑ…ÉÑ}½Ù•ÉÉ¥‘”€ô=áµ±±•µ•¹Ð ‰ÜéÍÑ…ÉÑ=Ù•ÉÉ¥‘”ˆ¤(€€€€€€€ÍÑ…ÉÑ}½Ù•ÉÉ¥‘”¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°ÍÑÈ¡¡…ÁÑ•É}ÍÑ…ÉÐ¤¤(€€€€€€€½Ù•ÉÉ¥‘”¹…ÁÁ•¹¡ÍÑ…ÉÑ}½Ù•ÉÉ¥‘”¤(€€€€€€€¹Õ´¹…ÁÁ•¹¡½Ù•ÉÉ¥‘”¤(€€€É½½Ð¹…ÁÁ•¹¡¹Õ´¤((€€€™½È±•Ù•°¥¸É…¹”¡±•Ù•±Ì¤è(€€€€€€€ÍÑå±”€ô•¹ÍÕÉ•}Á…É…É…Á¡}ÍÑå±”¡‘½Õµ•¹Ð°˜‰!•…‘¥¹œí±•Ù•°€¬€Åôˆ¤(€€€€€€€Á}ÁÈ€ôÍÑå±”¹•±•µ•¹Ð¹•Ñ}½É}…‘‘}ÁAÈ ¤(€€€€€€€¹Õµ}ÁÈ€ôÁ}ÁÈ¹™¥¹¡Å¸ ‰Üé¹ÕµAÈˆ¤¤(€€€€€€€¥˜¹Õµ}ÁÈ¥Ì9½¹”è(€€€€€€€€€€€¹Õµ}ÁÈ€ô=áµ±±•µ•¹Ð ‰Üé¹ÕµAÈˆ¤(€€€€€€€€€€€Á}ÁÈ¹…ÁÁ•¹¡¹Õµ}ÁÈ¤(€€€€€€€™½È¡¥±‘}¹…µ”¥¸€ ‰¥±Ù°ˆ°€‰¹Õµ%ˆ¤è(€€€€€€€€€€€•á¥ÍÑ¥¹œ€ô¹Õµ}ÁÈ¹™¥¹¡Å¸¡˜‰Üéí¡¥±‘}¹…µ•ôˆ¤¤(€€€€€€€€€€€¥˜•á¥ÍÑ¥¹œ¥Ì¹½Ð9½¹”è(€€€€€€€€€€€€€€€¹Õµ}ÁÈ¹É•µ½Ù”¡•á¥ÍÑ¥¹œ¤(€€€€€€€¥±Ù°€ô=áµ±±•µ•¹Ð ‰Üé¥±Ù°ˆ¤(€€€€€€€¥±Ù°¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°ÍÑÈ¡±•Ù•°¤¤(€€€€€€€¹Õµ‰•È€ô=áµ±±•µ•¹Ð ‰Üé¹Õµ%ˆ¤(€€€€€€€¹Õµ‰•È¹Í•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°ÍÑÈ¡¹Õµ}¥¤¤(€€€€€€€¹Õµ}ÁÈ¹•áÑ•¹¡m¥±Ù°°¹Õµ‰•Ét¤(€€€É•ÑÕÉ¸±•Ù•±Ì(()‘•˜…ÁÁ±å}™¥•±‘}ÁÉ½Á•ÉÑ¥•Ì¡‘½Õµ•¹Ðè¹ä°ÁÉ½Á•ÉÑ¥•Ìè‘¥ÑmÍÑÈ°¹åt¤€´ø¥¹Ðè(€€€¡…¹•€ô€À(€€€¥˜€‰ÕÁ‘…Ñ•}½¹}½Á•¸ˆ¥¸ÁÉ½Á•ÉÑ¥•Ìè(€€€€€€€}Í•Ñ}ÕÁ‘…Ñ•}™¥•±‘Í}½¹}½Á•¸¡‘½Õµ•¹Ð°‰½½°¡ÁÉ½Á•ÉÑ¥•Íl‰ÕÁ‘…Ñ•}½¹}½Á•¸‰t¤¤(€€€€€€€¡…¹•€¬ô€Ä(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰µ…É­}™¥•±‘Í}‘¥ÉÑäˆ¤è(€€€€€€€¡…¹•€¬ô}µ…É­}™¥•±‘Í}‘¥ÉÑä¡‘½Õµ•¹Ð¤(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰½¹Ù•ÉÑ}•áÁ±¥¥Ñ}µ…É­•ÉÌˆ¤è(€€€€€€€¡…¹•€¬ô}½¹Ù•ÉÑ}•áÁ±¥¥Ñ}™¥•±‘}µ…É­•ÉÌ¡‘½Õµ•¹Ð¤((€€€±•Ù•±Ì€ô¥¹Ð¡ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰¡•…‘¥¹}±•Ù•±Ìˆ°€Ð¤¤(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰ÍÑÉ¥Á}µ…¹Õ…±}¡•…‘¥¹}ÁÉ•™¥á•Ìˆ¤è(€€€€€€€¡…¹•€¬ô}ÍÑÉ¥Á}µ…¹Õ…±}¡•…‘¥¹}ÁÉ•™¥á•Ì¡‘½Õµ•¹Ð°±•Ù•±Ì¤(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰É•‰Õ¥±‘}¡•…‘¥¹}¹Õµ‰•É¥¹œˆ¤è(€€€€€€€¡…¹•€¬ô}•¹ÍÕÉ•}¡•…‘¥¹}¹Õµ‰•É¥¹œ (€€€€€€€€€€€‘½Õµ•¹Ð°±•Ù•±Ì°¥¹Ð¡ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰¡…ÁÑ•É}ÍÑ…ÉÐˆ°€Ä¤¤(€€€€€€€€¤(€€€É•ÑÕÉ¸¡…¹•(()‘•˜…ÁÁ±å}•ÅÕ…Ñ¥½¹}ÁÉ½Á•ÉÑ¥•Ì¡‘½Õµ•¹Ðè¹ä°ÁÉ½Á•ÉÑ¥•Ìè‘¥ÑmÍÑÈ°¹åt¤€´ø¥¹Ðè(€€€Õ¹ÍÕÁÁ½ÉÑ•‘}Ù…±Õ•Ì€ôì(€€€€€€€­•äèÙ…±Õ”(€€€€€€€™½È­•ä°Ù…±Õ”¥¸ÁÉ½Á•ÉÑ¥•Ì¹¥Ñ•µÌ ¤(€€€€€€€¥˜­•ä¥¸EUQ%=9}AI=AIQ%L…¹Ù…±Õ”¹½Ð¥¸íQÉÕ”°…±Í•ô(€€€ô(€€€¥˜Õ¹ÍÕÁÁ½ÉÑ•‘}Ù…±Õ•Ìè(€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È (€€€€€€€€€€€€‰ÅÕ…Ñ¥½¸Á½±¥äÁÉ½Á•ÉÑ¥•ÌµÕÍÐ‰”‰½½±•…¸è€ˆ(€€€€€€€€€€€€¬€ˆ°€ˆ¹©½¥¸¡Í½ÉÑ•¡Õ¹ÍÕÁÁ½ÉÑ•‘}Ù…±Õ•Ì¤¤(€€€€€€€€¤(€€€É•ÑÕÉ¸±•¸¡‘½Õµ•¹Ð¹•±•µ•¹Ð¹áÁ…Ñ  ˆ¸¼¼©m±½…°µ¹…µ” ¤ô½5…Ñ tˆ¤¤(()‘•˜}Í¡„ÈÔÙ}‰åÑ•Ì¡Ù…±Õ”è‰åÑ•Ì¤€´øÍÑÈè(€€€É•ÑÕÉ¸¡…Í¡±¥ˆ¹Í¡„ÈÔØ¡Ù…±Õ”¤¹¡•á‘¥•ÍÐ ¤(()‘•˜}½µÁ±•á}™¥•±‘}¥¹ÍÑÉÕÑ¥½¹Ì¡É½½Ðè•ÑÉ•”¹}±•µ•¹Ð¤€´ø±¥ÍÑmÍÑÉtè(€€€¥¹ÍÑÉÕÑ¥½¹Ìè±¥ÍÑmÍÑÉt€ômt(€€€™½ÈÁ…É…É…Á ¥¸É½½Ð¹áÁ…Ñ  ˆ¸¼½ÜéÀˆ°¹…µ•ÍÁ…•Ìõ9L¤è(€€€€€€€ÍÑ…¬è±¥ÍÑm‘¥ÑmÍÑÈ°¹åut€ômt(€€€€€€€™½È•±•µ•¹Ð¥¸Á…É…É…Á ¹¥Ñ•È ¤è(€€€€€€€€€€€¥˜•±•µ•¹Ð¹Ñ…œ€ôôÅ¸ ‰Üé™±‘¡…Èˆ¤è(€€€€€€€€€€€€€€€­¥¹€ô•±•µ•¹Ð¹•Ð¡Å¸ ‰Üé™±‘¡…ÉQåÁ”ˆ¤¤(€€€€€€€€€€€€€€€¥˜­¥¹€ôô€‰‰•¥¸ˆè(€€€€€€€€€€€€€€€€€€€ÍÑ…¬¹…ÁÁ•¹¡ì‰Á…ÉÑÌˆèmt°€‰…ÁÑÕÉ•ˆè…±Í•ô¤(€€€€€€€€€€€€€€€•±¥˜­¥¹€ôô€‰Í•Á…É…Ñ”ˆ…¹ÍÑ…¬…¹¹½ÐÍÑ…­l´Åul‰…ÁÑÕÉ•‰tè(€€€€€€€€€€€€€€€€€€€Ù…±Õ”€ô€ˆˆ¹©½¥¸¡ÍÑ…­l´Åul‰Á…ÉÑÌ‰t¤¹ÍÑÉ¥À ¤(€€€€€€€€€€€€€€€€€€€¥˜Ù…±Õ”è(€€€€€€€€€€€€€€€€€€€€€€€¥¹ÍÑÉÕÑ¥½¹Ì¹…ÁÁ•¹¡Ù…±Õ”¤(€€€€€€€€€€€€€€€€€€€ÍÑ…­l´Åul‰…ÁÑÕÉ•‰t€ôQÉÕ”(€€€€€€€€€€€€€€€•±¥˜­¥¹€ôô€‰•¹ˆ…¹ÍÑ…¬è(€€€€€€€€€€€€€€€€€€€™¥•±€ôÍÑ…¬¹Á½À ¤(€€€€€€€€€€€€€€€€€€€¥˜¹½Ð™¥•±‘l‰…ÁÑÕÉ•‰tè(€€€€€€€€€€€€€€€€€€€€€€€Ù…±Õ”€ô€ˆˆ¹©½¥¸¡™¥•±‘l‰Á…ÉÑÌ‰t¤¹ÍÑÉ¥À ¤(€€€€€€€€€€€€€€€€€€€€€€€¥˜Ù…±Õ”è(€€€€€€€€€€€€€€€€€€€€€€€€€€€¥¹ÍÑÉÕÑ¥½¹Ì¹…ÁÁ•¹¡Ù…±Õ”¤(€€€€€€€€€€€•±¥˜€ (€€€€€€€€€€€€€€€•±•µ•¹Ð¹Ñ…œ€ôôÅ¸ ‰Üé¥¹ÍÑÉQ•áÐˆ¤(€€€€€€€€€€€€€€€…¹ÍÑ…¬(€€€€€€€€€€€€€€€…¹¹½ÐÍÑ…­l´Åul‰…ÁÑÕÉ•‰t(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€ÍÑ…­l´Åul‰Á…ÉÑÌ‰t¹…ÁÁ•¹¡•±•µ•¹Ð¹Ñ•áÐ½È€ˆˆ¤(€€€É•ÑÕÉ¸¥¹ÍÑÉÕÑ¥½¹Ì(()‘•˜™¥•±‘}¥¹Ù•¹Ñ½Éä¡Á…Ñ èA…Ñ ¤€´ø‘¥ÑmÍÑÈ°¹åtè(€€€•¹ÍÕÉ•}‘½à¡Á…Ñ ¤(€€€½Õ¹ÑÌè‘¥ÑmÍÑÈ°¥¹Ñt€ôíô(€€€¥¹ÍÑÉÕÑ¥½¹Ìè±¥ÍÑmÍÑÉt€ômt(€€€‰½½­µ…É­ÌèÍ•ÑmÍÑÉt€ôÍ•Ð ¤(€€€Ý¥Ñ é¥Á™¥±”¹i¥Á¥±”¡Á…Ñ ¤…ÌÁ…­…”è(€€€€€€€™½È¹…µ”¥¸Á…­…”¹¹…µ•±¥ÍÐ ¤è(€€€€€€€€€€€¥˜¹½Ð¹…µ”¹ÍÑ…ÉÑÍÝ¥Ñ  ‰Ý½É¼ˆ¤½È¹½Ð¹…µ”¹•¹‘ÍÝ¥Ñ  ˆ¹áµ°ˆ¤è(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€É½½Ð€ô•ÑÉ•”¹™É½µÍÑÉ¥¹œ¡Á…­…”¹É•…¡¹…µ”¤¤(€€€€€€€€€€€‰½½­µ…É­Ì¹ÕÁ‘…Ñ” (€€€€€€€€€€€€€€€É½½Ð¹áÁ…Ñ  ˆ¸¼½Üé‰½½­µ…É­MÑ…ÉÐ½Üé¹…µ”ˆ°¹…µ•ÍÁ…•Ìõ9L¤(€€€€€€€€€€€€¤(€€€€€€€€€€€¥¹ÍÑÉÕÑ¥½¹Ì¹•áÑ•¹ (€€€€€€€€€€€€€€€Ù…±Õ”¹ÍÑÉ¥À ¤(€€€€€€€€€€€€€€€™½ÈÙ…±Õ”¥¸É½½Ð¹áÁ…Ñ  ˆ¸¼½Üé™±‘M¥µÁ±”½Üé¥¹ÍÑÈˆ°¹…µ•ÍÁ…•Ìõ9L¤(€€€€€€€€€€€€€€€¥˜Ù…±Õ”¹ÍÑÉ¥À ¤(€€€€€€€€€€€€¤(€€€€€€€€€€€¥¹ÍÑÉÕÑ¥½¹Ì¹•áÑ•¹¡}½µÁ±•á}™¥•±‘}¥¹ÍÑÉÕÑ¥½¹Ì¡É½½Ð¤¤((€€€É•™•É•¹•Ì€ômt(€€€Í•ÅÕ•¹•Ì€ômt(€€€™½È¥¹ÍÑÉÕÑ¥½¸¥¸¥¹ÍÑÉÕÑ¥½¹Ìè(€€€€€€€µ…Ñ €ôÉ”¹µ…Ñ ¡È‰qÌ¨¡mµi„µét¬¤ üéqÌ¬¡myqqqÍt¬¤¤üˆ°¥¹ÍÑÉÕÑ¥½¸¤(€€€€€€€­¥¹€ôµ…Ñ ¹É½ÕÀ Ä¤¹ÕÁÁ•È ¤¥˜µ…Ñ •±Í”€‰U9-9=]8ˆ(€€€€€€€…ÉÕµ•¹Ð€ôµ…Ñ ¹É½ÕÀ È¤¥˜µ…Ñ •±Í”9½¹”(€€€€€€€½Õ¹ÑÍm­¥¹‘t€ô½Õ¹ÑÌ¹•Ð¡­¥¹°€À¤€¬€Ä(€€€€€€€¥˜­¥¹¥¸ì‰Iˆ°€‰AI‰ô…¹…ÉÕµ•¹Ðè(€€€€€€€€€€€É•™•É•¹•Ì¹…ÁÁ•¹¡ì‰ÑåÁ”ˆè­¥¹°€‰Ñ…É•Ðˆè…ÉÕµ•¹Ñô¤(€€€€€€€¥˜­¥¹€ôô€‰MDˆ…¹…ÉÕµ•¹Ðè(€€€€€€€€€€€Í•ÅÕ•¹•Ì¹…ÁÁ•¹¡…ÉÕµ•¹Ð¤((€€€Õ¹É•Í½±Ù•€ôÍ½ÉÑ• (€€€€€€€ì(€€€€€€€€€€€¥Ñ•µl‰Ñ…É•Ð‰t(€€€€€€€€€€€™½È¥Ñ•´¥¸É•™•É•¹•Ì(€€€€€€€€€€€¥˜¥Ñ•µl‰Ñ…É•Ð‰t¹½Ð¥¸‰½½­µ…É­Ì(€€€€€€€ô(€€€€¤(€€€É•ÑÕÉ¸ì(€€€€€€€€‰Ñ½Ñ…°ˆè±•¸¡¥¹ÍÑÉÕÑ¥½¹Ì¤°(€€€€€€€€‰ÑåÁ•Ìˆè‘¥Ð¡Í½ÉÑ•¡½Õ¹ÑÌ¹¥Ñ•µÌ ¤¤¤°(€€€€€€€€‰‰½½­µ…É­ÌˆèÍ½ÉÑ•¡‰½½­µ…É­Ì¤°(€€€€€€€€‰É•™•É•¹•ÌˆèÉ•™•É•¹•Ì°(€€€€€€€€‰Õ¹É•Í½±Ù•‘}É•™•É•¹•ÌˆèÕ¹É•Í½±Ù•°(€€€€€€€€‰Í•ÅÕ•¹•ÌˆèÍ½ÉÑ•¡Í•Ð¡Í•ÅÕ•¹•Ì¤¤°(€€€ô(()‘•˜™¥•±‘}…¡•}¥¹Ù•¹Ñ½Éä¡Á…Ñ èA…Ñ ¤€´ø‘¥ÑmÍÑÈ°¹åtè(€€€¥¹Ù•¹Ñ½Éä€ô™¥•±‘}¥¹Ù•¹Ñ½Éä¡Á…Ñ ¤(€€€Ñ½}™¥•±‘Ì€ô¥¹Ð¡¥¹Ù•¹Ñ½Éål‰ÑåÁ•Ì‰t¹•Ð ‰Q=ˆ°€À¤¤(€€€Ñ½}•¹ÑÉ¥•Ì€ô€À(€€€‘¥ÉÑå}™¥•±‘Ì€ô€À(€€€ÕÁ‘…Ñ•}½¹}½Á•¸€ô…±Í”(€€€Ý¥Ñ é¥Á™¥±”¹i¥Á¥±”¡Á…Ñ ¤…ÌÁ…­…”è(€€€€€€€‘½Õµ•¹Ð€ô•ÑÉ•”¹™É½µÍÑÉ¥¹œ¡Á…­…”¹É•… ‰Ý½É½‘½Õµ•¹Ð¹áµ°ˆ¤¤(€€€€€€€Ñ½}•¹ÑÉ¥•Ì€ô±•¸ (€€€€€€€€€€€‘½Õµ•¹Ð¹áÁ…Ñ  (€€€€€€€€€€€€€€€€ˆ¸¼½ÜéÁmÍÑ…ÉÑÌµÝ¥Ñ ¡ÑÉ…¹Í±…Ñ” ¸½ÜéÁAÈ½ÜéÁMÑå±”½ÜéÙ…°°€Ñ½Œœ°€Q=œ¤°€Q=œ¥tˆ°(€€€€€€€€€€€€€€€¹…µ•ÍÁ…•Ìõ9L°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€€€€€‘¥ÉÑå}™¥•±‘Ì€ô±•¸ (€€€€€€€€€€€‘½Õµ•¹Ð¹áÁ…Ñ  (€€€€€€€€€€€€€€€€ˆ¸¼½Üé™±‘M¥µÁ±•mÜé‘¥ÉÑäôÑÉÕ”œ½ÈÜé‘¥ÉÑäôœÄtð€ˆ(€€€€€€€€€€€€€€€€ˆ¸¼½Üé™±‘¡…ÉmÜé™±‘¡…ÉQåÁ”ô‰•¥¸umÜé‘¥ÉÑäôÑÉÕ”œ½ÈÜé‘¥ÉÑäôœÄtˆ°(€€€€€€€€€€€€€€€¹…µ•ÍÁ…•Ìõ9L°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€€€€€¥˜€‰Ý½É½Í•ÑÑ¥¹Ì¹áµ°ˆ¥¸Á…­…”¹¹…µ•±¥ÍÐ ¤è(€€€€€€€€€€€Í•ÑÑ¥¹Ì€ô•ÑÉ•”¹™É½µÍÑÉ¥¹œ¡Á…­…”¹É•… ‰Ý½É½Í•ÑÑ¥¹Ì¹áµ°ˆ¤¤(€€€€€€€€€€€ÕÁ‘…Ñ•}½¹}½Á•¸€ô‰½½°¡Í•ÑÑ¥¹Ì¹áÁ…Ñ  ˆ¸¼½ÜéÕÁ‘…Ñ•¥•±‘Ìˆ°¹…µ•ÍÁ…•Ìõ9L¤¤((€€€¥˜Ñ½}™¥•±‘Ì€ôô€Àè(€€€€€€€ÍÑ…ÑÕÌ€ô€‰…‰Í•¹Ðˆ(€€€•±¥˜Ñ½}•¹ÑÉ¥•Ì€ôô€Àè(€€€€€€€ÍÑ…ÑÕÌ€ô€‰½‘•}½¹±äˆ(€€€•±¥˜‘¥ÉÑå}™¥•±‘Ìè(€€€€€€€ÍÑ…ÑÕÌ€ô€‰ÍÑ…±”ˆ(€€€•±Í”è(€€€€€€€ÍÑ…ÑÕÌ€ô€‰É•™É•Í¡•ˆ(€€€É•ÑÕÉ¸ì(€€€€€€€€‰ÍÑ…ÑÕÌˆèÍÑ…ÑÕÌ°(€€€€€€€€‰µ…¥¹}Ñ½}™¥•±‘ÌˆèÑ½}™¥•±‘Ì°(€€€€€€€€‰Ñ½}•¹ÑÉ¥•ÌˆèÑ½}•¹ÑÉ¥•Ì°(€€€€€€€€‰‘¥ÉÑå}™¥•±‘Ìˆè‘¥ÉÑå}™¥•±‘Ì°(€€€€€€€€‰ÕÁ‘…Ñ•}½¹}½Á•¸ˆèÕÁ‘…Ñ•}½¹}½Á•¸°(€€€€€€€€‰™¥•±‘}ÑåÁ•Ìˆè¥¹Ù•¹Ñ½Éål‰ÑåÁ•Ì‰t°(€€€ô(()‘•˜•ÅÕ…Ñ¥½¹}¥¹Ù•¹Ñ½Éä¡Á…Ñ èA…Ñ ¤€´ø‘¥ÑmÍÑÈ°¹åtè(€€€•¹ÍÕÉ•}‘½à¡Á…Ñ ¤(€€€É•ÍÕ±Ð€ôì(€€€€€€€€‰½µµ°ˆè€À°(€€€€€€€€‰µ…Ñ¡ÑåÁ•}½±”ˆè€À°(€€€€€€€€‰±•…å}•ÅÕ…Ñ¥½¹}½±”ˆè€À°(€€€€€€€€‰½Ñ¡•É}½±”ˆè€À°(€€€€€€€€‰™½ÉµÕ±…}¥µ…•}…¹‘¥‘…Ñ•Ìˆè€À°(€€€ô(€€€Ý¥Ñ é¥Á™¥±”¹i¥Á¥±”¡Á…Ñ ¤…ÌÁ…­…”è(€€€€€€€™½È¹…µ”¥¸Á…­…”¹¹…µ•±¥ÍÐ ¤è(€€€€€€€€€€€¥˜¹½Ð¹…µ”¹ÍÑ…ÉÑÍÝ¥Ñ  ‰Ý½É¼ˆ¤½È¹½Ð¹…µ”¹•¹‘ÍÝ¥Ñ  ˆ¹áµ°ˆ¤è(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€É½½Ð€ô•ÑÉ•”¹™É½µÍÑÉ¥¹œ¡Á…­…”¹É•…¡¹…µ”¤¤(€€€€€€€€€€€É•ÍÕ±Ñl‰½µµ°‰t€¬ô±•¸¡É½½Ð¹áÁ…Ñ  ˆ¸¼½´é½5…Ñ ˆ°¹…µ•ÍÁ…•Ìõ9L¤¤(€€€€€€€€€€€™½È½±”¥¸É½½Ð¹áÁ…Ñ  ˆ¸¼¼©m±½…°µ¹…µ” ¤ô=1=‰©•Ðtˆ¤è(€€€€€€€€€€€€€€€ÁÉ½}¥€ô€¡½±”¹•Ð ‰AÉ½%ˆ¤½È½±”¹•Ð¡˜‰ííí=}9MõõõAÉ½%ˆ¤½È€ˆˆ¤¹±½Ý•È ¤(€€€€€€€€€€€€€€€¥˜€‰‘ÍµÐˆ¥¸ÁÉ½}¥½È€‰µ…Ñ¡ÑåÁ”ˆ¥¸ÁÉ½}¥è(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ñl‰µ…Ñ¡ÑåÁ•}½±”‰t€¬ô€Ä(€€€€€€€€€€€€€€€•±¥˜ÁÉ½}¥¥¸ì‰•ÅÕ…Ñ¥½¸¸Ìˆ°€‰•ÅÕ…Ñ¥½¸¸Èˆ°€‰•ÅÕ…Ñ¥½¸‰ôè(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ñl‰±•…å}•ÅÕ…Ñ¥½¹}½±”‰t€¬ô€Ä(€€€€€€€€€€€€€€€•±Í”è(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ñl‰½Ñ¡•É}½±”‰t€¬ô€Ä((€€€€€€€€€€€™½ÈÁ…É…É…Á ¥¸É½½Ð¹áÁ…Ñ  ˆ¸¼½ÜéÀˆ°¹…µ•ÍÁ…•Ìõ9L¤è(€€€€€€€€€€€€€€€¥˜¹½ÐÁ…É…É…Á ¹áÁ…Ñ  ˆ¸¼½Üé‘É…Ý¥¹œð€¸¼½Øé¥µ…•‘…Ñ„ˆ°¹…µ•ÍÁ…•Ìõ9L¤è(€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€€€€€ÍÑå±•Ì€ôÁ…É…É…Á ¹áÁ…Ñ  ˆ¸½ÜéÁAÈ½ÜéÁMÑå±”½ÜéÙ…°ˆ°¹…µ•ÍÁ…•Ìõ9L¤(€€€€€€€€€€€€€€€µ•Ñ…‘…Ñ„€ôÁ…É…É…Á ¹áÁ…Ñ  (€€€€€€€€€€€€€€€€€€€€ˆ¸¼¼©m±½…°µ¹…µ” ¤ô‘½AÈt½¹…µ”ð€ˆ(€€€€€€€€€€€€€€€€€€€€ˆ¸¼¼©m±½…°µ¹…µ” ¤ô‘½AÈt½Ñ¥Ñ±”ð€ˆ(€€€€€€€€€€€€€€€€€€€€ˆ¸¼¼©m±½…°µ¹…µ” ¤ô‘½AÈt½‘•ÍÈˆ(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€¡¥¹Ð€ô€ˆ€ˆ¹©½¥¸¡ÍÑå±•Ì€¬µ•Ñ…‘…Ñ„¤¹±½Ý•È ¤(€€€€€€€€€€€€€€€¥˜…¹ä¡Ñ½­•¸¥¸¡¥¹Ð™½ÈÑ½­•¸¥¸€ ‰•ÅÕ…Ñ¥½¸ˆ°€‰™½ÉµÕ±„ˆ°€‹–³–ò<ˆ¤¤è(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ñl‰™½ÉµÕ±…}¥µ…•}…¹‘¥‘…Ñ•Ì‰t€¬ô€Ä(€€€É•ÍÕ±Ñl‰•‘¥Ñ…‰±•}Ñ½Ñ…°‰t€ô€ (€€€€€€€É•ÍÕ±Ñl‰½µµ°‰t€¬É•ÍÕ±Ñl‰µ…Ñ¡ÑåÁ•}½±”‰t€¬É•ÍÕ±Ñl‰±•…å}•ÅÕ…Ñ¥½¹}½±”‰t(€€€€¤(€€€É•ÑÕÉ¸É•ÍÕ±Ð(()‘•˜ÁÉ½Ñ•Ñ•‘}½‰©•Ñ}µ…¹¥™•ÍÐ¡Á…Ñ èA…Ñ ¤€´ø‘¥ÑmÍÑÈ°¹åtè(€€€•¹ÍÕÉ•}‘½à¡Á…Ñ ¤(€€€•µ‰•‘‘¥¹Ìè‘¥ÑmÍÑÈ°ÍÑÉt€ôíô(€€€µ•‘¥„è‘¥ÑmÍÑÈ°ÍÑÉt€ôíô(€€€½µµ°è±¥ÍÑmÍÑÉt€ômt(€€€Ý¥Ñ é¥Á™¥±”¹i¥Á¥±”¡Á…Ñ ¤…ÌÁ…­…”è(€€€€€€€™½È¹…µ”¥¸Í½ÉÑ•¡Á…­…”¹¹…µ•±¥ÍÐ ¤¤è(€€€€€€€€€€€‘…Ñ„€ôÁ…­…”¹É•…¡¹…µ”¤(€€€€€€€€€€€¥˜¹…µ”¹ÍÑ…ÉÑÍÝ¥Ñ  ‰Ý½É½•µ‰•‘‘¥¹Ì¼ˆ¤è(€€€€€€€€€€€€€€€•µ‰•‘‘¥¹Ím¹…µ•t€ô}Í¡„ÈÔÙ}‰åÑ•Ì¡‘…Ñ„¤(€€€€€€€€€€€•±¥˜¹…µ”¹ÍÑ…ÉÑÍÝ¥Ñ  ‰Ý½É½µ•‘¥„¼ˆ¤è(€€€€€€€€€€€€€€€µ•‘¥…m¹…µ•t€ô}Í¡„ÈÔÙ}‰åÑ•Ì¡‘…Ñ„¤(€€€€€€€€€€€¥˜¹…µ”¹ÍÑ…ÉÑÍÝ¥Ñ  ‰Ý½É¼ˆ¤…¹¹…µ”¹•¹‘ÍÝ¥Ñ  ˆ¹áµ°ˆ¤è(€€€€€€€€€€€€€€€É½½Ð€ô•ÑÉ•”¹™É½µÍÑÉ¥¹œ¡‘…Ñ„¤(€€€€€€€€€€€€€€€™½È•ÅÕ…Ñ¥½¸¥¸É½½Ð¹áÁ…Ñ  ˆ¸¼½´é½5…Ñ ˆ°¹…µ•ÍÁ…•Ìõ9L¤è(€€€€€€€€€€€€€€€€€€€…¹½¹¥…°€ô•ÑÉ•”¹Ñ½ÍÑÉ¥¹œ¡•ÅÕ…Ñ¥½¸°µ•Ñ¡½ô‰ŒÄÑ¸ˆ°•á±ÕÍ¥Ù”õQÉÕ”¤(€€€€€€€€€€€€€€€€€€€½µµ°¹…ÁÁ•¹¡}Í¡„ÈÔÙ}‰åÑ•Ì¡…¹½¹¥…°¤¤(€€€É•ÑÕÉ¸ì(€€€€€€€€‰•µ‰•‘‘¥¹Ìˆè•µ‰•‘‘¥¹Ì°(€€€€€€€€‰µ•‘¥„ˆèµ•‘¥„°(€€€€€€€€‰½µµ±}Í¡„ÈÔØˆèÍ½ÉÑ•¡½µµ°¤°(€€€ô(()‘•˜ÁÉ½Ñ•Ñ•‘}Á…å±½…‘}µ…¹¥™•ÍÐ¡Á…Ñ èA…Ñ ¤€´ø‘¥ÑmÍÑÈ°±¥ÍÑmÍÑÉutè(€€€€ˆˆ‰½µÁ…É”ÁÉ½Ñ•Ñ•Á…å±½…‘Ì¥¹‘•Á•¹‘•¹Ñ±ä½˜Á…­…”Á…ÉÐÉ•¹…µ¥¹œ¸ˆˆˆ(€€€µ…¹¥™•ÍÐ€ôÁÉ½Ñ•Ñ•‘}½‰©•Ñ}µ…¹¥™•ÍÐ¡Á…Ñ ¤(€€€É•ÑÕÉ¸ì(€€€€€€€€‰•µ‰•‘‘¥¹ÌˆèÍ½ÉÑ•¡µ…¹¥™•ÍÑl‰•µ‰•‘‘¥¹Ì‰t¹Ù…±Õ•Ì ¤¤°(€€€€€€€€‰µ•‘¥„ˆèÍ½ÉÑ•¡µ…¹¥™•ÍÑl‰µ•‘¥„‰t¹Ù…±Õ•Ì ¤¤°(€€€€€€€€‰½µµ±}Í¡„ÈÔØˆèÍ½ÉÑ•¡µ…¹¥™•ÍÑl‰½µµ±}Í¡„ÈÔØ‰t¤°(€€€ô()‘•˜…ÁÁ±å}ÉÕ±” (€€€‘½Õµ•¹Ðè¹ä°(€€€ÉÕ±”è‘¥ÑmÍÑÈ°¹åt°(€€€€¨°(€€€Á…É…É…Á¡}Ñ…É•ÑÌè±¥ÍÑm¹åtð9½¹”€ô9½¹”°(€€€Ñ…‰±•}Ñ…É•ÑÌè±¥ÍÑmÑÕÁ±•m¹ä°‘¥ÑmÍÑÈ°¹åuutð9½¹”€ô9½¹”°(€€€¡…ÁÑ•É}ÍÑ…ÉÐè¥¹Ðð9½¹”€ô9½¹”°(¤€´ø¥¹Ðè(€€€Õ¹ÍÕÁÁ½ÉÑ•€ôÕ¹ÍÕÁÁ½ÉÑ•‘}ÁÉ½Á•ÉÑ¥•Ì¡ÉÕ±”¤(€€€¥˜Õ¹ÍÕÁÁ½ÉÑ•è(€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È (€€€€€€€€€€€˜‰IÕ±”íÉÕ±•l¥uô¡…ÌÕ¹ÍÕÁÁ½ÉÑ•…ÕÑ½µ…Ñ¥ŒÁÉ½Á•ÉÑ¥•Ìèìœ°€œ¹©½¥¸¡Õ¹ÍÕÁÁ½ÉÑ•¥ôˆ(€€€€€€€€¤((€€€Í•±•Ñ½È€ôÉÕ±•l‰Í•±•Ñ½È‰t(€€€¥˜Í•±•Ñ½Él‰­¥¹‰t¥¸ì‰‘½Õµ•¹Ðˆ°€‰Í•Ñ¥½¹}É½±”‰ôè(€€€€€€€É•ÑÕÉ¸…ÁÁ±å}Í•Ñ¥½¹}ÁÉ½Á•ÉÑ¥•Ì¡‘½Õµ•¹Ð°ÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t¤(€€€¥˜Í•±•Ñ½Él‰­¥¹‰t€ôô€‰Ñ…‰±•}É½±”ˆè(€€€€€€€É•ÑÕÉ¸…ÁÁ±å}Ñ…‰±•}ÁÉ½Á•ÉÑ¥•Ì¡‘½Õµ•¹Ð°ÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t°Ñ…‰±•}Ñ…É•ÑÌ¤(€€€¥˜Í•±•Ñ½Él‰­¥¹‰t€ôô€‰™¥•±‘}É½±”ˆè(€€€€€€€ÁÉ½Á•ÉÑ¥•Ì€ô‘¥Ð¡ÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t¤(€€€€€€€¥˜¡…ÁÑ•É}ÍÑ…ÉÐ¥Ì¹½Ð9½¹”è(€€€€€€€€€€€ÁÉ½Á•ÉÑ¥•Íl‰¡…ÁÑ•É}ÍÑ…ÉÐ‰t€ô¡…ÁÑ•É}ÍÑ…ÉÐ(€€€€€€€É•ÑÕÉ¸…ÁÁ±å}™¥•±‘}ÁÉ½Á•ÉÑ¥•Ì¡‘½Õµ•¹Ð°ÁÉ½Á•ÉÑ¥•Ì¤(€€€¥˜Í•±•Ñ½Él‰­¥¹‰t€ôô€‰•ÅÕ…Ñ¥½¹}É½±”ˆè(€€€€€€€É•ÑÕÉ¸…ÁÁ±å}•ÅÕ…Ñ¥½¹}ÁÉ½Á•ÉÑ¥•Ì¡‘½Õµ•¹Ð°ÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t¤((€€€ÍÑå±•}¹…µ”€ôÍÑå±•}¹…µ•}™½É}Í•±•Ñ½È¡Í•±•Ñ½È¤(€€€¥˜ÍÑå±•}¹…µ”¥Ì9½¹”è(€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È (€€€€€€€€€€€˜‰IÕ±”íÉÕ±•l¥uôÕÍ•Ì…¸Õ¹ÍÕÁÁ½ÉÑ•…ÕÑ½µ…Ñ¥ŒÍ•±•Ñ½ÈèíÍ•±•Ñ½Éôˆ(€€€€€€€€¤(€€€¥˜Á…É…É…Á¡}Ñ…É•ÑÌ¥Ì¹½Ð9½¹”è(€€€€€€€É•ÑÕÉ¸…ÁÁ±å}ÍÑå±•}ÉÕ±•}Ñ½}Á…É…É…Á¡Ì¡‘½Õµ•¹Ð°ÉÕ±”°Á…É…É…Á¡}Ñ…É•ÑÌ¤(€€€ÍÑå±”€ô•¹ÍÕÉ•}Á…É…É…Á¡}ÍÑå±”¡‘½Õµ•¹Ð°ÍÑå±•}¹…µ”¤(€€€…ÁÁ±å}ÍÑå±•}ÁÉ½Á•ÉÑ¥•Ì¡ÍÑå±”°ÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t¤(€€€É•ÑÕÉ¸ÍÕ´ (€€€€€€€€Ä(€€€€€€€™½ÈÁ…É…É…Á ¥¸¥Ñ•É}‘½Õµ•¹Ñ}Á…É…É…Á¡Ì¡‘½Õµ•¹Ð¤(€€€€€€€¥˜Á…É…É…Á ¹ÍÑå±”…¹Á…É…É…Á ¹ÍÑå±”¹¹…µ”€ôôÍÑå±•}¹…µ”(€€€€¤(()‘•˜™¥ÉÍÑ}…¹¡½É}Á…É…É…Á ¡‘½Õµ•¹Ðè¹ä°ÉÕ±”è‘¥ÑmÍÑÈ°¹åt¤€´ø¹äð9½¹”è(€€€ÍÑå±•}¹…µ”€ôÍÑå±•}¹…µ•}™½É}Í•±•Ñ½È¡ÉÕ±•l‰Í•±•Ñ½È‰t¤(€€€Á…É…É…Á¡Ì€ô±¥ÍÐ¡‘½Õµ•¹Ð¹Á…É…É…Á¡Ì¤(€€€¥˜ÍÑå±•}¹…µ”è(€€€€€€€™½ÈÁ…É…É…Á ¥¸Á…É…É…Á¡Ìè(€€€€€€€€€€€¥˜€ (€€€€€€€€€€€€€€€Á…É…É…Á ¹Ñ•áÐ¹ÍÑÉ¥À ¤(€€€€€€€€€€€€€€€…¹Á…É…É…Á ¹ÍÑå±”(€€€€€€€€€€€€€€€…¹Á…É…É…Á ¹ÍÑå±”¹¹…µ”€ôôÍÑå±•}¹…µ”(€€€€€€€€€€€€€€€…¹Á…É…É…Á ¹ÉÕ¹Ì(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€É•ÑÕÉ¸Á…É…É…Á (€€€™½ÈÁ…É…É…Á ¥¸Á…É…É…Á¡Ìè(€€€€€€€¥˜Á…É…É…Á ¹Ñ•áÐ¹ÍÑÉ¥À ¤…¹Á…É…É…Á ¹ÉÕ¹Ìè(€€€€€€€€€€€É•ÑÕÉ¸Á…É…É…Á (€€€É•ÑÕÉ¸9½¹”(()‘•˜ÍÕµµ…É¥é•}ÉÕ±”¡ÉÕ±”è‘¥ÑmÍÑÈ°¹åt¤€´øÍÑÈè(€€€Á…¥ÉÌ€ô€ˆ°€ˆ¹©½¥¸¡˜‰í­•åôõíÙ…±Õ•ôˆ™½È­•ä°Ù…±Õ”¥¸Í½ÉÑ•¡ÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t¹¥Ñ•µÌ ¤¤¤(€€€Í½ÕÉ•Ì€ô€ˆ°€ˆ¹©½¥¸¡ÉÕ±•l‰Í½ÕÉ•}¥‘Ì‰t¤(€€€É•ÑÕÉ¸˜‰íÉÕ±•l¥uôèíÁ…¥ÉÍô¸M½ÕÉ•ÌèíÍ½ÕÉ•Íô¸ˆ(()‘•˜±½…‘}‘½Õµ•¹Ð¡Á…Ñ èA…Ñ ¤€´ø¹äè(€€€•¹ÍÕÉ•}‘½à¡Á…Ñ ¤(€€€ÑÉäè(€€€€€€€É•ÑÕÉ¸½Õµ•¹Ð¡ÍÑÈ¡Á…Ñ ¤¤(€€€•á•ÁÐá•ÁÑ¥½¸…Ì•áŒè(€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È¡˜‰U¹…‰±”Ñ¼½Á•¸=`íÁ…Ñ¡ôèí•áôˆ¤™É½´•áŒ(
+    kind = rule["selector"]["kind"]
+    if kind in {"document", "section_role"}:
+        return SECTION_PROPERTIES
+    if kind == "table_role":
+        return TABLE_PROPERTIES
+    if kind == "field_role":
+        return FIELD_PROPERTIES
+    if kind == "equation_role":
+        return EQUATION_PROPERTIES
+    if kind == "caption_role":
+        return STYLE_PROPERTIES | CAPTION_POLICY_PROPERTIES
+    if style_name_for_selector(rule["selector"]):
+        return STYLE_PROPERTIES
+    return set()
+
+
+def unsupported_properties(rule: dict[str, Any]) -> list[str]:
+    return sorted(set(rule["properties"]) - supported_properties(rule))
+
+
+def _font_attributes(font_element: Any) -> Any:
+    r_pr = font_element.get_or_add_rPr()
+    r_fonts = r_pr.rFonts
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, r_fonts)
+    return r_fonts
+
+
+def _set_font_attributes(font_element: Any, name: str, attributes: tuple[str, ...]) -> None:
+    r_fonts = _font_attributes(font_element)
+    for attr in attributes:
+        r_fonts.set(qn(f"w:{attr}"), name)
+
+
+def _set_east_asian_font(font_element: Any, name: str) -> None:
+    _set_font_attributes(font_element, name, ("ascii", "hAnsi", "eastAsia", "cs"))
+
+
+def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
+    font = style.font
+    paragraph_format = style.paragraph_format
+
+    if "font_name" in properties:
+        font.name = properties["font_name"]
+        _set_east_asian_font(style.element, properties["font_name"])
+    if "font_name_ascii" in properties:
+        font.name = properties["font_name_ascii"]
+        _set_font_attributes(
+            style.element, properties["font_name_ascii"], ("ascii", "hAnsi")
+        )
+    if "font_name_east_asia" in properties:
+        _set_font_attributes(
+            style.element, properties["font_name_east_asia"], ("eastAsia",)
+        )
+    if "font_name_complex_script" in properties:
+        _set_font_attributes(
+            style.element, properties["font_name_complex_script"], ("cs",)
+        )
+    if "font_size_pt" in properties:
+        font.size = Pt(float(properties["font_size_pt"]))
+    if "bold" in properties:
+        font.bold = bool(properties["bold"])
+    if "italic" in properties:
+        font.italic = bool(properties["italic"])
+    if "color_hex" in properties:
+        color = str(properties["color_hex"]).lstrip("#")
+        if not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+            raise FormatMonographError(f"Invalid color_hex: {properties['color_hex']}")
+        font.color.rgb = RGBColor.from_string(color.upper())
+    if "alignment" in properties:
+        value = properties["alignment"]
+        if value not in ALIGNMENTS:
+            raise FormatMonographError(f"Unsupported paragraph alignment: {value}")
+        paragraph_format.alignment = ALIGNMENTS[value]
+    for key, attr in (
+        ("space_before_pt", "space_before"),
+        ("space_after_pt", "space_after"),
+        ("first_line_indent_pt", "first_line_indent"),
+        ("left_indent_pt", "left_indent"),
+        ("right_indent_pt", "right_indent"),
+    ):
+        if key in properties:
+            setattr(paragraph_format, attr, Pt(float(properties[key])))
+    if "line_spacing" in properties:
+        paragraph_format.line_spacing = float(properties["line_spacing"])
+    if "line_spacing_rule" in properties:
+        rules = {
+            "single": WD_LINE_SPACING.SINGLE,
+            "one_point_five": WD_LINE_SPACING.ONE_POINT_FIVE,
+            "double": WD_LINE_SPACING.DOUBLE,
+            "at_least": WD_LINE_SPACING.AT_LEAST,
+            "exact": WD_LINE_SPACING.EXACTLY,
+            "multiple": WD_LINE_SPACING.MULTIPLE,
+        }
+        value = properties["line_spacing_rule"]
+        if value not in rules:
+            raise FormatMonographError(f"Unsupported line_spacing_rule: {value}")
+        paragraph_format.line_spacing_rule = rules[value]
+    if "line_spacing_pt" in properties:
+        paragraph_format.line_spacing = Pt(float(properties["line_spacing_pt"]))
+        if "line_spacing_rule" not in properties:
+            paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    if "first_line_indent_chars" in properties:
+        p_pr = style.element.get_or_add_pPr()
+        ind = p_pr.get_or_add_ind()
+        ind.set(
+            qn("w:firstLineChars"),
+            str(int(round(float(properties["first_line_indent_chars"]) * 100))),
+        )
+        ind.attrib.pop(qn("w:firstLine"), None)
+    for key, attr in (
+        ("keep_with_next", "keep_with_next"),
+        ("keep_together", "keep_together"),
+        ("page_break_before", "page_break_before"),
+        ("widow_control", "widow_control"),
+    ):
+        if key in properties:
+            setattr(paragraph_format, attr, bool(properties[key]))
+
+
+def ensure_paragraph_style(document: Any, style_name: str) -> Any:
+    try:
+        return document.styles[style_name]
+    except KeyError:
+        style = document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        if style_name != "Normal":
+            style.base_style = document.styles["Normal"]
+        return style
+
+
+def _drop_attributes(element: Any, names: tuple[str, ...]) -> None:
+    for name in names:
+        element.attrib.pop(qn(f"w:{name}"), None)
+    if not element.attrib and len(element) == 0 and element.getparent() is not None:
+        element.getparent().remove(element)
+
+
+def clear_controlled_direct_format(paragraph: Any, properties: dict[str, Any]) -> None:
+    p_pr = paragraph._p.pPr
+    if p_pr is not None:
+        if "alignment" in properties:
+            element = p_pr.find(qn("w:jc"))
+            if element is not None:
+                p_pr.remove(element)
+
+        spacing_keys = {
+            "space_before_pt": ("before", "beforeLines", "beforeAutospacing"),
+            "space_after_pt": ("after", "afterLines", "afterAutospacing"),
+            "line_spacing": ("line", "lineRule"),
+            "line_spacing_pt": ("line", "lineRule"),
+            "line_spacing_rule": ("line", "lineRule"),
+        }
+        spacing = p_pr.find(qn("w:spacing"))
+        if spacing is not None:
+            attrs = tuple(
+                attr
+                for key, values in spacing_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(spacing, attrs)
+
+        indent_keys = {
+            "first_line_indent_pt": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "first_line_indent_chars": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "left_indent_pt": ("left", "leftChars", "start", "startChars"),
+            "right_indent_pt": ("right", "rightChars", "end", "endChars"),
+        }
+        indent = p_pr.find(qn("w:ind"))
+        if indent is not None:
+            attrs = tuple(
+                attr
+                for key, values in indent_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(indent, attrs)
+
+        for key, tag in (
+            ("keep_with_next", "keepNext"),
+            ("keep_together", "keepLines"),
+            ("page_break_before", "pageBreakBefore"),
+            ("widow_control", "widowControl"),
+        ):
+            element = p_pr.find(qn(f"w:{tag}"))
+            if key in properties and element is not None:
+                p_pr.remove(element)
+
+    for run in paragraph.runs:
+        r_pr = run._r.rPr
+        if r_pr is None:
+            continue
+        if any(
+            key in properties
+            for key in (
+                "font_name",
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_name_complex_script",
+            )
+        ):
+            r_fonts = r_pr.find(qn("w:rFonts"))
+            if r_fonts is not None:
+                attrs = []
+                if "font_name" in properties:
+                    attrs.extend(("ascii", "hAnsi", "eastAsia", "cs"))
+                if "font_name_ascii" in properties:
+                    attrs.extend(("ascii", "hAnsi"))
+                if "font_name_east_asia" in properties:
+                    attrs.append("eastAsia")
+                if "font_name_complex_script" in properties:
+                    attrs.append("cs")
+                _drop_attributes(r_fonts, tuple(attrs))
+        for key, tags in (
+            ("font_size_pt", ("sz", "szCs")),
+            ("bold", ("b", "bCs")),
+            ("italic", ("i", "iCs")),
+            ("color_hex", ("color",)),
+        ):
+            if key not in properties:
+                continue
+            for tag in tags:
+                element = r_pr.find(qn(f"w:{tag}"))
+                if element is not None:
+                    r_pr.remove(element)
+
+
+def apply_style_rule_to_paragraphs(
+    document: Any, rule: dict[str, Any], paragraphs: Iterable[Any]
+) -> int:
+    style_name = style_name_for_selector(rule["selector"])
+    if style_name is None:
+        raise FormatMonographError(
+            f"Rule {rule['id']} has no paragraph style mapping."
+        )
+    style = ensure_paragraph_style(document, style_name)
+    apply_style_properties(style, rule["properties"])
+    targets = list(paragraphs)
+    for paragraph in targets:
+        paragraph.style = style
+        clear_controlled_direct_format(paragraph, rule["properties"])
+    return len(targets)
+
+
+def _set_document_toggle(document: Any, name: str, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn(f"w:{name}"))
+    if enabled:
+        if element is None:
+            element = OxmlElement(f"w:{name}")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
+    sections = list(document.sections)
+    page_size_policy = properties.get("page_size_policy")
+    if page_size_policy not in {None, "preserve"}:
+        raise FormatMonographError(f"Unsupported page_size_policy: {page_size_policy}")
+
+    explicit_size = "page_width_mm" in properties or "page_height_mm" in properties
+    for section in sections:
+        if "page_width_mm" in properties:
+            section.page_width = Mm(float(properties["page_width_mm"]))
+        if "page_height_mm" in properties:
+            section.page_height = Mm(float(properties["page_height_mm"]))
+        if "orientation" in properties:
+            orientation = str(properties["orientation"]).lower()
+            if orientation not in {"portrait", "landscape"}:
+                raise FormatMonographError(f"Unsupported orientation: {orientation}")
+            target = WD_ORIENT.PORTRAIT if orientation == "portrait" else WD_ORIENT.LANDSCAPE
+            if section.orientation != target and not explicit_size:
+                section.page_width, section.page_height = section.page_height, section.page_width
+            section.orientation = target
+
+        for key, attr in (
+            ("margin_top_mm", "top_margin"),
+            ("margin_bottom_mm", "bottom_margin"),
+            ("margin_left_mm", "left_margin"),
+            ("margin_right_mm", "right_margin"),
+            ("gutter_mm", "gutter"),
+        ):
+            if key in properties:
+                setattr(section, attr, Mm(float(properties[key])))
+
+        width_mm = float(section.page_width.mm)
+        height_mm = float(section.page_height.mm)
+        ratio_values = (
+            ("margin_inner_ratio", "left_margin", width_mm),
+            ("margin_outer_ratio", "right_margin", width_mm),
+            ("margin_top_ratio", "top_margin", height_mm),
+            ("margin_bottom_ratio", "bottom_margin", height_mm),
+            ("header_distance_ratio", "header_distance", height_mm),
+            ("footer_distance_ratio", "footer_distance", height_mm),
+        )
+        for key, attr, basis in ratio_values:
+            if key in properties:
+                ratio = float(properties[key])
+                if not 0 <= ratio < 0.5:
+                    raise FormatMonographError(f"{key} must be between 0 and 0.5.")
+                setattr(section, attr, Mm(basis * ratio))
+
+        if "different_first_page_header_footer" in properties:
+            section.different_first_page_header_footer = bool(
+                properties["different_first_page_header_footer"]
+            )
+
+    if "odd_and_even_pages_header_footer" in properties:
+        document.settings.odd_and_even_pages_header_footer = bool(
+            properties["odd_and_even_pages_header_footer"]
+        )
+    if "mirror_margins" in properties:
+        _set_document_toggle(document, "mirrorMargins", bool(properties["mirror_margins"]))
+
+    return len(sections)
+
+def _set_repeat_table_header(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:tblHeader"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:tblHeader")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def _set_prevent_row_split(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:cantSplit"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:cantSplit")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def apply_table_properties(
+    document: Any,
+    properties: dict[str, Any],
+    targets: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> int:
+    selected = targets if targets is not None else [(table, {}) for table in document.tables]
+    for table, entry in selected:
+        if "table_style" in properties:
+            table.style = properties["table_style"]
+        if "alignment" in properties:
+            value = properties["alignment"]
+            if value not in TABLE_ALIGNMENTS:
+                raise FormatMonographError(f"Unsupported table alignment: {value}")
+            table.alignment = TABLE_ALIGNMENTS[value]
+        if "repeat_header_row" in properties and table.rows:
+            header_rows = entry.get("repeat_header_rows", [0])
+            for row_index in header_rows:
+                if 0 <= int(row_index) < len(table.rows):
+                    _set_repeat_table_header(
+                        table.rows[int(row_index)], bool(properties["repeat_header_row"])
+                    )
+        if "prevent_row_split" in properties:
+            caption_row = entry.get("caption_row")
+            for row_index, row in enumerate(table.rows):
+                if caption_row is not None and row_index == int(caption_row):
+                    continue
+                _set_prevent_row_split(row, bool(properties["prevent_row_split"]))
+        for row in table.rows:
+            for cell in row.cells:
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    return len(selected)
+
+
+
+def _record_derived_change(document: Any, change: dict[str, Any]) -> None:
+    changes = getattr(document, "_format_monograph_derived_changes", None)
+    if changes is None:
+        changes = []
+        setattr(document, "_format_monograph_derived_changes", changes)
+    changes.append(change)
+
+
+def _set_update_fields_on_open(document: Any, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn("w:updateFields"))
+    if enabled:
+        if element is None:
+            element = OxmlElement("w:updateFields")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def _mark_fields_dirty(document: Any) -> int:
+    root = document.element
+    fields = root.xpath(".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']")
+    for field in fields:
+        field.set(qn("w:dirty"), "true")
+    return len(fields)
+
+
+def _clear_paragraph_content(paragraph: Any) -> None:
+    p = paragraph._p
+    for child in list(p):
+        if child.tag != qn("w:pPr"):
+            p.remove(child)
+
+
+def _append_simple_field(paragraph: Any, instruction: str, placeholder: str) -> None:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = placeholder
+    run.append(text)
+    field.append(run)
+    paragraph._p.append(field)
+
+
+def _field_instruction_for_marker(marker: str) -> tuple[str, str] | None:
+    fixed = {
+        "[[TOC]]": ('TOC \\o "1-3" \\h \\z \\u', "Update table of contents"),
+        "[[PAGE]]": ("PAGE", "1"),
+    }
+    if marker in fixed:
+        return fixed[marker]
+    match = re.fullmatch(r"\[\[(REF|PAGEREF|SEQ):([A-Za-z0-9_.-]+)\]\]", marker)
+    if not match:
+        return None
+    kind, value = match.groups()
+    if kind == "REF":
+        return f"REF {value} \\h", "0"
+    if kind == "PAGEREF":
+        return f"PAGEREF {value} \\h", "0"
+    return f"SEQ {value} \\* ARABIC \\s 1", "1"
+
+
+def _text_run_like(source_run: Any, value: str) -> Any:
+    run = OxmlElement("w:r")
+    r_pr = source_run._r.find(qn("w:rPr"))
+    if r_pr is not None:
+        run.append(copy.deepcopy(r_pr))
+    text = OxmlElement("w:t")
+    if value[:1].isspace() or value[-1:].isspace():
+        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text.text = value
+    run.append(text)
+    return run
+
+
+def _simple_field_like(source_run: Any, instruction: str, placeholder: str) -> Any:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    field.append(_text_run_like(source_run, placeholder))
+    return field
+
+
+def _field_reference_target(marker: str) -> str | None:
+    match = re.fullmatch(r"\[\[(?:REF|PAGEREF):([A-Za-z0-9_.-]+)\]\]", marker)
+    return None if match is None else match.group(1)
+
+
+def _convert_explicit_field_markers(document: Any) -> int:
+    converted = 0
+    bookmarks = set(document.element.xpath(".//w:bookmarkStart/@w:name"))
+    for index, paragraph in enumerate(iter_document_paragraphs(document)):
+        paragraph_text = paragraph.text
+        matches = list(FIELD_MARKER_PATTERN.finditer(paragraph_text))
+        if not matches:
+            continue
+
+        runs = list(paragraph.runs)
+        ranges = []
+        cursor = 0
+        for run in runs:
+            start = cursor
+            cursor += len(run.text)
+            ranges.append((start, cursor, run))
+
+        assignments: dict[int, list[tuple[re.Match[str], Any]]] = {}
+        for match in matches:
+            marker = match.group(0)
+            if marker == "[[TOC]]" and paragraph_text.strip() != marker:
+                raise FormatMonographError(
+                    f"TOC marker must occupy its own paragraph at paragraph {index}."
+                )
+            target = _field_reference_target(marker)
+            if target is not None and target not in bookmarks:
+                raise FormatMonographError(
+                    f"Field marker {marker} references missing bookmark {target} "
+                    f"at paragraph {index}."
+                )
+            containing = [
+                (start, run)
+                for start, end, run in ranges
+                if start <= match.start() and match.end() <= end
+            ]
+            if len(containing) != 1:
+                raise FormatMonographError(
+                    f"Field marker spans multiple runs at paragraph {index}: {marker}"
+                )
+            start, run = containing[0]
+            assignments.setdefault(id(run._r), []).append((match, run))
+
+        for _, assigned in assignments.items():
+            source_run = assigned[0][1]
+            run_start = next(start for start, _, run in ranges if run is source_run)
+            parent = source_run._r.getparent()
+            insertion = parent.index(source_run._r)
+            local_cursor = 0
+            for match, _ in assigned:
+                local_start = match.start() - run_start
+                local_end = match.end() - run_start
+                prefix = source_run.text[local_cursor:local_start]
+                if prefix:
+                    parent.insert(insertion, _text_run_like(source_run, prefix))
+                    insertion += 1
+                marker = match.group(0)
+                instruction, placeholder = _field_instruction_for_marker(marker)
+                parent.insert(
+                    insertion,
+                    _simple_field_like(source_run, instruction, placeholder),
+                )
+                insertion += 1
+                _record_derived_change(
+                    document,
+                    {
+                        "kind": "field_marker",
+                        "paragraph": index,
+                        "source": marker,
+                        "field": instruction,
+                    },
+                )
+                converted += 1
+                local_cursor = local_end
+            suffix = source_run.text[local_cursor:]
+            if suffix:
+                parent.insert(insertion, _text_run_like(source_run, suffix))
+            parent.remove(source_run._r)
+    return converted
+
+
+def _remove_prefix_from_runs(paragraph: Any, length: int) -> None:
+    remaining = length
+    for run in paragraph.runs:
+        if remaining <= 0:
+            break
+        text = run.text
+        take = min(len(text), remaining)
+        run.text = text[take:]
+        remaining -= take
+    if remaining:
+        raise FormatMonographError("Heading prefix spans an unsupported non-text object.")
+
+
+def _heading_prefix_pattern(level: int) -> re.Pattern[str]:
+    if level == 1:
+        return re.compile(r"^\s*ç¬¬\s*[0-9ä¸€äºŒä¸‰å››äº”å…­ä¸ƒå…«ä¹åç™¾]+\s*ç« \s*")
+    separators = level - 1
+    return re.compile(rf"^\s*\d+(?:[.-]\d+){{{separators}}}\s*")
+
+
+def _strip_manual_heading_prefixes(document: Any, levels: int) -> int:
+    changed = 0
+    for index, paragraph in enumerate(document.paragraphs):
+        if not paragraph.style or not paragraph.style.name.startswith("Heading "):
+            continue
+        try:
+            level = int(paragraph.style.name.split()[-1])
+        except ValueError:
+            continue
+        if level > levels:
+            continue
+        text = paragraph.text
+        match = _heading_prefix_pattern(level).match(text)
+        if not match:
+            if re.match(r"^\s*(?:ç¬¬\s*\d+\s*ç« |\d+[.-]\d+)", text):
+                raise FormatMonographError(
+                    f"Ambiguous manual heading number at paragraph {index}: {text[:80]}"
+                )
+            continue
+        prefix = match.group(0)
+        _remove_prefix_from_runs(paragraph, len(prefix))
+        _record_derived_change(
+            document,
+            {"kind": "heading_prefix", "paragraph": index, "removed": prefix},
+        )
+        changed += 1
+    return changed
+
+
+def _next_numbering_id(root: Any, tag: str, attribute: str) -> int:
+    values = []
+    for element in root.findall(qn(f"w:{tag}")):
+        value = element.get(qn(f"w:{attribute}"))
+        if value is not None and value.isdigit():
+            values.append(int(value))
+    return max(values, default=0) + 1
+
+
+def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1) -> int:
+    if not 1 <= levels <= 4:
+        raise FormatMonographError("heading_levels must be between 1 and 4.")
+    if chapter_start < 1:
+        raise FormatMonographError("chapter_start must be a positive integer.")
+    root = document.part.numbering_part.element
+    abstract_id = _next_numbering_id(root, "abstractNum", "abstractNumId")
+    num_id = _next_numbering_id(root, "num", "numId")
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    multi = OxmlElement("w:multiLevelType")
+    multi.set(qn("w:val"), "multilevel")
+    abstract.append(multi)
+
+    for level in range(levels):
+        lvl = OxmlElement("w:lvl")
+        lvl.set(qn("w:ilvl"), str(level))
+        start = OxmlElement("w:start")
+        start.set(qn("w:val"), str(chapter_start if level == 0 else 1))
+        num_fmt = OxmlElement("w:numFmt")
+        num_fmt.set(qn("w:val"), "decimal")
+        p_style = OxmlElement("w:pStyle")
+        p_style.set(qn("w:val"), f"Heading{level + 1}")
+        lvl_text = OxmlElement("w:lvlText")
+        if level == 0:
+            lvl_text.set(qn("w:val"), "ç¬¬%1ç« ")
+        else:
+            lvl_text.set(
+                qn("w:val"),
+                ".".join(f"%{number}" for number in range(1, level + 2)),
+            )
+        suff = OxmlElement("w:suff")
+        suff.set(qn("w:val"), "space")
+        lvl.extend([start, num_fmt, p_style, lvl_text, suff])
+        abstract.append(lvl)
+    root.insert(0, abstract)
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(num_id))
+    abstract_ref = OxmlElement("w:abstractNumId")
+    abstract_ref.set(qn("w:val"), str(abstract_id))
+    num.append(abstract_ref)
+    if chapter_start != 1:
+        override = OxmlElement("w:lvlOverride")
+        override.set(qn("w:ilvl"), "0")
+        start_override = OxmlElement("w:startOverride")
+        start_override.set(qn("w:val"), str(chapter_start))
+        override.append(start_override)
+        num.append(override)
+    root.append(num)
+
+    for level in range(levels):
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        p_pr = style.element.get_or_add_pPr()
+        num_pr = p_pr.find(qn("w:numPr"))
+        if num_pr is None:
+            num_pr = OxmlElement("w:numPr")
+            p_pr.append(num_pr)
+        for child_name in ("ilvl", "numId"):
+            existing = num_pr.find(qn(f"w:{child_name}"))
+            if existing is not None:
+                num_pr.remove(existing)
+        ilvl = OxmlElement("w:ilvl")
+        ilvl.set(qn("w:val"), str(level))
+        number = OxmlElement("w:numId")
+        number.set(qn("w:val"), str(num_id))
+        num_pr.extend([ilvl, number])
+    return levels
+
+
+def apply_field_properties(document: Any, properties: dict[str, Any]) -> int:
+    changed = 0
+    if "update_on_open" in properties:
+        _set_update_fields_on_open(document, bool(properties["update_on_open"]))
+        changed += 1
+    if properties.get("mark_fields_dirty"):
+        changed += _mark_fields_dirty(document)
+    if properties.get("convert_explicit_markers"):
+        changed += _convert_explicit_field_markers(document)
+
+    levels = int(properties.get("heading_levels", 4))
+    if properties.get("strip_manual_heading_prefixes"):
+        changed += _strip_manual_heading_prefixes(document, levels)
+    if properties.get("rebuild_heading_numbering"):
+        changed += _ensure_heading_numbering(
+            document, levels, int(properties.get("chapter_start", 1))
+        )
+    return changed
+
+
+def apply_equation_properties(document: Any, properties: dict[str, Any]) -> int:
+    unsupported_values = {
+        key: value
+        for key, value in properties.items()
+        if key in EQUATION_PROPERTIES and value not in {True, False}
+    }
+    if unsupported_values:
+        raise FormatMonographError(
+            "Equation policy properties must be boolean: "
+            + ", ".join(sorted(unsupported_values))
+        )
+    return len(document.element.xpath(".//*[local-name()='oMath']"))
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _complex_field_instructions(root: etree._Element) -> list[str]:
+    instructions: list[str] = []
+    for paragraph in root.xpath(".//w:p", namespaces=NS):
+        stack: list[dict[str, Any]] = []
+        for element in paragraph.iter():
+            if element.tag == qn("w:fldChar"):
+                kind = element.get(qn("w:fldCharType"))
+                if kind == "begin":
+                    stack.append({"parts": [], "captured": False})
+                elif kind == "separate" and stack and not stack[-1]["captured"]:
+                    value = "".join(stack[-1]["parts"]).strip()
+                    if value:
+                        instructions.append(value)
+                    stack[-1]["captured"] = True
+                elif kind == "end" and stack:
+                    field = stack.pop()
+                    if not field["captured"]:
+                        value = "".join(field["parts"]).strip()
+                        if value:
+                            instructions.append(value)
+            elif (
+                element.tag == qn("w:instrText")
+                and stack
+                and not stack[-1]["captured"]
+            ):
+                stack[-1]["parts"].append(element.text or "")
+    return instructions
+
+
+def field_inventory(path: Path) -> dict[str, Any]:
+    ensure_docx(path)
+    counts: dict[str, int] = {}
+    instructions: list[str] = []
+    bookmarks: set[str] = set()
+    with zipfile.ZipFile(path) as package:
+        for name in package.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            root = etree.fromstring(package.read(name))
+            bookmarks.update(
+                root.xpath(".//w:bookmarkStart/@w:name", namespaces=NS)
+            )
+            instructions.extend(
+                value.strip()
+                for value in root.xpath(".//w:fldSimple/@w:instr", namespaces=NS)
+                if value.strip()
+            )
+            instructions.extend(_complex_field_instructions(root))
+
+    references = []
+    sequences = []
+    for instruction in instructions:
+        match = re.match(r"\s*([A-Za-z]+)(?:\s+([^\\\s]+))?", instruction)
+        kind = match.group(1).upper() if match else "UNKNOWN"
+        argument = match.group(2) if match else None
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind in {"REF", "PAGEREF"} and argument:
+            references.append({"type": kind, "target": argument})
+        if kind == "SEQ" and argument:
+            sequences.append(argument)
+
+    unresolved = sorted(
+        {
+            item["target"]
+            for item in references
+            if item["target"] not in bookmarks
+        }
+    )
+    return {
+        "total": len(instructions),
+        "types": dict(sorted(counts.items())),
+        "bookmarks": sorted(bookmarks),
+        "references": references,
+        "unresolved_references": unresolved,
+        "sequences": sorted(set(sequences)),
+    }
+
+
+def field_cache_inventory(path: Path) -> dict[str, Any]:
+    inventory = field_inventory(path)
+    toc_fields = int(inventory["types"].get("TOC", 0))
+    toc_entries = 0
+    dirty_fields = 0
+    update_on_open = False
+    with zipfile.ZipFile(path) as package:
+        document = etree.fromstring(package.read("word/document.xml"))
+        toc_entries = len(
+            document.xpath(
+                ".//w:p[starts-with(translate(./w:pPr/w:pStyle/@w:val, 'toc', 'TOC'), 'TOC')]",
+                namespaces=NS,
+            )
+        )
+        dirty_fields = len(
+            document.xpath(
+                ".//w:fldSimple[@w:dirty='true' or @w:dirty='1'] | "
+                ".//w:fldChar[@w:fldCharType='begin'][@w:dirty='true' or @w:dirty='1']",
+                namespaces=NS,
+            )
+        )
+        if "word/settings.xml" in package.namelist():
+            settings = etree.fromstring(package.read("word/settings.xml"))
+            update_on_open = bool(settings.xpath(".//w:updateFields", namespaces=NS))
+
+    if toc_fields == 0:
+        status = "absent"
+    elif toc_entries == 0:
+        status = "code_only"
+    elif dirty_fields:
+        status = "stale"
+    else:
+        status = "refreshed"
+    return {
+        "status": status,
+        "main_toc_fields": toc_fields,
+        "toc_entries": toc_entries,
+        "dirty_fields": dirty_fields,
+        "update_on_open": update_on_open,
+        "field_types": inventory["types"],
+    }
+
+
+def equation_inventory(path: Path) -> dict[str, Any]:
+    ensure_docx(path)
+    result = {
+        "omml": 0,
+        "mathtype_ole": 0,
+        "legacy_equation_ole": 0,
+        "other_ole": 0,
+        "formula_image_candidates": 0,
+    }
+    with zipfile.ZipFile(path) as package:
+        for name in package.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            root = etree.fromstring(package.read(name))
+            result["omml"] += len(root.xpath(".//m:oMath", namespaces=NS))
+            for ole in root.xpath(".//*[local-name()='OLEObject']"):
+                prog_id = (ole.get("ProgID") or ole.get(f"{{{O_NS}}}ProgID") or "").lower()
+                if "dsmt" in prog_id or "mathtype" in prog_id:
+                    result["mathtype_ole"] += 1
+                elif prog_id in {"equation.3", "equation.2", "equation"}:
+                    result["legacy_equation_ole"] += 1
+                else:
+                    result["other_ole"] += 1
+
+            for paragraph in root.xpath(".//w:p", namespaces=NS):
+                if not paragraph.xpath(".//w:drawing | .//v:imagedata", namespaces=NS):
+                    continue
+                styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
+                metadata = paragraph.xpath(
+                    ".//*[local-name()='docPr']/@name | "
+                    ".//*[local-name()='docPr']/@title | "
+                    ".//*[local-name()='docPr']/@descr"
+                )
+                hint = " ".join(styles + metadata).lower()
+                if any(token in hint for token in ("equation", "formula", "å…¬å¼")):
+                    result["formula_image_candidates"] += 1
+    result["editable_total"] = (
+        result["omml"] + result["mathtype_ole"] + result["legacy_equation_ole"]
+    )
+    return result
+
+
+def protected_object_manifest(path: Path) -> dict[str, Any]:
+    ensure_docx(path)
+    embeddings: dict[str, str] = {}
+    media: dict[str, str] = {}
+    omml: list[str] = []
+    with zipfile.ZipFile(path) as package:
+        for name in sorted(package.namelist()):
+            data = package.read(name)
+            if name.startswith("word/embeddings/"):
+                embeddings[name] = _sha256_bytes(data)
+            elif name.startswith("word/media/"):
+                media[name] = _sha256_bytes(data)
+            if name.startswith("word/") and name.endswith(".xml"):
+                root = etree.fromstring(data)
+                for equation in root.xpath(".//m:oMath", namespaces=NS):
+                    canonical = etree.tostring(equation, method="c14n", exclusive=True)
+                    omml.append(_sha256_bytes(canonical))
+    return {
+        "embeddings": embeddings,
+        "media": media,
+        "omml_sha256": sorted(omml),
+    }
+
+
+def protected_payload_manifest(path: Path) -> dict[str, list[str]]:
+    """Compare protected payloads independently of package part renaming."""
+    manifest = protected_object_manifest(path)
+    return {
+        "embeddings": sorted(manifest["embeddings"].values()),
+        "media": sorted(manifest["media"].values()),
+        "omml_sha256": sorted(manifest["omml_sha256"]),
+    }
+
+def apply_rule(
+    document: Any,
+    rule: dict[str, Any],
+    *,
+    paragraph_targets: list[Any] | None = None,
+    table_targets: list[tuple[Any, dict[str, Any]]] | None = None,
+    chapter_start: int | None = None,
+) -> int:
+    unsupported = unsupported_properties(rule)
+    if unsupported:
+        raise FormatMonographError(
+            f"Rule {rule['id']} has unsupported automatic properties: {', '.join(unsupported)}"
+        )
+
+    selector = rule["selector"]
+    if selector["kind"] in {"document", "section_role"}:
+        return apply_section_properties(document, rule["properties"])
+    if selector["kind"] == "table_role":
+        return apply_table_properties(document, rule["properties"], table_targets)
+    if selector["kind"] == "field_role":
+        properties = dict(rule["properties"])
+        if chapter_start is not None:
+            properties["chapter_start"] = chapter_start
+        return apply_field_properties(document, properties)
+    if selector["kind"] == "equation_role":
+        return apply_equation_properties(document, rule["properties"])
+
+    style_name = style_name_for_selector(selector)
+    if style_name is None:
+        raise FormatMonographError(
+            f"Rule {rule['id']} uses an unsupported automatic selector: {selector}"
+        )
+    if paragraph_targets is not None:
+        return apply_style_rule_to_paragraphs(document, rule, paragraph_targets)
+    style = ensure_paragraph_style(document, style_name)
+    apply_style_properties(style, rule["properties"])
+    return sum(
+        1
+        for paragraph in iter_document_paragraphs(document)
+        if paragraph.style and paragraph.style.name == style_name
+    )
+
+
+def first_anchor_paragraph(document: Any, rule: dict[str, Any]) -> Any | None:
+    style_name = style_name_for_selector(rule["selector"])
+    paragraphs = list(document.paragraphs)
+    if style_name:
+        for paragraph in paragraphs:
+            if (
+                paragraph.text.strip()
+                and paragraph.style
+                and paragraph.style.name == style_name
+                and paragraph.runs
+            ):
+                return paragraph
+    for paragraph in paragraphs:
+        if paragraph.text.strip() and paragraph.runs:
+            return paragraph
+    return None
+
+
+def summarize_rule(rule: dict[str, Any]) -> str:
+    pairs = ", ".join(f"{key}={value}" for key, value in sorted(rule["properties"].items()))
+    sources = ", ".join(rule["source_ids"])
+    return f"{rule['id']}: {pairs}. Sources: {sources}."
+
+
+def load_document(path: Path) -> Any:
+    ensure_docx(path)
+    try:
+        return Document(str(path))
+    except Exception as exc:
+        raise FormatMonographError(f"Unable to open DOCX {path}: {exc}") from exc
