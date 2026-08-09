@@ -10,7 +10,20 @@ Use a source-bound structure map for operations that reinterpret document struct
 4. Pass the same map to `apply_profile.py` and `audit_docx.py`.
 5. Regenerate the map and repeat QA whenever the source fingerprint changes.
 
-New maps use schema `1.2`; readers continue to accept `1.0` and `1.1`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. It cannot express domain-aware manual caption actions.
+New maps use schema `1.3`; readers continue to accept `1.0`, `1.1`, and `1.2`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. Version 1.2 adds domain-aware manual caption actions and semantic paragraph roles.
+
+## Schema 1.3
+
+Schema 1.3 keeps all 1.2 behavior and adds stable locators and pagination-only groups.
+
+- Body-paragraph locators include `text_sha256`, plus hashes of the nearest preceding and following nonempty paragraphs when available. After TOC expansion or another approved structural shift, resolve by hash and context; block when the result is absent or ambiguous.
+- Heading candidates include `normalized_text_sha256` so audit can identify the approved title after a verified manual prefix is removed.
+- `pagination_groups` bind an image paragraph to its following caption, or a standalone table caption to its following table, without changing text.
+- An approved layout table is permitted only with `pagination_only=true`; formatting rules for data tables still cannot target it.
+- `repeat_caption_with_header=true` requires caption row 0 and header row 1 and repeats both rows. `keep_rows_together` applies only pagination control.
+- Approved non-heading roles clear inherited direct outline levels and accidental Heading 1-4 paragraph styles before their approved role style is applied.
+
+New TOC migration physically removes verified static TOC paragraphs and inserts one complex Word `TOC` field. Readers normalize legacy emptied TOC anchors for audit compatibility, but new output must not leave them behind.
 
 ## Schema 1.2
 
@@ -55,6 +68,7 @@ Candidates report visible payload, header/footer references and payload, page-nu
 - `headings`: assign approved body paragraphs to Heading 1-4 and remove only verified prefixes.
 - `captions`: preserve or style manual identifiers by default; perform only explicitly approved identifier replacement, relocation, or field conversion.
 - `tables`: apply exact approved header and row-split controls to data tables.
+- `pagination_groups`: apply only approved `keepNext`/`cantSplit` relationships to figures, captions, and tables.
 - `trailing_empty_sections`: remove safe approved final sections from the end inward.
 
 Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, and revisions.

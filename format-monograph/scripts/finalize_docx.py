@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""Finalize field caches and re-audit a formatted DOCX without overwriting inputs."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+from lxml import etree
+
+from _common import (
+    NS,
+    FormatMonographError,
+    ensure_docx,
+    field_cache_inventory,
+    protected_payload_manifest,
+    write_json,
+)
+from render_docx import locate_soffice
+from structure_map import (
+    load_structure_map,
+    structure_content_fingerprint,
+    validate_structure_map_source,
+)
+from validate_profile import validate
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def rewrite_field_flags(path: Path, *, deferred: bool) -> None:
+    temp_path = path.with_name(f".{path.name}.fields.tmp")
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(
+        temp_path, "w", zipfile.ZIP_DEFLATED
+    ) as target:
+        for info in source.infolist():
+            data = source.read(info.filename)
+            if info.filename == "word/document.xml":
+                root = etree.fromstring(data)
+                for field in root.xpath(
+                    ".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']",
+                    namespaces=NS,
+                ):
+                    dirty = f"{{{NS['w']}}}dirty"
+                    if deferred:
+                        field.set(dirty, "true")
+                    else:
+                        field.attrib.pop(dirty, None)
+                data = etree.tostring(
+                    root, xml_declaration=True, encoding="UTF-8", standalone=True
+                )
+            elif info.filename == "word/settings.xml":
+                root = etree.fromstring(data)
+                updates = root.xpath("./w:updateFields", namespaces=NS)
+                if deferred and not updates:
+                    update = etree.Element(f"{{{NS['w']}}}updateFields")
+                    update.set(f"{{{NS['w']}}}val", "true")
+                    root.append(update)
+                elif not deferred:
+                    for update in updates:
+                        root.remove(update)
+                data = etree.tostring(
+                    root, xml_declaration=True, encoding="UTF-8", standalone=True
+                )
+            target.writestr(info, data)
+    os.replace(temp_path, path)
+
+
+def free_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def uno_python_candidates(soffice: str) -> list[str]:
+    program = Path(soffice).resolve().parent
+    candidates = [
+        program / ("python.exe" if os.name == "nt" else "python"),
+        Path("/usr/bin/python3"),
+        Path(sys.executable),
+    ]
+    result = []
+    for candidate in candidates:
+        value = str(candidate)
+        if candidate.is_file() and value not in result:
+            result.append(value)
+    return result
+
+
+def locate_uno_python(soffice: str, env: dict[str, str]) -> str:
+    for candidate in uno_python_candidates(soffice):
+        checked = subprocess.run(
+            [candidate, "-c", "import uno"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=20,
+            check=False,
+        )
+        if checked.returncode == 0:
+            return candidate
+    raise FormatMonographError(
+        "LibreOffice was found, but no Python runtime with the UNO module was available."
+    )
+
+
+def libreoffice_refresh(
+    input_path: Path, output_path: Path, renderer: str | None
+) -> dict:
+    soffice, renderer_source = locate_soffice(renderer)
+    helper = Path(__file__).with_name("libreoffice_fields.py")
+    port = free_port()
+    with tempfile.TemporaryDirectory(prefix="format-monograph-fields-") as temp_name:
+        temp = Path(temp_name)
+        profile = temp / "lo-profile"
+        profile.mkdir()
+        env = os.environ.copy()
+        env["PATH"] = str(Path(soffice).resolve().parent) + os.pathsep + env.get(
+            "PATH", ""
+        )
+        python = locate_uno_python(soffice, env)
+        server = subprocess.Popen(
+            [
+                soffice,
+                "--headless",
+                "--invisible",
+                "--nologo",
+                "--nodefault",
+                "--nofirststartwizard",
+                f"-env:UserInstallation={profile.resolve().as_uri()}",
+                f"--accept=socket,host=127.0.0.1,port={port};urp;StarOffice.ComponentContext",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    python,
+                    str(helper),
+                    str(input_path.resolve()),
+                    str(output_path.resolve()),
+                    "--port",
+                    str(port),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=300,
+                check=False,
+            )
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                server.kill()
+        if completed.returncode != 0 or not output_path.is_file():
+            raise FormatMonographError(
+                "LibreOffice field refresh failed. "
+                f"stdout={completed.stdout.strip()} stderr={completed.stderr.strip()}"
+            )
+        rewrite_field_flags(output_path, deferred=False)
+        details = json.loads(completed.stdout or "{}")
+        details.update(
+            {
+                "backend": "libreoffice_uno",
+                "renderer": soffice,
+                "renderer_source": renderer_source,
+                "uno_python": python,
+            }
+        )
+        return details
+
+
+def field_contract_preserved(before: dict, after: dict) -> bool:
+    if before["main_toc_fields"] > after["main_toc_fields"]:
+        return False
+    after_types = after.get("field_types", {})
+    return all(
+        int(after_types.get(name, 0)) >= int(count)
+        for name, count in before.get("field_types", {}).items()
+    )
+
+
+def use_deferred_output(input_path: Path, output_path: Path, reason: str) -> dict:
+    output_path.unlink(missing_ok=True)
+    shutil.copy2(input_path, output_path)
+    rewrite_field_flags(output_path, deferred=True)
+    return {"backend": "deferred_on_open", "fallback_from": reason}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--profile", required=True, type=Path)
+    parser.add_argument("--structure-map", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--status-output", type=Path)
+    parser.add_argument(
+        "--field-updater",
+        choices=("auto", "libreoffice", "deferred"),
+        default="auto",
+    )
+    parser.add_argument("--renderer")
+    parser.add_argument("--approve-deferred", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        ensure_docx(args.input)
+        if args.source:
+            ensure_docx(args.source)
+        errors, profile = validate(args.profile)
+        if errors or profile["approval"]["status"] != "approved":
+            raise FormatMonographError(
+                "Finalization requires an approved valid profile: " + "; ".join(errors)
+            )
+        structure_map = load_structure_map(args.structure_map)
+        if args.source:
+            validate_structure_map_source(args.source, structure_map)
+        if args.output.exists() and not args.force:
+            raise FormatMonographError("Final output exists; use --force to replace it.")
+        if args.output.resolve() == args.input.resolve() or (
+            args.source and args.output.resolve() == args.source.resolve()
+        ):
+            raise FormatMonographError("Finalization must not overwrite an input DOCX.")
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.unlink(missing_ok=True)
+
+        baseline = args.source or args.input
+        baseline_fp = structure_content_fingerprint(baseline, structure_map)
+        input_fp = structure_content_fingerprint(args.input, structure_map)
+        if baseline_fp != input_fp:
+            raise FormatMonographError(
+                "Formatted input failed the stable pre-finalization content audit."
+            )
+        baseline_objects = protected_payload_manifest(baseline)
+        input_fields = field_cache_inventory(args.input)
+        backend: dict = {"backend": "not_needed"}
+        delivery_status = input_fields["status"]
+
+        if input_fields["status"] in {"absent", "refreshed"}:
+            shutil.copy2(args.input, args.output)
+        elif args.field_updater == "deferred":
+            if not args.approve_deferred:
+                raise FormatMonographError(
+                    "Deferred field update requires caller QA and --approve-deferred."
+                )
+            shutil.copy2(args.input, args.output)
+            rewrite_field_flags(args.output, deferred=True)
+            backend = {"backend": "deferred_on_open"}
+            delivery_status = "deferred"
+        else:
+            try:
+                backend = libreoffice_refresh(args.input, args.output, args.renderer)
+            except FormatMonographError:
+                if args.field_updater != "auto" or not args.approve_deferred:
+                    raise
+                backend = use_deferred_output(
+                    args.input, args.output, "libreoffice_error"
+                )
+                delivery_status = "deferred"
+
+        output_fields = field_cache_inventory(args.output)
+        if backend.get("backend") == "libreoffice_uno":
+            delivery_status = output_fields["status"]
+            field_contract_ok = field_contract_preserved(input_fields, output_fields)
+            refreshed_ok = (
+                not input_fields["main_toc_fields"] or delivery_status == "refreshed"
+            )
+        else:
+            field_contract_ok = True
+            refreshed_ok = True
+
+        output_fp = structure_content_fingerprint(args.output, structure_map)
+        output_objects = protected_payload_manifest(args.output)
+        content_ok = baseline_fp == output_fp
+        objects_ok = baseline_objects == output_objects
+        if backend.get("backend") == "libreoffice_uno" and not (
+            field_contract_ok and refreshed_ok and content_ok and objects_ok
+        ):
+            if args.field_updater == "auto" and args.approve_deferred:
+                backend = use_deferred_output(
+                    args.input, args.output, "libreoffice_contract_or_integrity"
+                )
+                delivery_status = "deferred"
+                output_fields = field_cache_inventory(args.output)
+                output_fp = structure_content_fingerprint(args.output, structure_map)
+                output_objects = protected_payload_manifest(args.output)
+                content_ok = baseline_fp == output_fp
+                objects_ok = baseline_objects == output_objects
+            else:
+                args.output.unlink(missing_ok=True)
+                raise FormatMonographError(
+                    "LibreOffice field refresh did not preserve the editable-field "
+                    "contract and document integrity."
+                )
+        if not content_ok or not objects_ok:
+            args.output.unlink(missing_ok=True)
+            raise FormatMonographError(
+                "Finalization integrity failed "
+                f"(content={'pass' if content_ok else 'fail'}, "
+                f"protected_objects={'pass' if objects_ok else 'fail'})."
+            )
+
+        result = {
+            "status": "pass",
+            "delivery_field_status": delivery_status,
+            "input_field_cache": input_fields,
+            "output_field_cache": output_fields,
+            "field_backend": backend,
+            "content_integrity": "pass",
+            "protected_object_integrity": "pass",
+            "workflow_state": {
+                "source_sha256": file_sha256(baseline),
+                "input_sha256": file_sha256(args.input),
+                "profile_sha256": file_sha256(args.profile),
+                "structure_map_sha256": file_sha256(args.structure_map),
+                "output_sha256": file_sha256(args.output),
+                "stage": "finalized",
+            },
+            "output": str(args.output),
+        }
+        if args.status_output:
+            write_json(args.status_output, result)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    except (
+        FormatMonographError,
+        OSError,
+        ValueError,
+        subprocess.SubprocessError,
+        zipfile.BadZipFile,
+    ) as exc:
+        args.output.unlink(missing_ok=True)
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

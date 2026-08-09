@@ -40,6 +40,10 @@ def main() -> int:
     parser.add_argument("--keep-pdf", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--renderer", help="Explicit LibreOffice-compatible renderer path.")
+    parser.add_argument(
+        "--target-software",
+        help="Publisher-designated target application used to qualify visual QA.",
+    )
     args = parser.parse_args()
 
     try:
@@ -47,6 +51,14 @@ def main() -> int:
         if args.dpi < 72 or args.dpi > 300:
             raise FormatMonographError("--dpi must be between 72 and 300.")
         soffice, renderer_source = locate_soffice(args.renderer)
+        version_result = subprocess.run(
+            [soffice, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        renderer_version = (version_result.stdout or version_result.stderr).strip() or None
         try:
             import fitz
         except ImportError as exc:
@@ -123,7 +135,13 @@ def main() -> int:
             "pages": page_paths,
             "pdf": kept_pdf,
             "renderer": soffice,
+            "renderer_version": renderer_version,
             "renderer_source": renderer_source,
+            "target_software": args.target_software,
+            "target_layout_unverified": bool(
+                args.target_software
+                and "libreoffice" not in args.target_software.casefold()
+            ),
             "visual_review": "pending",
         }
         write_json(manifest_path, result)

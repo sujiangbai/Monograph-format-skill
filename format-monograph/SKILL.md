@@ -57,6 +57,10 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 10. Preserve all authored text except an individually caller-confirmed caption-identifier replacement. Such a replacement must use `action=replace_identifier`, preserve the caption title exactly, and pass the dedicated audit. Approved field display values may also change.
 11. Run:
    `<python> scripts/audit_docx.py <input.docx> <formatted.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output <audit.json>`
+12. Finalize editable field caches without overwriting either input:
+   `<python> scripts/finalize_docx.py <formatted.docx> --source <input.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output <finalized.docx> --status-output <finalization.json>`
+
+The finalizer first tries an available LibreOffice UNO backend. It accepts that result only when authored-content fingerprints, editable-field counts, OMML, embedded objects, and media payloads all remain intact. If the backend is incompatible, stop. Fall back to updating fields when the target application opens the DOCX only after explicit caller QA, using `--approve-deferred`; record `delivery_field_status=deferred` in the report. `--field-updater deferred` requests that approved fallback directly. Never describe dirty field flags as a completed field refresh.
 
 For a whole book, use one source-bound structure map that covers the entire DOCX. A chapter trial is evidence for tuning the rules, not the final scope of the skill.
 
@@ -77,9 +81,11 @@ Use real Word fields and linked numbering only when the profile and structure ma
 
 In full mode, run:
 
-`<python> scripts/render_docx.py <formatted.docx> --output-dir <render-directory> [--renderer <path>]`
+`<python> scripts/render_docx.py <finalized.docx> --output-dir <render-directory> [--renderer <path>] [--target-software <name>]`
 
 Open every generated page image at full readable size. Check every page for clipping, overlap, missing glyphs, broken tables, bad page breaks, misplaced figures, incorrect headers or footers, and visibly rasterized or missing equations. Fix, re-audit, and re-render after every layout-sensitive change.
+
+Rendering with LibreOffice does not prove Microsoft Word layout compatibility. When the requested target differs from the actual renderer, record `target_layout_unverified` and require a final check in that target application before claiming publication-ready layout.
 
 In structural mode, ask the caller to approve delivery without visual QA and state the limitation in the report. In analysis mode, do not modify a DOCX.
 
@@ -105,6 +111,7 @@ Stop and ask the caller when:
 - a formula-image candidate or unresolved legacy equation object exists;
 - content or protected-object integrity fails;
 - field migration is ambiguous;
+- field finalization changes authored content, protected objects, or the editable-field contract;
 - a structure map does not match the current source fingerprint or is not approved;
 - rendering fails for a reason other than an unavailable renderer.
 

@@ -22,6 +22,7 @@ from _common import (
     font_alias_keys,
     load_document,
     protected_object_manifest,
+    protected_payload_manifest,
     style_name_for_selector,
     write_json,
 )
@@ -514,7 +515,9 @@ def main() -> int:
         )
         original_objects = protected_object_manifest(args.original)
         formatted_objects = protected_object_manifest(args.formatted)
-        objects_ok = original_objects == formatted_objects
+        original_payloads = protected_payload_manifest(args.original)
+        formatted_payloads = protected_payload_manifest(args.formatted)
+        objects_ok = original_payloads == formatted_payloads
         document = load_document(args.formatted)
         rule_results = []
 
@@ -599,6 +602,11 @@ def main() -> int:
                 "passed": objects_ok,
                 "original": original_objects,
                 "formatted": formatted_objects,
+                "payload_comparison": {
+                    "path_independent": True,
+                    "original": original_payloads,
+                    "formatted": formatted_payloads,
+                },
             },
             "equations": equation_inventory(args.formatted),
             "approved_manual_identifier_replacements": caption_replacements,

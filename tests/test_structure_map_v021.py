@@ -184,7 +184,13 @@ class StructureMapV021Tests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         capabilities = json.loads(result.stdout)["capabilities"]
         self.assertEqual(
-            {"inspection", "profile_validation", "docx_editing", "rendering"},
+            {
+                "inspection",
+                "profile_validation",
+                "docx_editing",
+                "field_finalization",
+                "rendering",
+            },
             set(capabilities),
         )
 

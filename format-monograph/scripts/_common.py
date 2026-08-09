@@ -1263,6 +1263,49 @@ def field_inventory(path: Path) -> dict[str, Any]:
     }
 
 
+def field_cache_inventory(path: Path) -> dict[str, Any]:
+    inventory = field_inventory(path)
+    toc_fields = int(inventory["types"].get("TOC", 0))
+    toc_entries = 0
+    dirty_fields = 0
+    update_on_open = False
+    with zipfile.ZipFile(path) as package:
+        document = etree.fromstring(package.read("word/document.xml"))
+        toc_entries = len(
+            document.xpath(
+                ".//w:p[starts-with(translate(./w:pPr/w:pStyle/@w:val, 'toc', 'TOC'), 'TOC')]",
+                namespaces=NS,
+            )
+        )
+        dirty_fields = len(
+            document.xpath(
+                ".//w:fldSimple[@w:dirty='true' or @w:dirty='1'] | "
+                ".//w:fldChar[@w:fldCharType='begin'][@w:dirty='true' or @w:dirty='1']",
+                namespaces=NS,
+            )
+        )
+        if "word/settings.xml" in package.namelist():
+            settings = etree.fromstring(package.read("word/settings.xml"))
+            update_on_open = bool(settings.xpath(".//w:updateFields", namespaces=NS))
+
+    if toc_fields == 0:
+        status = "absent"
+    elif toc_entries == 0:
+        status = "code_only"
+    elif dirty_fields:
+        status = "stale"
+    else:
+        status = "refreshed"
+    return {
+        "status": status,
+        "main_toc_fields": toc_fields,
+        "toc_entries": toc_entries,
+        "dirty_fields": dirty_fields,
+        "update_on_open": update_on_open,
+        "field_types": inventory["types"],
+    }
+
+
 def equation_inventory(path: Path) -> dict[str, Any]:
     ensure_docx(path)
     result = {
@@ -1326,6 +1369,16 @@ def protected_object_manifest(path: Path) -> dict[str, Any]:
         "embeddings": embeddings,
         "media": media,
         "omml_sha256": sorted(omml),
+    }
+
+
+def protected_payload_manifest(path: Path) -> dict[str, list[str]]:
+    """Compare protected payloads independently of package part renaming."""
+    manifest = protected_object_manifest(path)
+    return {
+        "embeddings": sorted(manifest["embeddings"].values()),
+        "media": sorted(manifest["media"].values()),
+        "omml_sha256": sorted(manifest["omml_sha256"]),
     }
 
 def apply_rule(
