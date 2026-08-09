@@ -89,6 +89,26 @@ def semantic_errors(profile: dict) -> list[str]:
                 errors.append(
                     f"Caption rule {rule['id']} cannot automatically renumber manual text."
                 )
+        if rule.get("selector", {}).get("kind") == "table_role":
+            properties = rule.get("properties", {})
+            if properties.get("border_preset") not in {
+                None,
+                "preserve",
+                "three_line",
+                "full_grid",
+            }:
+                errors.append(f"Table rule {rule['id']} has invalid border_preset.")
+            width = properties.get("available_width_percent")
+            if width is not None and not 1 <= float(width) <= 100:
+                errors.append(
+                    f"Table rule {rule['id']} available_width_percent must be 1-100."
+                )
+            roles = properties.get("column_roles")
+            if roles and any(
+                role not in {"numeric", "unit", "short_code", "narrative"}
+                for role in roles
+            ):
+                errors.append(f"Table rule {rule['id']} has an invalid column role.")
 
     for conflict in profile.get("conflicts", []):
         missing = sorted(set(conflict["rule_ids"]) - known_rules)

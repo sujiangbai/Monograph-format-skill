@@ -43,8 +43,14 @@ V1.1 可自动执行：
 - `alignment`
 - `repeat_header_row`
 - `prevent_row_split`
+- `available_width_percent`、`preferred_column_widths_percent`、`allow_autofit`
+- `cell_margins_mm`、`vertical_alignment`
+- `border_preset`：`preserve`、`three_line` 或 `full_grid`
+- `column_roles`、`column_alignments`
+- `header_bold`、`header_shading_hex`
+- `font_name_east_asia`、`font_name_ascii`、`font_size_pt`、`line_spacing_pt`
 
-`prevent_row_split` 适用于普通行。超高行、续表标签、断点和横向分节必须先盘点并通过 QA。
+`prevent_row_split` 适用于普通行。视觉属性只作用于结构映射逐表批准的数据表；逐列角色不明确时不得自动对齐。超高行、复杂合并、可见控制标记、续表标签、断点和横向分节必须先盘点并通过 QA。
 
 ## 字段属性
 
@@ -56,6 +62,8 @@ V1.1 可自动执行：
 - `strip_manual_heading_prefixes`
 
 支持的显式标记为 `[[TOC]]`、`[[PAGE]]`、`[[SEQ:name]]`、`[[REF:name]]` 和 `[[PAGEREF:name]]`。不得根据相似文本猜测静态目录、题注或交叉引用。
+
+目录与正文的物理页码分区属于结构映射 1.4，不是普通字段属性。页码序列必须由目标软件重新分页验证；`PAGE` 字段数量不等于文档页数。
 
 ## 公式属性
 

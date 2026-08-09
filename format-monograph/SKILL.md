@@ -36,16 +36,16 @@ Record every conflict. Follow a clear higher-priority instruction, but stop for 
 7. Present conflicts, low-confidence rules, missing values, and blocking questions to the caller.
 8. Stop before document modification until `approval.status` is `approved` and every blocking question and conflict is resolved.
 
-Read [monograph-elements.md](references/monograph-elements.md) while building selectors and properties. When the caller selects the technical-textbook baseline, load `examples/profiles/technical-textbook-layout.v0.2.draft.json` as a candidate and make a task-specific approved copy outside the skill directory.
+Read [monograph-elements.md](references/monograph-elements.md) while building selectors and properties. When the caller selects the technical-textbook baseline, load `examples/profiles/technical-textbook-layout.v0.2.5.draft.json` as a candidate and make a task-specific approved copy outside the skill directory. Earlier candidate profiles remain historical inputs and must not be silently upgraded.
 
 ## Apply approved rules
 
 1. Read [structure-map.md](references/structure-map.md).
 2. Run:
    `<python> scripts/inspect_docx.py <input.docx> --output <inventory.json> --structure-map-output <candidate-structure-map.json>`
-3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, chapter start and heading progression, captions, table kinds, exact header rows, cross-page tables, and trailing-section evidence.
+3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, chapter start and heading progression, captions, table kinds, exact header rows, column roles, complex merges, visible control marks, wide tables, TOC/body page-number boundaries, odd/even footers, and trailing-section evidence.
 4. Ask the caller to approve each proposed structural operation. Keep uncertain entries unapproved and report them; never infer approval from profile approval.
-   For schema 1.2, mark body/title/front-matter roles explicitly and approve only `kind=data` tables for data-table rules. Caption identifiers remain editable manual text by default. Do not infer a missing number, sequence error, or `SEQ` conversion from punctuation alone.
+   For schema 1.4, mark body/title/front-matter roles explicitly, approve `pagination_sections` only after identifying the TOC and body starts, and approve table visuals only for `kind=data` with a known role for every column. Caption identifiers remain editable manual text by default. Do not infer a missing number, sequence error, or `SEQ` conversion from punctuation alone.
    In architecture, civil-engineering, structural-engineering, or drafting content, analyze whether hyphenated numbers identify a section, elevation, node, detail, or drawing callout. Preserve uncertain identifiers and ask the caller before changing them.
 5. Set the map status to `approved`, then bind it to the unchanged source:
    `<python> scripts/validate_structure_map.py <approved-structure-map.json> --source <input.docx>`
@@ -60,7 +60,7 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 12. Finalize editable field caches without overwriting either input:
    `<python> scripts/finalize_docx.py <formatted.docx> --source <input.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output <finalized.docx> --status-output <finalization.json>`
 
-The finalizer first tries an available LibreOffice UNO backend. It accepts that result only when authored-content fingerprints, editable-field counts, OMML, embedded objects, and media payloads all remain intact. If the backend is incompatible, stop. Fall back to updating fields when the target application opens the DOCX only after explicit caller QA, using `--approve-deferred`; record `delivery_field_status=deferred` in the report. `--field-updater deferred` requests that approved fallback directly. Never describe dirty field flags as a completed field refresh.
+When an approved target-application backend is available, call the finalizer with `--field-updater external --field-updater-command <command>`. The backend receives one JSON request and must return one JSON response after repagination, approved field updates, save, and cache verification. The core accepts its output only when authored-content fingerprints, editable-field counts, OMML, embedded objects, and media payloads remain intact. Without an external backend, `auto` may use LibreOffice UNO. Fall back to update-on-open only after explicit caller QA, using `--approve-deferred`; record `delivery_field_status=deferred`. Never describe dirty flags as a completed refresh or LibreOffice pagination as Microsoft Word pagination.
 
 For a whole book, use one source-bound structure map that covers the entire DOCX. A chapter trial is evidence for tuning the rules, not the final scope of the skill.
 
@@ -77,15 +77,17 @@ For a whole book, use one source-bound structure map that covers the entire DOCX
 
 Use real Word fields and linked numbering only when the profile and structure map explicitly approve them. Figure and table identifiers default to editable manual text, not `SEQ`; preserve existing `SEQ`, `REF`, and `PAGEREF` fields. A new caption conversion requires both an approved profile rule with `numbering_mode=seq_field` and `allow_automatic_renumbering=true`, plus an individually approved `convert_to_seq` map entry. Explicit markers are `[[TOC]]`, `[[PAGE]]`, `[[SEQ:name]]`, `[[REF:name]]`, and `[[PAGEREF:name]]`. Remove manual heading prefixes only when they match an approved, unambiguous pattern. Use the approved `chapter_start` for a chapter excerpt and validate progression across a whole book. Otherwise stop and ask.
 
+For the technical-textbook baseline, create separate TOC and body sections only through approved `pagination_sections`. Start each at decimal 1, continue numbering through later body and landscape sections, show the first-page number, and require both default/odd and even footers with PAGE fields. Never treat the number of PAGE fields as the physical page count.
+
 ## Render and verify
 
 In full mode, run:
 
-`<python> scripts/render_docx.py <finalized.docx> --output-dir <render-directory> [--renderer <path>] [--target-software <name>]`
+`<python> scripts/render_docx.py <finalized.docx> --output-dir <render-directory> [--renderer <path>] [--target-software <name>] [--target-pdf <target-export.pdf>]`
 
 Open every generated page image at full readable size. Check every page for clipping, overlap, missing glyphs, broken tables, bad page breaks, misplaced figures, incorrect headers or footers, and visibly rasterized or missing equations. Fix, re-audit, and re-render after every layout-sensitive change.
 
-Rendering with LibreOffice does not prove Microsoft Word layout compatibility. When the requested target differs from the actual renderer, record `target_layout_unverified` and require a final check in that target application before claiming publication-ready layout.
+Rendering with LibreOffice does not prove Microsoft Word layout compatibility. When an approved backend exports a target-software PDF, render that PDF with `--target-pdf`; it becomes target-layout evidence only after every page image is inspected. Otherwise record `target_layout_unverified` and require a final check in the target application.
 
 In structural mode, ask the caller to approve delivery without visual QA and state the limitation in the report. In analysis mode, do not modify a DOCX.
 
@@ -112,6 +114,8 @@ Stop and ask the caller when:
 - content or protected-object integrity fails;
 - field migration is ambiguous;
 - field finalization changes authored content, protected objects, or the editable-field contract;
+- an approved pagination map lacks a TOC/body boundary, an even PAGE footer, or contains an unapproved body restart;
+- a table has unknown column roles, complex merges, floating objects, visible control marks, or landscape layout without individual approval;
 - a structure map does not match the current source fingerprint or is not approved;
 - rendering fails for a reason other than an unavailable renderer.
 

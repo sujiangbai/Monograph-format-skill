@@ -70,10 +70,38 @@ def resolve_renderer(requested: str | None) -> tuple[str | None, str | None]:
     return discovered, "path" if discovered else None
 
 
+def word_automation_status(adapter: str | None) -> dict[str, object]:
+    powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+    installed = False
+    if platform.system() == "Windows":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Word.Application\CLSID"):
+                installed = True
+        except (ImportError, FileNotFoundError, OSError):
+            installed = False
+    adapter_path = Path(adapter).expanduser() if adapter else None
+    adapter_available = bool(adapter_path and adapter_path.is_file())
+    available = bool(installed and powershell and (adapter_available or not adapter))
+    return {
+        "installed": installed,
+        "powershell": powershell,
+        "adapter": str(adapter_path.resolve()) if adapter_available else None,
+        "adapter_requested": bool(adapter),
+        "available": available,
+        "authorization_required": True,
+        "live_automation_verified": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     parser.add_argument("--renderer", help="Explicit LibreOffice-compatible renderer path.")
+    parser.add_argument(
+        "--word-adapter", help="Optional Microsoft Word field-updater adapter path."
+    )
     args = parser.parse_args()
 
     packages = package_status()
@@ -85,8 +113,9 @@ def main() -> int:
     editing_ok = inspection_ok
     soffice, renderer_source = resolve_renderer(args.renderer)
     pymupdf_ok = bool(packages["PyMuPDF"]["available"])
+    word = word_automation_status(args.word_adapter)
 
-    if editing_ok and validation_ok and soffice and pymupdf_ok:
+    if editing_ok and validation_ok and pymupdf_ok and (soffice or word["available"]):
         mode = "full"
     elif editing_ok and validation_ok:
         mode = "structural"
@@ -111,8 +140,11 @@ def main() -> int:
             "inspection": inspection_ok,
             "profile_validation": validation_ok,
             "docx_editing": editing_ok,
-            "field_finalization": bool(editing_ok and soffice),
-            "rendering": bool(soffice and pymupdf_ok),
+            "field_finalization": bool(editing_ok and (soffice or word["available"])),
+            "word_automation": bool(word["available"]),
+            "word_field_refresh": bool(word["available"]),
+            "word_pdf_export": bool(word["available"]),
+            "rendering": bool(pymupdf_ok and (soffice or word["available"])),
         },
         "rendering": {
             "soffice": soffice,
@@ -122,6 +154,7 @@ def main() -> int:
             "available": bool(soffice and pymupdf_ok),
             "field_refresh_candidate": bool(soffice),
         },
+        "microsoft_word": word,
         "font_directories": font_directories(),
         "limitations": [],
     }
@@ -132,7 +165,13 @@ def main() -> int:
     if not validation_ok:
         result["limitations"].append("Profile validation dependency jsonschema was not found.")
     if not soffice:
-        result["limitations"].append("LibreOffice soffice was not found.")
+        result["limitations"].append(
+            "LibreOffice soffice was not found; rendering requires an approved Word adapter or another renderer."
+        )
+    if platform.system() == "Windows" and not word["installed"]:
+        result["limitations"].append("Microsoft Word desktop automation was not detected.")
+    if args.word_adapter and not word["adapter"]:
+        result["limitations"].append("The requested Microsoft Word adapter was not found.")
     if not pymupdf_ok:
         result["limitations"].append("PyMuPDF was not found.")
 

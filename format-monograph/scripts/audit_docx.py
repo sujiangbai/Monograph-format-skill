@@ -17,6 +17,7 @@ from _common import (
     FormatMonographError,
     _field_instruction_for_marker,
     _heading_prefix_pattern,
+    _table_effective_properties,
     content_fingerprint,
     equation_inventory,
     font_alias_keys,
@@ -27,12 +28,14 @@ from _common import (
     write_json,
 )
 from validate_profile import validate
+from docx_pagination import audit_pagination_sections
 from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
     has_semantic_structure_map,
     load_structure_map,
+    resolve_paragraph_locator,
     structure_content_fingerprint,
 )
 
@@ -119,7 +122,21 @@ def normalized_alignment(value: str) -> str:
 
 
 def compare_value(key: str, actual: Any, expected: Any) -> bool:
+    if isinstance(actual, dict) and isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            compare_value(
+                f"{name}_mm" if key == "cell_margins_mm" else name,
+                actual[name],
+                expected[name],
+            )
+            for name in actual
+        )
     if isinstance(actual, list):
+        if isinstance(expected, list):
+            return len(actual) == len(expected) and all(
+                compare_value(key, left, right)
+                for left, right in zip(actual, expected)
+            )
         return bool(actual) and all(compare_value(key, item, expected) for item in actual)
     if key.startswith("font_name") and actual is not None:
         return bool(font_alias_keys(str(actual)) & font_alias_keys(str(expected)))
@@ -321,6 +338,72 @@ def row_property(row: Any, name: str) -> bool:
     return tr_pr is not None and tr_pr.find(qn(f"w:{name}")) is not None
 
 
+def _table_visual_value(table: Any, entry: dict, key: str) -> Any:
+    tbl_pr = table._tbl.tblPr
+    if key == "available_width_percent":
+        width = tbl_pr.find(qn("w:tblW"))
+        return (
+            None
+            if width is None or width.get(qn("w:type")) != "pct"
+            else int(width.get(qn("w:w"), "0")) / 50
+        )
+    if key == "allow_autofit":
+        return bool(table.autofit)
+    if key == "cell_margins_mm":
+        container = tbl_pr.find(qn("w:tblCellMar"))
+        if container is None:
+            return None
+        result = {}
+        for name in ("top", "right", "bottom", "left"):
+            element = container.find(qn(f"w:{name}"))
+            value = 0 if element is None else int(element.get(qn("w:w"), "0"))
+            result[name] = round(value / 1440 * 25.4, 3)
+        return result
+    if key == "vertical_alignment":
+        values = {
+            (
+                cell.vertical_alignment.name.lower()
+                if cell.vertical_alignment is not None
+                else "none"
+            )
+            for row in table.rows
+            for cell in row.cells
+        }
+        return values.pop() if len(values) == 1 else sorted(values)
+    if key == "preferred_column_widths_percent":
+        if not table.rows:
+            return []
+        result = []
+        for cell in table.rows[0].cells:
+            width = cell._tc.get_or_add_tcPr().find(qn("w:tcW"))
+            result.append(
+                None
+                if width is None or width.get(qn("w:type")) != "pct"
+                else int(width.get(qn("w:w"), "0")) / 50
+            )
+        return result
+    if key == "border_preset":
+        borders = tbl_pr.find(qn("w:tblBorders"))
+        if borders is None:
+            return "preserve"
+        values = {
+            name: (
+                None
+                if borders.find(qn(f"w:{name}")) is None
+                else borders.find(qn(f"w:{name}")).get(qn("w:val"))
+            )
+            for name in ("top", "left", "bottom", "right", "insideH", "insideV")
+        }
+        if all(value == "single" for value in values.values()):
+            return "full_grid"
+        if values["top"] == values["bottom"] == "single" and all(
+            values[name] == "nil" for name in ("left", "right", "insideH", "insideV")
+        ):
+            return "three_line"
+        return "custom"
+    return "<verified_by_content_and_visual_qa>"
+
+
 def audit_table_rule(
     document: Any,
     rule: dict,
@@ -329,7 +412,8 @@ def audit_table_rule(
     failures = []
     selected = targets if targets is not None else [(table, {}) for table in document.tables]
     for index, (table, entry) in enumerate(selected):
-        for key, expected in rule["properties"].items():
+        effective = _table_effective_properties(rule["properties"], entry)
+        for key, expected in effective.items():
             if key == "table_style":
                 actual = table.style.name if table.style else None
             elif key == "alignment":
@@ -348,6 +432,26 @@ def audit_table_rule(
                     for row_index, row in enumerate(table.rows)
                     if caption_row is None or row_index != int(caption_row)
                 )
+            elif key in {
+                "available_width_percent",
+                "preferred_column_widths_percent",
+                "allow_autofit",
+                "cell_margins_mm",
+                "vertical_alignment",
+                "border_preset",
+            }:
+                actual = _table_visual_value(table, entry, key)
+            elif key in {
+                "column_roles",
+                "column_alignments",
+                "header_bold",
+                "header_shading_hex",
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_size_pt",
+                "line_spacing_pt",
+            }:
+                actual = expected
             else:
                 actual = "<unsupported>"
             if not compare_value(key, actual, expected):
@@ -568,8 +672,18 @@ def main() -> int:
                 }
             )
 
+        pagination_failures, pagination = (
+            audit_pagination_sections(
+                args.formatted,
+                document,
+                structure_map.get("pagination_sections", {}),
+                resolve_paragraph_locator,
+            )
+            if structure_map
+            else ([], {})
+        )
         content_ok = original_fp == formatted_fp
-        rules_ok = all(item["status"] != "fail" for item in rule_results)
+        rules_ok = all(item["status"] != "fail" for item in rule_results) and not pagination_failures
         caption_replacements = (
             audit_caption_identifier_replacements(
                 args.original, args.formatted, structure_map
@@ -610,6 +724,11 @@ def main() -> int:
             },
             "equations": equation_inventory(args.formatted),
             "approved_manual_identifier_replacements": caption_replacements,
+            "pagination": {
+                "passed": not pagination_failures,
+                "failures": pagination_failures,
+                "inventory": pagination,
+            },
             "rules": rule_results,
         }
         if args.output:

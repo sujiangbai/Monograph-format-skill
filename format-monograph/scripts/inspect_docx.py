@@ -23,6 +23,7 @@ from _common import (
     write_json,
 )
 from structure_map import candidate_structure_map
+from docx_pagination import pagination_inventory
 
 
 def length_points(value) -> float | None:
@@ -129,6 +130,21 @@ def inventory(path: Path) -> dict:
                     for row_index, row in enumerate(table.rows)
                     if row_has_property(row, "cantSplit")
                 ],
+                "complex_merge": len(
+                    {id(cell._tc) for row in table.rows for cell in row.cells}
+                )
+                < sum(len(row.cells) for row in table.rows),
+                "floating_object_count": len(
+                    table._tbl.xpath(".//wp:anchor | .//w:object | .//w:pict")
+                ),
+                "visible_control_mark_candidates": sum(
+                    1
+                    for character in "\n".join(
+                        cell.text for row in table.rows for cell in row.cells
+                    )
+                    if 0x2400 <= ord(character) <= 0x2426
+                    or (ord(character) < 32 and character not in "\t\n\r")
+                ),
             }
         )
 
@@ -161,6 +177,7 @@ def inventory(path: Path) -> dict:
         },
         "fields": field_inventory(path),
         "field_cache": field_cache_inventory(path),
+        "pagination": pagination_inventory(path),
         "equations": equation_inventory(path),
         "protected_objects": {
             "embedding_count": len(object_manifest["embeddings"]),
