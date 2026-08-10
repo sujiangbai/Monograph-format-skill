@@ -139,7 +139,7 @@ class V026DeterministicFontTests(unittest.TestCase):
             "selector": {"kind": "paragraph_role", "value": "body_text"},
             "properties": {
                 "font_name_ascii": "Times New Roman",
-                "font_name_east_asia": "瀹嬩綋",
+                "font_name_east_asia": "宋体",
                 "font_name_complex_script": "Times New Roman",
             },
         }
@@ -148,7 +148,7 @@ class V026DeterministicFontTests(unittest.TestCase):
             "selector": {"kind": "paragraph_role", "value": "level_2_section"},
             "properties": {
                 "font_name_ascii": "Arial",
-                "font_name_east_asia": "榛戜綋",
+                "font_name_east_asia": "黑体",
                 "font_name_complex_script": "Arial",
             },
         }
@@ -159,8 +159,8 @@ class V026DeterministicFontTests(unittest.TestCase):
 
         formatted = Document(output)
         for style_name, ascii_name, east_asia_name in (
-            ("Normal", "Times New Roman", "瀹嬩綋"),
-            ("Heading 2", "Arial", "榛戜綋"),
+            ("Normal", "Times New Roman", "宋体"),
+            ("Heading 2", "Arial", "黑体"),
         ):
             r_fonts = formatted.styles[style_name].element.rPr.rFonts
             self.assertEqual(ascii_name, r_fonts.get(qn("w:ascii")))
@@ -188,18 +188,18 @@ class V026DeterministicFontTests(unittest.TestCase):
         source = self.root / "role-styles.docx"
         document = Document()
         cases = (
-            ("Normal", {"kind": "paragraph_role", "value": "body_text"}, "瀹嬩綋", "Times New Roman"),
-            ("Heading 1", {"kind": "paragraph_role", "value": "heading_1"}, "榛戜綋", "Arial"),
-            ("Heading 2", {"kind": "paragraph_role", "value": "heading_2"}, "榛戜綋", "Arial"),
-            ("Heading 3", {"kind": "paragraph_role", "value": "heading_3"}, "榛戜綋", "Arial"),
-            ("Heading 4", {"kind": "paragraph_role", "value": "heading_4"}, "瀹嬩綋", "Times New Roman"),
-            ("TOC 1", {"kind": "paragraph_role", "value": "toc_level_1"}, "瀹嬩綋", "Times New Roman"),
-            ("TOC 2", {"kind": "paragraph_role", "value": "toc_level_2"}, "瀹嬩綋", "Times New Roman"),
-            ("TOC 3", {"kind": "paragraph_role", "value": "toc_level_3"}, "瀹嬩綋", "Times New Roman"),
-            ("Caption", {"kind": "caption_role", "value": "all"}, "瀹嬩綋", "Times New Roman"),
-            ("Quote", {"kind": "paragraph_role", "value": "long_quote"}, "瀹嬩綋", "Times New Roman"),
-            ("Bibliography", {"kind": "bibliography_role", "value": "entries"}, "瀹嬩綋", "Times New Roman"),
-            ("Footnote Text", {"kind": "style_name", "value": "Footnote Text"}, "瀹嬩綋", "Times New Roman"),
+            ("Normal", {"kind": "paragraph_role", "value": "body_text"}, "宋体", "Times New Roman"),
+            ("Heading 1", {"kind": "paragraph_role", "value": "heading_1"}, "黑体", "Arial"),
+            ("Heading 2", {"kind": "paragraph_role", "value": "heading_2"}, "黑体", "Arial"),
+            ("Heading 3", {"kind": "paragraph_role", "value": "heading_3"}, "黑体", "Arial"),
+            ("Heading 4", {"kind": "paragraph_role", "value": "heading_4"}, "宋体", "Times New Roman"),
+            ("TOC 1", {"kind": "paragraph_role", "value": "toc_level_1"}, "宋体", "Times New Roman"),
+            ("TOC 2", {"kind": "paragraph_role", "value": "toc_level_2"}, "宋体", "Times New Roman"),
+            ("TOC 3", {"kind": "paragraph_role", "value": "toc_level_3"}, "宋体", "Times New Roman"),
+            ("Caption", {"kind": "caption_role", "value": "all"}, "宋体", "Times New Roman"),
+            ("Quote", {"kind": "paragraph_role", "value": "long_quote"}, "宋体", "Times New Roman"),
+            ("Bibliography", {"kind": "bibliography_role", "value": "entries"}, "宋体", "Times New Roman"),
+            ("Footnote Text", {"kind": "style_name", "value": "Footnote Text"}, "宋体", "Times New Roman"),
         )
         for style_name, _selector, _east_asia, _ascii in cases:
             style = ensure_paragraph_style(document, style_name)
@@ -323,7 +323,7 @@ class V026DeterministicFontTests(unittest.TestCase):
                 cell.text = f"Synthetic {row_index}-{cell_index}"
         properties = {
             "font_name_ascii": "Times New Roman",
-            "font_name_east_asia": "瀹嬩綋",
+            "font_name_east_asia": "宋体",
             "font_name_complex_script": "Times New Roman",
         }
         apply_table_properties(
@@ -634,4 +634,3 @@ class V026DeterministicFontTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

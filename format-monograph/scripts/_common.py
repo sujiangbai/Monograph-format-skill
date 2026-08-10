@@ -155,10 +155,10 @@ FIELD_PROPERTIES = {
 }
 
 FONT_ALIAS_GROUPS = (
-    {"瀹嬩綋", "simsun", "nsimsun", "鏂板畫浣?},
-    {"榛戜綋", "simhei"},
-    {"妤蜂綋", "kaiti", "simkai", "妤蜂綋_gb2312"},
-    {"浠垮畫", "fangsong", "simfang", "浠垮畫_gb2312"},
+    {"宋体", "simsun", "nsimsun", "新宋体"},
+    {"黑体", "simhei"},
+    {"楷体", "kaiti", "simkai", "楷体_gb2312"},
+    {"仿宋", "fangsong", "simfang", "仿宋_gb2312"},
 )
 
 EQUATION_PROPERTIES = {
@@ -595,7 +595,723 @@ def style_effective_font(
         qn("w:docDefaults") + "/" + qn("w:rPrDefault") + "/" + qn("w:rPr")
     )
     value, source = rpr_effective_font(document, defaults, attribute)
-    retu…7312 tokens truncated…
+    return value, None if source is None else f"docDefaults:{source}"
+
+
+def run_effective_font(
+    document: Any, paragraph: Any, run: Any, attribute: str
+) -> tuple[str | None, str | None]:
+    value, source = rpr_effective_font(document, run._r.rPr, attribute)
+    if value:
+        return value, f"run:{source}"
+    run_style = run.style
+    if run_style is not None and run_style.name != "Default Paragraph Font":
+        value, source = style_effective_font(document, run_style, attribute)
+        if value:
+            return value, f"character-{source}"
+    return style_effective_font(document, paragraph.style, attribute)
+
+
+def _font_attributes(font_element: Any) -> Any:
+    r_pr = font_element.get_or_add_rPr()
+    r_fonts = r_pr.rFonts
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, r_fonts)
+    return r_fonts
+
+
+def _set_font_attributes(font_element: Any, name: str, attributes: tuple[str, ...]) -> None:
+    r_fonts = _font_attributes(font_element)
+    for attr in attributes:
+        r_fonts.set(qn(f"w:{attr}"), name)
+        theme_attribute = FONT_THEME_ATTRIBUTES.get(attr)
+        if theme_attribute:
+            r_fonts.attrib.pop(qn(f"w:{theme_attribute}"), None)
+
+
+def _set_east_asian_font(font_element: Any, name: str) -> None:
+    _set_font_attributes(font_element, name, ("ascii", "hAnsi", "eastAsia", "cs"))
+
+
+def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
+    font = style.font
+    paragraph_format = style.paragraph_format
+
+    if "font_name" in properties:
+        font.name = properties["font_name"]
+        _set_east_asian_font(style.element, properties["font_name"])
+    if "font_name_ascii" in properties:
+        font.name = properties["font_name_ascii"]
+        _set_font_attributes(
+            style.element, properties["font_name_ascii"], ("ascii", "hAnsi")
+        )
+        if "font_name_complex_script" not in properties:
+            _set_font_attributes(style.element, properties["font_name_ascii"], ("cs",))
+    if "font_name_east_asia" in properties:
+        _set_font_attributes(
+            style.element, properties["font_name_east_asia"], ("eastAsia",)
+        )
+    if "font_name_complex_script" in properties:
+        _set_font_attributes(
+            style.element, properties["font_name_complex_script"], ("cs",)
+        )
+    if "font_size_pt" in properties:
+        font.size = Pt(float(properties["font_size_pt"]))
+    if "bold" in properties:
+        font.bold = bool(properties["bold"])
+    if "italic" in properties:
+        font.italic = bool(properties["italic"])
+    if "color_hex" in properties:
+        color = str(properties["color_hex"]).lstrip("#")
+        if not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+            raise FormatMonographError(f"Invalid color_hex: {properties['color_hex']}")
+        font.color.rgb = RGBColor.from_string(color.upper())
+    if "alignment" in properties:
+        value = properties["alignment"]
+        if value not in ALIGNMENTS:
+            raise FormatMonographError(f"Unsupported paragraph alignment: {value}")
+        paragraph_format.alignment = ALIGNMENTS[value]
+    for key, attr in (
+        ("space_before_pt", "space_before"),
+        ("space_after_pt", "space_after"),
+        ("first_line_indent_pt", "first_line_indent"),
+        ("left_indent_pt", "left_indent"),
+        ("right_indent_pt", "right_indent"),
+    ):
+        if key in properties:
+            setattr(paragraph_format, attr, Pt(float(properties[key])))
+    if "line_spacing" in properties:
+        paragraph_format.line_spacing = float(properties["line_spacing"])
+    if "line_spacing_rule" in properties:
+        rules = {
+            "single": WD_LINE_SPACING.SINGLE,
+            "one_point_five": WD_LINE_SPACING.ONE_POINT_FIVE,
+            "double": WD_LINE_SPACING.DOUBLE,
+            "at_least": WD_LINE_SPACING.AT_LEAST,
+            "exact": WD_LINE_SPACING.EXACTLY,
+            "multiple": WD_LINE_SPACING.MULTIPLE,
+        }
+        value = properties["line_spacing_rule"]
+        if value not in rules:
+            raise FormatMonographError(f"Unsupported line_spacing_rule: {value}")
+        paragraph_format.line_spacing_rule = rules[value]
+    if "line_spacing_pt" in properties:
+        paragraph_format.line_spacing = Pt(float(properties["line_spacing_pt"]))
+        if "line_spacing_rule" not in properties:
+            paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    if "first_line_indent_chars" in properties:
+        p_pr = style.element.get_or_add_pPr()
+        ind = p_pr.get_or_add_ind()
+        ind.set(
+            qn("w:firstLineChars"),
+            str(int(round(float(properties["first_line_indent_chars"]) * 100))),
+        )
+        ind.attrib.pop(qn("w:firstLine"), None)
+    for key, attr in (
+        ("keep_with_next", "keep_with_next"),
+        ("keep_together", "keep_together"),
+        ("page_break_before", "page_break_before"),
+        ("widow_control", "widow_control"),
+    ):
+        if key in properties:
+            setattr(paragraph_format, attr, bool(properties[key]))
+
+
+def ensure_paragraph_style(document: Any, style_name: str) -> Any:
+    try:
+        return document.styles[style_name]
+    except KeyError:
+        style = document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        if style_name != "Normal":
+            style.base_style = document.styles["Normal"]
+        return style
+
+
+def _drop_attributes(element: Any, names: tuple[str, ...]) -> None:
+    for name in names:
+        element.attrib.pop(qn(f"w:{name}"), None)
+    if not element.attrib and len(element) == 0 and element.getparent() is not None:
+        element.getparent().remove(element)
+
+
+def clear_controlled_direct_format(paragraph: Any, properties: dict[str, Any]) -> None:
+    p_pr = paragraph._p.pPr
+    if p_pr is not None:
+        if "alignment" in properties:
+            element = p_pr.find(qn("w:jc"))
+            if element is not None:
+                p_pr.remove(element)
+
+        spacing_keys = {
+            "space_before_pt": ("before", "beforeLines", "beforeAutospacing"),
+            "space_after_pt": ("after", "afterLines", "afterAutospacing"),
+            "line_spacing": ("line", "lineRule"),
+            "line_spacing_pt": ("line", "lineRule"),
+            "line_spacing_rule": ("line", "lineRule"),
+        }
+        spacing = p_pr.find(qn("w:spacing"))
+        if spacing is not None:
+            attrs = tuple(
+                attr
+                for key, values in spacing_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(spacing, attrs)
+
+        indent_keys = {
+            "first_line_indent_pt": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "first_line_indent_chars": ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+            "left_indent_pt": ("left", "leftChars", "start", "startChars"),
+            "right_indent_pt": ("right", "rightChars", "end", "endChars"),
+        }
+        indent = p_pr.find(qn("w:ind"))
+        if indent is not None:
+            attrs = tuple(
+                attr
+                for key, values in indent_keys.items()
+                if key in properties
+                for attr in values
+            )
+            _drop_attributes(indent, attrs)
+
+        for key, tag in (
+            ("keep_with_next", "keepNext"),
+            ("keep_together", "keepLines"),
+            ("page_break_before", "pageBreakBefore"),
+            ("widow_control", "widowControl"),
+        ):
+            element = p_pr.find(qn(f"w:{tag}"))
+            if key in properties and element is not None:
+                p_pr.remove(element)
+
+    for run in paragraph.runs:
+        r_pr = run._r.rPr
+        if r_pr is None:
+            continue
+        if any(
+            key in properties
+            for key in (
+                "font_name",
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_name_complex_script",
+            )
+        ):
+            r_fonts = r_pr.find(qn("w:rFonts"))
+            if r_fonts is not None:
+                attrs = []
+                if "font_name" in properties:
+                    attrs.extend(
+                        (
+                            "ascii",
+                            "hAnsi",
+                            "eastAsia",
+                            "cs",
+                            "asciiTheme",
+                            "hAnsiTheme",
+                            "eastAsiaTheme",
+                            "cstheme",
+                        )
+                    )
+                if "font_name_ascii" in properties:
+                    attrs.extend(("ascii", "hAnsi", "asciiTheme", "hAnsiTheme"))
+                    if "font_name_complex_script" not in properties:
+                        attrs.extend(("cs", "cstheme"))
+                if "font_name_east_asia" in properties:
+                    attrs.extend(("eastAsia", "eastAsiaTheme"))
+                if "font_name_complex_script" in properties:
+                    attrs.extend(("cs", "cstheme"))
+                _drop_attributes(r_fonts, tuple(attrs))
+        for key, tags in (
+            ("font_size_pt", ("sz", "szCs")),
+            ("bold", ("b", "bCs")),
+            ("italic", ("i", "iCs")),
+            ("color_hex", ("color",)),
+        ):
+            if key not in properties:
+                continue
+            for tag in tags:
+                element = r_pr.find(qn(f"w:{tag}"))
+                if element is not None:
+                    r_pr.remove(element)
+
+
+def apply_style_rule_to_paragraphs(
+    document: Any, rule: dict[str, Any], paragraphs: Iterable[Any]
+) -> int:
+    style_name = style_name_for_selector(rule["selector"])
+    if style_name is None:
+        raise FormatMonographError(
+            f"Rule {rule['id']} has no paragraph style mapping."
+        )
+    style = ensure_paragraph_style(document, style_name)
+    apply_style_properties(style, rule["properties"])
+    targets = list(paragraphs)
+    for paragraph in targets:
+        paragraph.style = style
+        clear_controlled_direct_format(paragraph, rule["properties"])
+    return len(targets)
+
+
+def _set_document_toggle(document: Any, name: str, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn(f"w:{name}"))
+    if enabled:
+        if element is None:
+            element = OxmlElement(f"w:{name}")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def apply_section_properties(document: Any, properties: dict[str, Any]) -> int:
+    sections = list(document.sections)
+    page_size_policy = properties.get("page_size_policy")
+    if page_size_policy not in {None, "preserve"}:
+        raise FormatMonographError(f"Unsupported page_size_policy: {page_size_policy}")
+
+    explicit_size = "page_width_mm" in properties or "page_height_mm" in properties
+    for section in sections:
+        if "page_width_mm" in properties:
+            section.page_width = Mm(float(properties["page_width_mm"]))
+        if "page_height_mm" in properties:
+            section.page_height = Mm(float(properties["page_height_mm"]))
+        if "orientation" in properties:
+            orientation = str(properties["orientation"]).lower()
+            if orientation not in {"portrait", "landscape"}:
+                raise FormatMonographError(f"Unsupported orientation: {orientation}")
+            target = WD_ORIENT.PORTRAIT if orientation == "portrait" else WD_ORIENT.LANDSCAPE
+            if section.orientation != target and not explicit_size:
+                section.page_width, section.page_height = section.page_height, section.page_width
+            section.orientation = target
+
+        for key, attr in (
+            ("margin_top_mm", "top_margin"),
+            ("margin_bottom_mm", "bottom_margin"),
+            ("margin_left_mm", "left_margin"),
+            ("margin_right_mm", "right_margin"),
+            ("gutter_mm", "gutter"),
+        ):
+            if key in properties:
+                setattr(section, attr, Mm(float(properties[key])))
+
+        width_mm = float(section.page_width.mm)
+        height_mm = float(section.page_height.mm)
+        ratio_values = (
+            ("margin_inner_ratio", "left_margin", width_mm),
+            ("margin_outer_ratio", "right_margin", width_mm),
+            ("margin_top_ratio", "top_margin", height_mm),
+            ("margin_bottom_ratio", "bottom_margin", height_mm),
+            ("header_distance_ratio", "header_distance", height_mm),
+            ("footer_distance_ratio", "footer_distance", height_mm),
+        )
+        for key, attr, basis in ratio_values:
+            if key in properties:
+                ratio = float(properties[key])
+                if not 0 <= ratio < 0.5:
+                    raise FormatMonographError(f"{key} must be between 0 and 0.5.")
+                setattr(section, attr, Mm(basis * ratio))
+
+        if "different_first_page_header_footer" in properties:
+            section.different_first_page_header_footer = bool(
+                properties["different_first_page_header_footer"]
+            )
+
+    if "odd_and_even_pages_header_footer" in properties:
+        document.settings.odd_and_even_pages_header_footer = bool(
+            properties["odd_and_even_pages_header_footer"]
+        )
+    if "mirror_margins" in properties:
+        _set_document_toggle(document, "mirrorMargins", bool(properties["mirror_margins"]))
+
+    return len(sections)
+
+def _set_repeat_table_header(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:tblHeader"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:tblHeader")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def _set_prevent_row_split(row: Any, enabled: bool) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    existing = tr_pr.find(qn("w:cantSplit"))
+    if enabled:
+        if existing is None:
+            existing = OxmlElement("w:cantSplit")
+            tr_pr.append(existing)
+        existing.set(qn("w:val"), "true")
+    elif existing is not None:
+        tr_pr.remove(existing)
+
+
+def _table_effective_properties(
+    properties: dict[str, Any], entry: dict[str, Any]
+) -> dict[str, Any]:
+    result = dict(properties)
+    visual = entry.get("visual", {})
+    if visual.get("approved"):
+        result.update(
+            {
+                key: value
+                for key, value in visual.items()
+                if key not in {"approved", "orientation", "landscape_approved"}
+            }
+        )
+    return result
+
+
+def _set_table_width_percent(table: Any, value: float) -> None:
+    if not 1 <= value <= 100:
+        raise FormatMonographError("available_width_percent must be between 1 and 100.")
+    tbl_pr = table._tbl.tblPr
+    width = tbl_pr.find(qn("w:tblW"))
+    if width is None:
+        width = OxmlElement("w:tblW")
+        tbl_pr.insert(0, width)
+    width.set(qn("w:type"), "pct")
+    width.set(qn("w:w"), str(round(value * 50)))
+
+
+def _set_column_widths_percent(table: Any, values: list[Any]) -> None:
+    if len(values) != len(table.columns):
+        raise FormatMonographError(
+            "preferred_column_widths_percent must match the table column count."
+        )
+    widths = [float(value) for value in values]
+    if any(value <= 0 for value in widths) or abs(sum(widths) - 100.0) > 0.25:
+        raise FormatMonographError(
+            "preferred_column_widths_percent must be positive and total 100."
+        )
+    for column_index, percent in enumerate(widths):
+        for row in table.rows:
+            cell = row.cells[column_index]
+            tc_pr = cell._tc.get_or_add_tcPr()
+            width = tc_pr.find(qn("w:tcW"))
+            if width is None:
+                width = OxmlElement("w:tcW")
+                tc_pr.append(width)
+            width.set(qn("w:type"), "pct")
+            width.set(qn("w:w"), str(round(percent * 50)))
+
+
+def _set_table_cell_margins(table: Any, value: Any) -> None:
+    margins = (
+        {name: float(value) for name in ("top", "right", "bottom", "left")}
+        if isinstance(value, (int, float))
+        else {name: float(value.get(name, 0)) for name in ("top", "right", "bottom", "left")}
+    )
+    if any(amount < 0 or amount > 20 for amount in margins.values()):
+        raise FormatMonographError("cell_margins_mm values must be between 0 and 20.")
+    tbl_pr = table._tbl.tblPr
+    container = tbl_pr.find(qn("w:tblCellMar"))
+    if container is None:
+        container = OxmlElement("w:tblCellMar")
+        tbl_pr.append(container)
+    for name, amount in margins.items():
+        element = container.find(qn(f"w:{name}"))
+        if element is None:
+            element = OxmlElement(f"w:{name}")
+            container.append(element)
+        element.set(qn("w:w"), str(round(amount / 25.4 * 1440)))
+        element.set(qn("w:type"), "dxa")
+
+
+def _set_border(element: Any, name: str, *, style: str, size: int = 4) -> None:
+    border = element.find(qn(f"w:{name}"))
+    if border is None:
+        border = OxmlElement(f"w:{name}")
+        element.append(border)
+    border.set(qn("w:val"), style)
+    border.set(qn("w:sz"), str(size))
+    border.set(qn("w:space"), "0")
+    border.set(qn("w:color"), "000000")
+
+
+def _set_table_borders(table: Any, preset: str, header_rows: list[int]) -> None:
+    if preset == "preserve":
+        return
+    tbl_pr = table._tbl.tblPr
+    borders = tbl_pr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    if preset == "full_grid":
+        for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            _set_border(borders, name, style="single", size=4)
+        return
+    if preset != "three_line":
+        raise FormatMonographError(f"Unsupported table border preset: {preset}")
+    for name in ("top", "bottom"):
+        _set_border(borders, name, style="single", size=8)
+    for name in ("left", "right", "insideH", "insideV"):
+        _set_border(borders, name, style="nil", size=0)
+    for row_index in header_rows:
+        if not 0 <= row_index < len(table.rows):
+            continue
+        for cell in table.rows[row_index].cells:
+            tc_pr = cell._tc.get_or_add_tcPr()
+            cell_borders = tc_pr.find(qn("w:tcBorders"))
+            if cell_borders is None:
+                cell_borders = OxmlElement("w:tcBorders")
+                tc_pr.append(cell_borders)
+            _set_border(cell_borders, "bottom", style="single", size=4)
+
+
+def _set_cell_shading(cell: Any, color: str | None) -> None:
+    if not color:
+        return
+    value = str(color).lstrip("#").upper()
+    if not re.fullmatch(r"[0-9A-F]{6}", value):
+        raise FormatMonographError("header_shading_hex must be a six-digit hex color.")
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:fill"), value)
+
+
+def _format_table_text(
+    table: Any,
+    properties: dict[str, Any],
+    header_rows: list[int],
+    caption_row: int | None = None,
+) -> None:
+    vertical = {
+        "top": WD_CELL_VERTICAL_ALIGNMENT.TOP,
+        "center": WD_CELL_VERTICAL_ALIGNMENT.CENTER,
+        "bottom": WD_CELL_VERTICAL_ALIGNMENT.BOTTOM,
+    }
+    vertical_name = str(properties.get("vertical_alignment", "center"))
+    if vertical_name not in vertical:
+        raise FormatMonographError(
+            f"Unsupported table vertical alignment: {vertical_name}"
+        )
+    roles = list(properties.get("column_roles", []))
+    if roles and len(roles) != len(table.columns):
+        raise FormatMonographError("column_roles must match the table column count.")
+    role_alignments = {
+        "numeric": "right",
+        "unit": "center",
+        "short_code": "center",
+        "narrative": "left",
+    }
+    role_alignments.update(properties.get("column_alignments", {}))
+    for row_index, row in enumerate(table.rows):
+        if caption_row is not None and row_index == caption_row:
+            continue
+        for column_index, cell in enumerate(row.cells):
+            cell.vertical_alignment = vertical[vertical_name]
+            if row_index in header_rows:
+                _set_cell_shading(cell, properties.get("header_shading_hex"))
+            alignment = "center" if row_index in header_rows else role_alignments.get(
+                roles[column_index] if roles else "narrative", "left"
+            )
+            if alignment not in ALIGNMENTS:
+                raise FormatMonographError(f"Unsupported table cell alignment: {alignment}")
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = ALIGNMENTS[alignment]
+                if "line_spacing_pt" in properties:
+                    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+                    paragraph.paragraph_format.line_spacing = Pt(
+                        float(properties["line_spacing_pt"])
+                    )
+                for run in paragraph.runs:
+                    if "font_name_ascii" in properties:
+                        _set_font_attributes(
+                            run._element,
+                            str(properties["font_name_ascii"]),
+                            ("ascii", "hAnsi"),
+                        )
+                        if "font_name_complex_script" not in properties:
+                            _set_font_attributes(
+                                run._element,
+                                str(properties["font_name_ascii"]),
+                                ("cs",),
+                            )
+                    if "font_name_east_asia" in properties:
+                        _set_font_attributes(
+                            run._element,
+                            str(properties["font_name_east_asia"]),
+                            ("eastAsia",),
+                        )
+                    if "font_name_complex_script" in properties:
+                        _set_font_attributes(
+                            run._element,
+                            str(properties["font_name_complex_script"]),
+                            ("cs",),
+                        )
+                    if "font_size_pt" in properties:
+                        run.font.size = Pt(float(properties["font_size_pt"]))
+                    if row_index in header_rows and "header_bold" in properties:
+                        run.bold = bool(properties["header_bold"])
+
+
+def apply_table_properties(
+    document: Any,
+    properties: dict[str, Any],
+    targets: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> int:
+    selected = targets if targets is not None else [(table, {}) for table in document.tables]
+    for table, entry in selected:
+        effective = _table_effective_properties(properties, entry)
+        if "table_style" in effective:
+            table.style = effective["table_style"]
+        if "alignment" in effective:
+            value = effective["alignment"]
+            if value not in TABLE_ALIGNMENTS:
+                raise FormatMonographError(f"Unsupported table alignment: {value}")
+            table.alignment = TABLE_ALIGNMENTS[value]
+        if "available_width_percent" in effective:
+            _set_table_width_percent(table, float(effective["available_width_percent"]))
+        if "preferred_column_widths_percent" in effective:
+            _set_column_widths_percent(
+                table, list(effective["preferred_column_widths_percent"])
+            )
+        if "allow_autofit" in effective:
+            table.autofit = bool(effective["allow_autofit"])
+        if "cell_margins_mm" in effective:
+            _set_table_cell_margins(table, effective["cell_margins_mm"])
+        if "repeat_header_row" in effective and table.rows:
+            header_rows = entry.get("repeat_header_rows", [0])
+            for row_index in header_rows:
+                if 0 <= int(row_index) < len(table.rows):
+                    _set_repeat_table_header(
+                        table.rows[int(row_index)], bool(effective["repeat_header_row"])
+                    )
+        if "prevent_row_split" in effective:
+            caption_row = entry.get("caption_row")
+            for row_index, row in enumerate(table.rows):
+                if caption_row is not None and row_index == int(caption_row):
+                    continue
+                _set_prevent_row_split(row, bool(effective["prevent_row_split"]))
+        header_rows = [int(value) for value in entry.get("header_rows", [0])]
+        _set_table_borders(
+            table, str(effective.get("border_preset", "preserve")), header_rows
+        )
+        caption_row = entry.get("caption_row")
+        _format_table_text(
+            table,
+            effective,
+            header_rows,
+            None if caption_row is None else int(caption_row),
+        )
+    return len(selected)
+
+
+
+def _record_derived_change(document: Any, change: dict[str, Any]) -> None:
+    changes = getattr(document, "_format_monograph_derived_changes", None)
+    if changes is None:
+        changes = []
+        setattr(document, "_format_monograph_derived_changes", changes)
+    changes.append(change)
+
+
+def _set_update_fields_on_open(document: Any, enabled: bool) -> None:
+    settings = document.settings.element
+    element = settings.find(qn("w:updateFields"))
+    if enabled:
+        if element is None:
+            element = OxmlElement("w:updateFields")
+            settings.append(element)
+        element.set(qn("w:val"), "true")
+    elif element is not None:
+        settings.remove(element)
+
+
+def _mark_fields_dirty(document: Any) -> int:
+    root = document.element
+    fields = root.xpath(".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']")
+    for field in fields:
+        field.set(qn("w:dirty"), "true")
+    return len(fields)
+
+
+def _clear_paragraph_content(paragraph: Any) -> None:
+    p = paragraph._p
+    for child in list(p):
+        if child.tag != qn("w:pPr"):
+            p.remove(child)
+
+
+def _append_simple_field(paragraph: Any, instruction: str, placeholder: str) -> None:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = placeholder
+    run.append(text)
+    field.append(run)
+    paragraph._p.append(field)
+
+
+def _field_instruction_for_marker(marker: str) -> tuple[str, str] | None:
+    fixed = {
+        "[[TOC]]": ('TOC \\o "1-3" \\h \\z \\u', "Update table of contents"),
+        "[[PAGE]]": ("PAGE", "1"),
+    }
+    if marker in fixed:
+        return fixed[marker]
+    match = re.fullmatch(r"\[\[(REF|PAGEREF|SEQ):([A-Za-z0-9_.-]+)\]\]", marker)
+    if not match:
+        return None
+    kind, value = match.groups()
+    if kind == "REF":
+        return f"REF {value} \\h", "0"
+    if kind == "PAGEREF":
+        return f"PAGEREF {value} \\h", "0"
+    return f"SEQ {value} \\* ARABIC \\s 1", "1"
+
+
+def _text_run_like(source_run: Any, value: str) -> Any:
+    run = OxmlElement("w:r")
+    r_pr = source_run._r.find(qn("w:rPr"))
+    if r_pr is not None:
+        run.append(copy.deepcopy(r_pr))
+    text = OxmlElement("w:t")
+    if value[:1].isspace() or value[-1:].isspace():
+        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text.text = value
+    run.append(text)
+    return run
+
+
+def _simple_field_like(source_run: Any, instruction: str, placeholder: str) -> Any:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), instruction)
+    field.set(qn("w:dirty"), "true")
+    field.append(_text_run_like(source_run, placeholder))
+    return field
+
+
+def _field_reference_target(marker: str) -> str | None:
+    match = re.fullmatch(r"\[\[(?:REF|PAGEREF):([A-Za-z0-9_.-]+)\]\]", marker)
+    return None if match is None else match.group(1)
+
+
+def _convert_explicit_field_markers(document: Any) -> int:
+    converted = 0
+    bookmarks = set(document.element.xpath(".//w:bookmarkStart/@w:name"))
+    for index, paragraph in enumerate(iter_document_paragraphs(document)):
+        paragraph_text = paragraph.text
+        matches = list(FIELD_MARKER_PATTERN.finditer(paragraph_text))
+        if not matches:
+            continue
+
+        runs = list(paragraph.runs)
+        ranges = []
         cursor = 0
         for run in runs:
             start = cursor
@@ -680,7 +1396,7 @@ def _remove_prefix_from_runs(paragraph: Any, length: int) -> None:
 
 def _heading_prefix_pattern(level: int) -> re.Pattern[str]:
     if level == 1:
-        return re.compile(r"^\s*绗琝s*[0-9涓€浜屼笁鍥涗簲鍏竷鍏節鍗佺櫨]+\s*绔燶s*")
+        return re.compile(r"^\s*第\s*[0-9一二三四五六七八九十百]+\s*章\s*")
     separators = level - 1
     return re.compile(rf"^\s*\d+(?:[.-]\d+){{{separators}}}\s*")
 
@@ -699,7 +1415,7 @@ def _strip_manual_heading_prefixes(document: Any, levels: int) -> int:
         text = paragraph.text
         match = _heading_prefix_pattern(level).match(text)
         if not match:
-            if re.match(r"^\s*(?:绗琝s*\d+\s*绔爘\d+[.-]\d+)", text):
+            if re.match(r"^\s*(?:第\s*\d+\s*章|\d+[.-]\d+)", text):
                 raise FormatMonographError(
                     f"Ambiguous manual heading number at paragraph {index}: {text[:80]}"
                 )
@@ -749,7 +1465,7 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
         p_style.set(qn("w:val"), f"Heading{level + 1}")
         lvl_text = OxmlElement("w:lvlText")
         if level == 0:
-            lvl_text.set(qn("w:val"), "绗?1绔?)
+            lvl_text.set(qn("w:val"), "第%1章")
         else:
             lvl_text.set(
                 qn("w:val"),
@@ -987,7 +1703,7 @@ def equation_inventory(path: Path) -> dict[str, Any]:
                     ".//*[local-name()='docPr']/@descr"
                 )
                 hint = " ".join(styles + metadata).lower()
-                if any(token in hint for token in ("equation", "formula", "鍏紡")):
+                if any(token in hint for token in ("equation", "formula", "公式")):
                     result["formula_image_candidates"] += 1
     result["editable_total"] = (
         result["omml"] + result["mathtype_ole"] + result["legacy_equation_ole"]
@@ -1101,4 +1817,3 @@ def load_document(path: Path) -> Any:
         return Document(str(path))
     except Exception as exc:
         raise FormatMonographError(f"Unable to open DOCX {path}: {exc}") from exc
-

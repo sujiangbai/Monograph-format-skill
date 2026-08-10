@@ -644,4 +644,3 @@ def audit_pagination_sections(
             }
         )
     return failures, inventory
-
