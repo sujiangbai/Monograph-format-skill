@@ -22,6 +22,7 @@ from _common import (
     summarize_rule,
 )
 from validate_profile import validate
+from docx_pagination import finalize_pagination_sections
 from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
@@ -29,6 +30,7 @@ from structure_map import (
     has_semantic_structure_map,
     load_structure_map,
     prime_structure_map_locators,
+    resolve_paragraph_locator,
     structure_content_fingerprint,
     validate_structure_map_source,
 )
@@ -142,54 +144,54 @@ def report_markdown(
 ) -> str:
     integrity = "PASS" if original_fp == formatted_fp and protected_objects_ok else "FAIL"
     lines = [
-        "# 专著格式修改报告",
+        "# 涓撹憲鏍煎紡淇敼鎶ュ憡",
         "",
-        "## 基本信息",
+        "## 鍩烘湰淇℃伅",
         "",
-        f"- 输入文件：`{input_path.name}`",
-        f"- 格式配置：`{profile['profile_id']}` / {profile['name']}",
-        f"- 配置版本：`{profile['schema_version']}`",
-        f"- 批准人：{profile['approval'].get('approved_by', '')}",
-        f"- 批准时间：{profile['approval'].get('approved_at', '')}",
-        f"- 生成时间：{dt.datetime.now(dt.timezone.utc).isoformat()}",
+        f"- 杈撳叆鏂囦欢锛歚{input_path.name}`",
+        f"- 鏍煎紡閰嶇疆锛歚{profile['profile_id']}` / {profile['name']}",
+        f"- 閰嶇疆鐗堟湰锛歚{profile['schema_version']}`",
+        f"- 鎵瑰噯浜猴細{profile['approval'].get('approved_by', '')}",
+        f"- 鎵瑰噯鏃堕棿锛歿profile['approval'].get('approved_at', '')}",
+        f"- 鐢熸垚鏃堕棿锛歿dt.datetime.now(dt.timezone.utc).isoformat()}",
         "",
-        "## 运行时依据",
+        "## 杩愯鏃朵緷鎹?,
         "",
-        f"- 调用者明确要求最高：{profile.get('runtime_policy', {}).get('caller_requirements_highest', False)}",
-        "- 来源优先级：" + " > ".join(profile.get("source_precedence", [])),
+        f"- 璋冪敤鑰呮槑纭姹傛渶楂橈細{profile.get('runtime_policy', {}).get('caller_requirements_highest', False)}",
+        "- 鏉ユ簮浼樺厛绾э細" + " > ".join(profile.get("source_precedence", [])),
         "",
-        "## 字体预检",
+        "## 瀛椾綋棰勬",
         "",
-        "- 缺失字体：" + (", ".join(missing_fonts) if missing_fonts else "无"),
-        "- 字体解析："
+        "- 缂哄け瀛椾綋锛? + (", ".join(missing_fonts) if missing_fonts else "鏃?),
+        "- 瀛椾綋瑙ｆ瀽锛?
         + (
             "; ".join(
                 f"{item['requested']} -> {item['matched_name'] or 'missing'} ({item['match']})"
                 for item in font_resolutions
             )
             if font_resolutions
-            else "无"
+            else "鏃?
         ),
-        f"- 用户批准缺失字体降级：{missing_fonts_approved}",
+        f"- 鐢ㄦ埛鎵瑰噯缂哄け瀛椾綋闄嶇骇锛歿missing_fonts_approved}",
         "",
-        "## 内容一致性",
+        "## 鍐呭涓€鑷存€?,
         "",
-        f"- 结果：**{integrity}**",
-        f"- 原稿指纹：`{original_fp}`",
-        f"- 格式稿指纹：`{formatted_fp}`",
-        "- 指纹排除字段显示结果；获批字段重建还会规范化明确识别的派生编号。",
-        f"- OMML、嵌入对象和媒体哈希：{'PASS' if protected_objects_ok else 'FAIL'}",
+        f"- 缁撴灉锛?*{integrity}**",
+        f"- 鍘熺鎸囩汗锛歚{original_fp}`",
+        f"- 鏍煎紡绋挎寚绾癸細`{formatted_fp}`",
+        "- 鎸囩汗鎺掗櫎瀛楁鏄剧ず缁撴灉锛涜幏鎵瑰瓧娈甸噸寤鸿繕浼氳鑼冨寲鏄庣‘璇嗗埆鐨勬淳鐢熺紪鍙枫€?,
+        f"- OMML銆佸祵鍏ュ璞″拰濯掍綋鍝堝笇锛歿'PASS' if protected_objects_ok else 'FAIL'}",
         "",
-        "## 公式对象",
+        "## 鍏紡瀵硅薄",
         "",
-        f"- OMML：{equation_summary['omml']}",
-        f"- MathType OLE：{equation_summary['mathtype_ole']}",
-        f"- 旧版 Equation Editor：{equation_summary['legacy_equation_ole']}",
-        f"- 公式图片候选：{equation_summary['formula_image_candidates']}",
+        f"- OMML锛歿equation_summary['omml']}",
+        f"- MathType OLE锛歿equation_summary['mathtype_ole']}",
+        f"- 鏃х増 Equation Editor锛歿equation_summary['legacy_equation_ole']}",
+        f"- 鍏紡鍥剧墖鍊欓€夛細{equation_summary['formula_image_candidates']}",
         "",
-        "## 已应用规则",
+        "## 宸插簲鐢ㄨ鍒?,
         "",
-        "| 规则 | 选择器 | 命中数量 | 属性 |",
+        "| 瑙勫垯 | 閫夋嫨鍣?| 鍛戒腑鏁伴噺 | 灞炴€?|",
         "| --- | --- | ---: | --- |",
     ]
     for change in changes:
@@ -200,46 +202,46 @@ def report_markdown(
             f"| {change['id']} | {change['selector']} | {change['targets']} | {props} |"
         )
     if not changes:
-        lines.append("| - | - | 0 | 没有自动规则 |")
+        lines.append("| - | - | 0 | 娌℃湁鑷姩瑙勫垯 |")
 
-    lines.extend(["", "## 派生字段变更", ""])
+    lines.extend(["", "## 娲剧敓瀛楁鍙樻洿", ""])
     if derived_changes:
         for change in derived_changes:
-            lines.append(f"- `{change['kind']}`：{json.dumps(change, ensure_ascii=False)}")
+            lines.append(f"- `{change['kind']}`锛歿json.dumps(change, ensure_ascii=False)}")
     else:
-        lines.append("- 无。")
+        lines.append("- 鏃犮€?)
 
-    lines.extend(["", "## 人工复核", ""])
+    lines.extend(["", "## 浜哄伐澶嶆牳", ""])
     if manual:
         for rule in manual:
             lines.append(
-                f"- `{rule['id']}`：{rule['evidence_summary']} "
-                f"（选择器：`{rule['selector']['kind']}:{rule['selector']['value']}`）"
+                f"- `{rule['id']}`锛歿rule['evidence_summary']} "
+                f"锛堥€夋嫨鍣細`{rule['selector']['kind']}:{rule['selector']['value']}`锛?
             )
     else:
-        lines.append("- 无。")
+        lines.append("- 鏃犮€?)
 
-    lines.extend(["", "## 审阅标注", ""])
+    lines.extend(["", "## 瀹￠槄鏍囨敞", ""])
     if unanchored:
-        lines.append("- 以下规则无法精确锚定，已仅在本报告记录：" + ", ".join(unanchored))
+        lines.append("- 浠ヤ笅瑙勫垯鏃犳硶绮剧‘閿氬畾锛屽凡浠呭湪鏈姤鍛婅褰曪細" + ", ".join(unanchored))
     else:
-        lines.append("- 所有自动规则均已在审阅稿中建立批注锚点。")
+        lines.append("- 鎵€鏈夎嚜鍔ㄨ鍒欏潎宸插湪瀹￠槄绋夸腑寤虹珛鎵规敞閿氱偣銆?)
 
     lines.extend(
         [
             "",
-            "## 渲染与视觉 QA",
+            "## 娓叉煋涓庤瑙?QA",
             "",
-            "- 状态：待运行 `render_docx.py` 并逐页人工检查。",
-            "- 在完成逐页检查前，不得将本报告结论改为“通过”。",
+            "- 鐘舵€侊細寰呰繍琛?`render_docx.py` 骞堕€愰〉浜哄伐妫€鏌ャ€?,
+            "- 鍦ㄥ畬鎴愰€愰〉妫€鏌ュ墠锛屼笉寰楀皢鏈姤鍛婄粨璁烘敼涓衡€滈€氳繃鈥濄€?,
             "",
-            "## 结论",
+            "## 缁撹",
             "",
-            "- 当前结论："
+            "- 褰撳墠缁撹锛?
             + (
-                "结构检查通过，等待视觉 QA。"
+                "缁撴瀯妫€鏌ラ€氳繃锛岀瓑寰呰瑙?QA銆?
                 if integrity == "PASS"
-                else "失败：内容或可编辑对象一致性检查未通过。"
+                else "澶辫触锛氬唴瀹规垨鍙紪杈戝璞′竴鑷存€ф鏌ユ湭閫氳繃銆?
             ),
             "",
         ]
@@ -347,6 +349,20 @@ def main() -> int:
                     "properties": rule["properties"],
                 }
             )
+
+        if structure_map and finalize_pagination_sections(
+            document,
+            structure_map.get("pagination_sections", {}),
+            resolve_paragraph_locator,
+        ):
+            _changes = getattr(document, "_format_monograph_derived_changes", [])
+            _changes.append(
+                {
+                    "kind": "structure_pagination_page_break_deduplicated",
+                    "reason": "body_section_already_starts_on_new_page",
+                }
+            )
+            setattr(document, "_format_monograph_derived_changes", _changes)
 
         derived_changes = list(
             getattr(document, "_format_monograph_derived_changes", [])
@@ -466,3 +482,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

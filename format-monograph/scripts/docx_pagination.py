@@ -98,6 +98,27 @@ def _set_page_numbering(sect_pr: Any, start: int | None, number_format: str) -> 
         pg_num.set(qn("w:start"), str(start))
 
 
+def _suppress_redundant_body_page_break(paragraph: Any, sect_pr: Any) -> bool:
+    section_type = sect_pr.find(qn("w:type"))
+    section_value = (
+        section_type.get(qn("w:val")) if section_type is not None else "nextPage"
+    )
+    if section_value == "continuous":
+        return False
+    direct = paragraph.paragraph_format.page_break_before
+    if direct is False:
+        return False
+    inherited = (
+        paragraph.style.paragraph_format.page_break_before
+        if direct is None and paragraph.style is not None
+        else None
+    )
+    if direct is None and inherited is not True:
+        return False
+    paragraph.paragraph_format.page_break_before = False
+    return True
+
+
 def _field_types(root: Any) -> set[str]:
     def xpath(expression: str) -> list[Any]:
         try:
@@ -149,16 +170,34 @@ def _page_field_count(root: Any) -> int:
 
 
 def _page_only_footer(footer: Any) -> bool:
-    if footer._element.xpath(".//w:tbl | .//w:drawing | .//w:object | .//w:pict"):
+    root = footer._element
+    if root.xpath(
+        ".//w:tbl | .//w:object | "
+        ".//*[local-name()='blip']"
+    ):
         return False
-    if _field_types(footer._element) - {"PAGE"}:
+    if _field_types(root) - {"PAGE"}:
         return False
+    for visual in root.xpath(".//w:drawing | .//w:pict"):
+        if (
+            not visual.xpath(".//*[local-name()='txbxContent']")
+            or _field_types(visual) != {"PAGE"}
+        ):
+            return False
+        if visual.xpath(".//*[local-name()='blip']"):
+            return False
+        for image_data in visual.xpath(".//*[local-name()='imagedata']"):
+            if any(str(value).strip() for value in image_data.attrib.values()):
+                return False
     visible = [
         value.strip()
-        for value in footer._element.xpath(".//w:t/text()")
+        for value in root.xpath(".//w:t/text()")
         if value.strip()
     ]
-    return all(value.isdigit() for value in visible)
+    return all(
+        value.isdigit() or re.fullmatch(r"[IVXLCDMivxlcdm]+", value)
+        for value in visible
+    )
 
 
 def _replace_with_page_field(footer: Any, alignment: Any) -> None:
@@ -282,7 +321,10 @@ def apply_pagination_sections(
     if _body_position(document, toc_paragraph) >= _body_position(document, body_paragraph):
         raise FormatMonographError("TOC pagination start must precede body pagination start.")
 
-    _, inserted = _boundary_before(document, body_paragraph)
+    body_boundary, inserted = _boundary_before(document, body_paragraph)
+    page_break_suppressed = _suppress_redundant_body_page_break(
+        body_paragraph, body_boundary
+    )
     toc_index = section_index_for_paragraph(document, toc_paragraph)
     body_index = section_index_for_paragraph(document, body_paragraph)
     if body_index != toc_index + 1:
@@ -308,8 +350,31 @@ def apply_pagination_sections(
         "toc_section": toc_index,
         "body_section": body_index,
         "inserted_body_section_break": inserted,
+        "suppressed_redundant_body_page_break": page_break_suppressed,
         "page_fields_added": fields_added,
     }
+
+
+def finalize_pagination_sections(
+    document: Any,
+    settings: dict[str, Any],
+    resolver: Callable[[Any, dict[str, Any]], Any],
+) -> bool:
+    if not settings.get("approved"):
+        return False
+    body_locator = settings.get("body_start")
+    if not isinstance(body_locator, dict):
+        raise FormatMonographError(
+            "Approved pagination_sections requires a body_start locator."
+        )
+    body_paragraph = resolver(document, body_locator)
+    body_index = section_index_for_paragraph(document, body_paragraph)
+    sections = _section_properties(document)
+    if not 0 <= body_index < len(sections):
+        raise FormatMonographError("Body pagination section is out of range.")
+    return _suppress_redundant_body_page_break(
+        body_paragraph, sections[body_index]
+    )
 
 
 def _relationship_targets(package: zipfile.ZipFile) -> dict[str, str]:
@@ -427,18 +492,96 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
         }
 
 
+def _resolve_audit_boundary(
+    document: Any,
+    locator: dict[str, Any],
+    resolver: Callable[[Any, dict[str, Any]], Any],
+    *,
+    allow_unique_toc_field: bool = False,
+    alternate_locators: list[dict[str, Any]] | None = None,
+) -> Any:
+    try:
+        return resolver(document, locator)
+    except FormatMonographError as original_error:
+        for alternate in alternate_locators or []:
+            try:
+                return resolver(document, alternate)
+            except FormatMonographError:
+                continue
+        if not allow_unique_toc_field:
+            raise original_error
+        matches = [
+            paragraph
+            for paragraph in document.paragraphs
+            if paragraph._p.xpath(
+                ".//w:fldSimple[starts-with(translate(normalize-space(@w:instr), "
+                "'toc', 'TOC'), 'TOC')] | "
+                ".//w:instrText[starts-with(translate(normalize-space(.), "
+                "'toc', 'TOC'), 'TOC')]"
+            )
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        raise original_error
+
+
 def audit_pagination_sections(
     path: Path,
     document: Any,
     settings: dict[str, Any],
     resolver: Callable[[Any, dict[str, Any]], Any],
+    structure_map: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     inventory = pagination_inventory(path)
     if not settings.get("approved"):
         return [], inventory
-    toc = section_index_for_paragraph(document, resolver(document, settings["toc_start"]))
-    body = section_index_for_paragraph(document, resolver(document, settings["body_start"]))
+    toc = section_index_for_paragraph(
+        document,
+        _resolve_audit_boundary(
+            document,
+            settings["toc_start"],
+            resolver,
+            allow_unique_toc_field=True,
+        ),
+    )
+    body_locator = settings["body_start"]
+    alternate_body_locators = []
+    for heading in (structure_map or {}).get("headings", []):
+        heading_locator = heading.get("locator", {})
+        if (
+            heading.get("approved")
+            and heading_locator.get("text_sha256")
+            == body_locator.get("text_sha256")
+            and heading.get("normalized_text_sha256")
+        ):
+            alternate = copy.deepcopy(body_locator)
+            alternate["text_sha256"] = heading["normalized_text_sha256"]
+            alternate_body_locators.append(alternate)
+    body_paragraph = _resolve_audit_boundary(
+        document,
+        body_locator,
+        resolver,
+        alternate_locators=alternate_body_locators,
+    )
+    body = section_index_for_paragraph(document, body_paragraph)
     failures = []
+    direct_page_break = body_paragraph.paragraph_format.page_break_before
+    inherited_page_break = (
+        body_paragraph.style.paragraph_format.page_break_before
+        if body_paragraph.style is not None
+        else None
+    )
+    if direct_page_break is True or (
+        direct_page_break is None and inherited_page_break is True
+    ):
+        failures.append(
+            {
+                "section": body,
+                "property": "redundant_page_break_before_at_body_start",
+                "expected": False,
+                "actual": True,
+            }
+        )
     starts = settings.get("start_at", {})
     expected = {toc: str(starts.get("toc", 1)), body: str(starts.get("body", 1))}
     sections = inventory["sections"]
@@ -501,3 +644,4 @@ def audit_pagination_sections(
             }
         )
     return failures, inventory
+

@@ -255,6 +255,13 @@ def audit_paragraph_rule(
             if key not in STYLE_PROPERTIES:
                 continue
             actual = paragraph_effective_value(document, paragraph, key)
+            if (
+                key == "page_break_before"
+                and expected is True
+                and actual is False
+                and _paragraph_starts_new_page_section(paragraph)
+            ):
+                continue
             if not compare_value(key, actual, expected):
                 failures.append(
                     {
@@ -266,6 +273,21 @@ def audit_paragraph_rule(
                     }
                 )
     return failures
+
+
+def _paragraph_starts_new_page_section(paragraph: Any) -> bool:
+    previous = paragraph._p.getprevious()
+    if previous is None or previous.tag != qn("w:p"):
+        return False
+    p_pr = previous.find(qn("w:pPr"))
+    sect_pr = None if p_pr is None else p_pr.find(qn("w:sectPr"))
+    if sect_pr is None:
+        return False
+    section_type = sect_pr.find(qn("w:type"))
+    section_value = (
+        section_type.get(qn("w:val")) if section_type is not None else "nextPage"
+    )
+    return section_value != "continuous"
 
 
 def audit_style_rule(document: Any, rule: dict) -> list[dict]:
@@ -438,7 +460,11 @@ def audit_table_rule(
                 "vertical_alignment",
                 "border_preset",
             }:
-                actual = _table_visual_value(table, entry, key)
+                actual = (
+                    "preserve"
+                    if key == "border_preset" and expected == "preserve"
+                    else _table_visual_value(table, entry, key)
+                )
             elif key in {
                 "column_roles",
                 "column_alignments",
@@ -455,7 +481,9 @@ def audit_table_rule(
             }:
                 actual = [
                     run_font_value(document, paragraph, run, key)
-                    for row in table.rows
+                    for row_index, row in enumerate(table.rows)
+                    if entry.get("caption_row") is None
+                    or row_index != int(entry["caption_row"])
                     for cell in row.cells
                     for paragraph in cell.paragraphs
                     for run in paragraph.runs
@@ -687,6 +715,7 @@ def main() -> int:
                 document,
                 structure_map.get("pagination_sections", {}),
                 resolve_paragraph_locator,
+                structure_map,
             )
             if structure_map
             else ([], {})
@@ -751,3 +780,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -26,12 +26,20 @@ from _common import (  # noqa: E402
 )
 from audit_docx import audit_paragraph_rule, audit_table_rule  # noqa: E402
 from docx_pagination import (  # noqa: E402
+    apply_pagination_sections,
+    audit_pagination_sections,
+    finalize_pagination_sections,
     _ensure_page_field,
     _page_field_count,
+    _resolve_audit_boundary,
     pagination_inventory,
 )
 from finalize_docx import effective_font_failures  # noqa: E402
-from structure_map import approved_role_paragraphs, structure_content_fingerprint  # noqa: E402
+from structure_map import (  # noqa: E402
+    approved_role_paragraphs,
+    audit_caption_identifier_replacements,
+    structure_content_fingerprint,
+)
 
 
 def set_theme_fonts(element, ascii_theme: str, east_asia_theme: str) -> None:
@@ -85,6 +93,17 @@ def add_page_field(paragraph) -> None:
     paragraph._p.append(field)
 
 
+def page_field_element(cache: str = "CXLI") -> OxmlElement:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), "PAGE")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = cache
+    run.append(text)
+    field.append(run)
+    return field
+
+
 class V026DeterministicFontTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -120,7 +139,7 @@ class V026DeterministicFontTests(unittest.TestCase):
             "selector": {"kind": "paragraph_role", "value": "body_text"},
             "properties": {
                 "font_name_ascii": "Times New Roman",
-                "font_name_east_asia": "宋体",
+                "font_name_east_asia": "瀹嬩綋",
                 "font_name_complex_script": "Times New Roman",
             },
         }
@@ -129,7 +148,7 @@ class V026DeterministicFontTests(unittest.TestCase):
             "selector": {"kind": "paragraph_role", "value": "level_2_section"},
             "properties": {
                 "font_name_ascii": "Arial",
-                "font_name_east_asia": "黑体",
+                "font_name_east_asia": "榛戜綋",
                 "font_name_complex_script": "Arial",
             },
         }
@@ -140,8 +159,8 @@ class V026DeterministicFontTests(unittest.TestCase):
 
         formatted = Document(output)
         for style_name, ascii_name, east_asia_name in (
-            ("Normal", "Times New Roman", "宋体"),
-            ("Heading 2", "Arial", "黑体"),
+            ("Normal", "Times New Roman", "瀹嬩綋"),
+            ("Heading 2", "Arial", "榛戜綋"),
         ):
             r_fonts = formatted.styles[style_name].element.rPr.rFonts
             self.assertEqual(ascii_name, r_fonts.get(qn("w:ascii")))
@@ -169,18 +188,18 @@ class V026DeterministicFontTests(unittest.TestCase):
         source = self.root / "role-styles.docx"
         document = Document()
         cases = (
-            ("Normal", {"kind": "paragraph_role", "value": "body_text"}, "宋体", "Times New Roman"),
-            ("Heading 1", {"kind": "paragraph_role", "value": "heading_1"}, "黑体", "Arial"),
-            ("Heading 2", {"kind": "paragraph_role", "value": "heading_2"}, "黑体", "Arial"),
-            ("Heading 3", {"kind": "paragraph_role", "value": "heading_3"}, "黑体", "Arial"),
-            ("Heading 4", {"kind": "paragraph_role", "value": "heading_4"}, "宋体", "Times New Roman"),
-            ("TOC 1", {"kind": "paragraph_role", "value": "toc_level_1"}, "宋体", "Times New Roman"),
-            ("TOC 2", {"kind": "paragraph_role", "value": "toc_level_2"}, "宋体", "Times New Roman"),
-            ("TOC 3", {"kind": "paragraph_role", "value": "toc_level_3"}, "宋体", "Times New Roman"),
-            ("Caption", {"kind": "caption_role", "value": "all"}, "宋体", "Times New Roman"),
-            ("Quote", {"kind": "paragraph_role", "value": "long_quote"}, "宋体", "Times New Roman"),
-            ("Bibliography", {"kind": "bibliography_role", "value": "entries"}, "宋体", "Times New Roman"),
-            ("Footnote Text", {"kind": "style_name", "value": "Footnote Text"}, "宋体", "Times New Roman"),
+            ("Normal", {"kind": "paragraph_role", "value": "body_text"}, "瀹嬩綋", "Times New Roman"),
+            ("Heading 1", {"kind": "paragraph_role", "value": "heading_1"}, "榛戜綋", "Arial"),
+            ("Heading 2", {"kind": "paragraph_role", "value": "heading_2"}, "榛戜綋", "Arial"),
+            ("Heading 3", {"kind": "paragraph_role", "value": "heading_3"}, "榛戜綋", "Arial"),
+            ("Heading 4", {"kind": "paragraph_role", "value": "heading_4"}, "瀹嬩綋", "Times New Roman"),
+            ("TOC 1", {"kind": "paragraph_role", "value": "toc_level_1"}, "瀹嬩綋", "Times New Roman"),
+            ("TOC 2", {"kind": "paragraph_role", "value": "toc_level_2"}, "瀹嬩綋", "Times New Roman"),
+            ("TOC 3", {"kind": "paragraph_role", "value": "toc_level_3"}, "瀹嬩綋", "Times New Roman"),
+            ("Caption", {"kind": "caption_role", "value": "all"}, "瀹嬩綋", "Times New Roman"),
+            ("Quote", {"kind": "paragraph_role", "value": "long_quote"}, "瀹嬩綋", "Times New Roman"),
+            ("Bibliography", {"kind": "bibliography_role", "value": "entries"}, "瀹嬩綋", "Times New Roman"),
+            ("Footnote Text", {"kind": "style_name", "value": "Footnote Text"}, "瀹嬩綋", "Times New Roman"),
         )
         for style_name, _selector, _east_asia, _ascii in cases:
             style = ensure_paragraph_style(document, style_name)
@@ -256,6 +275,45 @@ class V026DeterministicFontTests(unittest.TestCase):
             2, inventory["sections"][0]["footer_page_field_counts"]["default"]
         )
 
+        legacy = Document().sections[0].footer
+        legacy_paragraph = legacy.paragraphs[0]
+        for container_name in ("drawing", "pict"):
+            container = OxmlElement(f"w:{container_name}")
+            text_box = OxmlElement("w:txbxContent")
+            inner_paragraph = OxmlElement("w:p")
+            inner_paragraph.append(page_field_element())
+            text_box.append(inner_paragraph)
+            container.append(text_box)
+            if container_name == "pict":
+                container.append(
+                    etree.Element("{urn:schemas-microsoft-com:vml}imagedata")
+                )
+            legacy_paragraph._p.append(container)
+        self.assertTrue(_ensure_page_field(legacy, 2))
+        self.assertEqual(1, _page_field_count(legacy._element))
+        self.assertFalse(legacy._element.xpath(".//w:drawing | .//w:pict"))
+
+        linked_vml_footer = Document().sections[0].footer
+        pict = OxmlElement("w:pict")
+        text_box = OxmlElement("w:txbxContent")
+        inner_paragraph = OxmlElement("w:p")
+        inner_paragraph.append(page_field_element())
+        text_box.append(inner_paragraph)
+        pict.append(text_box)
+        image_data = etree.Element("{urn:schemas-microsoft-com:vml}imagedata")
+        image_data.set(qn("r:id"), "rIdSyntheticImage")
+        pict.append(image_data)
+        linked_vml_footer.paragraphs[0]._p.append(pict)
+        self.assertFalse(_ensure_page_field(linked_vml_footer, 2))
+        self.assertTrue(linked_vml_footer._element.xpath(".//w:pict"))
+
+        image_footer = Document().sections[0].footer
+        drawing = OxmlElement("w:drawing")
+        drawing.append(OxmlElement("a:blip"))
+        image_footer.paragraphs[0]._p.append(drawing)
+        with self.assertRaises(FormatMonographError):
+            _ensure_page_field(image_footer, 2)
+
     def test_table_fonts_are_explicit_and_effectively_audited(self) -> None:
         output = self.root / "table-fonts.docx"
         document = Document()
@@ -265,7 +323,7 @@ class V026DeterministicFontTests(unittest.TestCase):
                 cell.text = f"Synthetic {row_index}-{cell_index}"
         properties = {
             "font_name_ascii": "Times New Roman",
-            "font_name_east_asia": "宋体",
+            "font_name_east_asia": "瀹嬩綋",
             "font_name_complex_script": "Times New Roman",
         }
         apply_table_properties(
@@ -279,7 +337,7 @@ class V026DeterministicFontTests(unittest.TestCase):
         rule = {
             "id": "FMT-TABLE-FONT-TEST",
             "selector": {"kind": "table_role", "value": "all"},
-            "properties": properties,
+            "properties": {**properties, "border_preset": "preserve"},
         }
         self.assertFalse(
             audit_table_rule(formatted, rule, [(formatted.tables[0], {})])
@@ -292,6 +350,20 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertEqual("Times New Roman", r_fonts.get(qn("w:cs")))
         for attribute in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
             self.assertIsNone(r_fonts.get(qn(f"w:{attribute}")))
+
+        caption_document = Document()
+        caption_table = caption_document.add_table(rows=2, cols=1)
+        caption = caption_table.cell(0, 0).paragraphs[0]
+        caption.text = "Synthetic table caption"
+        caption.style = "Caption"
+        caption.alignment = 1
+        caption_entry = {"caption_row": 0, "header_rows": [1]}
+        apply_table_properties(
+            caption_document,
+            {**properties, "column_roles": ["narrative"]},
+            [(caption_table, caption_entry)],
+        )
+        self.assertEqual(1, caption.alignment)
 
     def test_approved_derived_footers_are_path_and_cache_independent(self) -> None:
         source = self.root / "source.docx"
@@ -365,6 +437,39 @@ class V026DeterministicFontTests(unittest.TestCase):
             ),
         )
 
+        toc_document = Document()
+        toc_paragraph = toc_document.add_paragraph()
+        toc_paragraph._p.append(page_field_element("Update directory"))
+        toc_paragraph._p[-1].set(qn("w:instr"), 'TOC \\o "1-3"')
+
+        def missing_locator(_document, _locator):
+            raise FormatMonographError("Synthetic removed static TOC locator")
+
+        resolved_toc = _resolve_audit_boundary(
+                toc_document,
+                {"kind": "body_paragraph", "paragraph": 1},
+                missing_locator,
+                allow_unique_toc_field=True,
+            )
+        self.assertIs(toc_paragraph._p, resolved_toc._p)
+
+        normalized_paragraph = toc_document.add_paragraph("Synthetic normalized title")
+
+        def normalized_locator(document, locator):
+            if locator.get("text_sha256") == "normalized":
+                return document.paragraphs[1]
+            raise FormatMonographError("Synthetic original heading locator")
+
+        resolved_body = _resolve_audit_boundary(
+            toc_document,
+            {"kind": "body_paragraph", "text_sha256": "original"},
+            normalized_locator,
+            alternate_locators=[
+                {"kind": "body_paragraph", "text_sha256": "normalized"}
+            ],
+        )
+        self.assertIs(normalized_paragraph._p, resolved_body._p)
+
     def test_word_adapter_uses_compatible_open_calls(self) -> None:
         adapter = (
             REPO
@@ -377,6 +482,156 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertNotIn("$outputPath, $false, $false", adapter)
         self.assertIn("try { $word.Options.UpdateLinksAtOpen", adapter)
 
+    def test_localized_caption_style_keeps_semantic_audit_contract(self) -> None:
+        source = self.root / "caption-source.docx"
+        original_text = "Fig 1.1 Synthetic caption"
+        replacement_text = "Fig 1.2 Synthetic caption"
+        document = Document()
+        document.add_paragraph(original_text)
+        document.save(source)
+
+        output = self.root / "caption-localized.docx"
+        document = Document()
+        paragraph = document.add_paragraph(replacement_text, style="Caption")
+        rule = {
+            "id": "FMT-CAP-LOCALIZED",
+            "selector": {"kind": "caption_role", "value": "all"},
+            "properties": {
+                "font_name_ascii": "Times New Roman",
+                "font_name_east_asia": "Times New Roman",
+                "font_name_complex_script": "Times New Roman",
+            },
+        }
+        apply_style_rule_to_paragraphs(document, rule, [paragraph])
+        style = document.styles["Caption"]
+        style.element.set(qn("w:styleId"), "LocalizedCaption")
+        style.element.find(qn("w:name")).set(
+            qn("w:val"), "Localized Caption"
+        )
+        paragraph._p.get_or_add_pPr().get_or_add_pStyle().val = "LocalizedCaption"
+        document.save(output)
+
+        start, end = 0, len("Fig 1.1")
+        title_start = end + 1
+        entry = {
+            "approved": True,
+            "role": "figure_caption",
+            "text_sha256": hashlib.sha256(original_text.encode("utf-8")).hexdigest(),
+            "locator": {
+                "kind": "body_paragraph",
+                "paragraph": 0,
+                "text_sha256": hashlib.sha256(
+                    original_text.encode("utf-8")
+                ).hexdigest(),
+            },
+        }
+        caption = {
+            "approved": True,
+            "action": "replace_identifier",
+            "locator": entry["locator"],
+            "text_sha256": entry["text_sha256"],
+            "identifier_span": {"start": start, "end": end},
+            "identifier_sha256": hashlib.sha256(
+                original_text[start:end].encode("utf-8")
+            ).hexdigest(),
+            "identifier_prefix_sha256": hashlib.sha256(b"").hexdigest(),
+            "identifier_suffix_sha256": hashlib.sha256(
+                original_text[end:].encode("utf-8")
+            ).hexdigest(),
+            "title_span_start": title_start,
+            "title_text_sha256": hashlib.sha256(
+                original_text[title_start:].encode("utf-8")
+            ).hexdigest(),
+            "replacement_identifier": "Fig 1.2",
+        }
+        structure_map = {
+            "schema_version": "1.4",
+            "paragraph_roles": [entry],
+            "captions": [caption],
+            "toc_ranges": [],
+        }
+        formatted = Document(output)
+        targets = approved_role_paragraphs(
+            formatted, structure_map, rule["selector"]
+        )
+        self.assertEqual([replacement_text], [target.text for target in targets])
+        profile = {
+            "rules": [{**rule, "status": "approved", "application": "automatic"}]
+        }
+        self.assertFalse(effective_font_failures(output, profile, structure_map))
+        self.assertEqual(
+            "pass",
+            audit_caption_identifier_replacements(
+                source, output, structure_map
+            )[0]["status"],
+        )
+
+    def test_body_section_suppresses_inherited_duplicate_page_break(self) -> None:
+        document = Document()
+        document.add_paragraph("Synthetic TOC")
+        body = document.add_paragraph("Synthetic chapter", style="Heading 1")
+        document.styles["Heading 1"].paragraph_format.page_break_before = True
+        settings = {
+            "approved": True,
+            "toc_start": {"text": "Synthetic TOC"},
+            "body_start": {"text": "Synthetic chapter"},
+            "number_format": "decimal",
+            "start_at": {"toc": 1, "body": 1},
+            "continue_after_body_start": True,
+        }
+
+        def resolver(doc, locator):
+            return next(p for p in doc.paragraphs if p.text == locator["text"])
+
+        result = apply_pagination_sections(document, settings, resolver)
+        self.assertTrue(result["suppressed_redundant_body_page_break"])
+        self.assertIs(False, body.paragraph_format.page_break_before)
+        body.paragraph_format.page_break_before = True
+        self.assertTrue(
+            finalize_pagination_sections(document, settings, resolver)
+        )
+        self.assertIs(False, body.paragraph_format.page_break_before)
+        output = self.root / "no-duplicate-page-break.docx"
+        document.save(output)
+        failures, _ = audit_pagination_sections(
+            output, Document(output), settings, resolver
+        )
+        self.assertFalse(failures)
+        formatted = Document(output)
+        self.assertFalse(
+            audit_paragraph_rule(
+                formatted,
+                {
+                    "selector": {
+                        "kind": "paragraph_role",
+                        "value": "chapter_title",
+                    },
+                    "properties": {"page_break_before": True},
+                },
+                [resolver(formatted, settings["body_start"])],
+            )
+        )
+
+        broken = Document(output)
+        resolver(broken, settings["body_start"]).paragraph_format.page_break_before = None
+        broken_path = self.root / "duplicate-page-break.docx"
+        broken.save(broken_path)
+        failures, _ = audit_pagination_sections(
+            broken_path, Document(broken_path), settings, resolver
+        )
+        self.assertIn(
+            "redundant_page_break_before_at_body_start",
+            {failure["property"] for failure in failures},
+        )
+
+        plain = Document()
+        plain.add_paragraph("Synthetic TOC")
+        plain_body = plain.add_paragraph("Synthetic chapter")
+        plain_result = apply_pagination_sections(plain, settings, resolver)
+        self.assertFalse(plain_result["suppressed_redundant_body_page_break"])
+        self.assertIsNone(plain_body.paragraph_format.page_break_before)
+
 
 if __name__ == "__main__":
     unittest.main()
+
