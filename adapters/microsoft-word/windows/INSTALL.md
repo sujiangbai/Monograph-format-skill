@@ -22,6 +22,8 @@ python format-monograph/scripts/finalize_docx.py formatted.docx \
   --pdf-output finalized-word.pdf
 ```
 
-The adapter opens only the copied output, disables macros, link updates, recent-file recording, prompts, and visible windows, then updates approved `TOC`, `PAGE`, `REF`, and `PAGEREF` fields across Word story ranges. It repaginates, saves DOCX, reopens it to verify editable fields, optionally exports PDF, and always closes its Word instance.
+Always pass the updater as a JSON argument array, especially when paths contain spaces. The adapter uses the compatible one-argument `Documents.Open(path)` call; optional Word preference assignments are best-effort and do not weaken macro blocking, Protected View, or organization policy.
+
+The adapter opens only the copied output, disables macros, link updates, recent-file recording, prompts, and visible windows, then updates approved `TOC`, `PAGE`, `REF`, and `PAGEREF` fields across Word story ranges. It repaginates, saves DOCX, reopens it to verify editable fields, optionally exports PDF, and closes only the Word instance it created.
 
 Do not use this adapter on an untrusted DOCX outside a sandboxed user profile. Protected View, organization policy, Word dialogs, damaged fields, or automation denial must be reported as a blocked or deferred finalization; never bypass those controls.

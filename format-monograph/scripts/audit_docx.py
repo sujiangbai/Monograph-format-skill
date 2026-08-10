@@ -24,6 +24,8 @@ from _common import (
     load_document,
     protected_object_manifest,
     protected_payload_manifest,
+    run_effective_font,
+    style_effective_font,
     style_name_for_selector,
     write_json,
 )
@@ -46,24 +48,16 @@ def close(actual: Any, expected: Any, tolerance: float = 0.05) -> bool:
     return math.isclose(float(actual), float(expected), abs_tol=tolerance)
 
 
-def style_font_value(style: Any, attribute: str) -> Any:
-    r_pr = style.element.rPr
-    r_fonts = None if r_pr is None else r_pr.rFonts
-    if r_fonts is None:
-        return None
-    return r_fonts.get(qn(f"w:{attribute}"))
-
-
-def style_value(style: Any, key: str) -> Any:
+def style_value(document: Any, style: Any, key: str) -> Any:
     font, pf = style.font, style.paragraph_format
     if key == "font_name":
-        return font.name
+        return style_effective_font(document, style, "ascii")[0]
     if key == "font_name_ascii":
-        return style_font_value(style, "ascii") or style_font_value(style, "hAnsi")
+        return style_effective_font(document, style, "ascii")[0]
     if key == "font_name_east_asia":
-        return style_font_value(style, "eastAsia")
+        return style_effective_font(document, style, "eastAsia")[0]
     if key == "font_name_complex_script":
-        return style_font_value(style, "cs")
+        return style_effective_font(document, style, "cs")[0]
     if key == "font_size_pt":
         return None if font.size is None else font.size.pt
     if key in {"bold", "italic"}:
@@ -152,19 +146,16 @@ def compare_value(key: str, actual: Any, expected: Any) -> bool:
     return actual == expected
 
 
-def run_font_value(run: Any, key: str) -> Any:
+def run_font_value(document: Any, paragraph: Any, run: Any, key: str) -> Any:
     r_pr = run._r.rPr
-    r_fonts = None if r_pr is None else r_pr.find(qn("w:rFonts"))
     if key == "font_name":
-        return run.font.name
+        return run_effective_font(document, paragraph, run, "ascii")[0]
     if key == "font_name_ascii":
-        return None if r_fonts is None else (
-            r_fonts.get(qn("w:ascii")) or r_fonts.get(qn("w:hAnsi"))
-        )
+        return run_effective_font(document, paragraph, run, "ascii")[0]
     if key == "font_name_east_asia":
-        return None if r_fonts is None else r_fonts.get(qn("w:eastAsia"))
+        return run_effective_font(document, paragraph, run, "eastAsia")[0]
     if key == "font_name_complex_script":
-        return None if r_fonts is None else r_fonts.get(qn("w:cs"))
+        return run_effective_font(document, paragraph, run, "cs")[0]
     if key == "font_size_pt":
         return None if run.font.size is None else run.font.size.pt
     if key in {"bold", "italic"}:
@@ -174,20 +165,27 @@ def run_font_value(run: Any, key: str) -> Any:
     return None
 
 
-def paragraph_effective_value(paragraph: Any, key: str) -> Any:
+def paragraph_effective_value(document: Any, paragraph: Any, key: str) -> Any:
     style = paragraph.style
-    if key.startswith("font_name") or key in {
+    if key.startswith("font_name"):
+        values = [
+            run_font_value(document, paragraph, run, key)
+            for run in paragraph.runs
+            if run.text
+        ]
+        return values or style_value(document, style, key)
+    if key in {
         "font_size_pt",
         "bold",
         "italic",
         "color_hex",
     }:
-        fallback = style_value(style, key)
+        fallback = style_value(document, style, key)
         values = []
         for run in paragraph.runs:
             if not run.text:
                 continue
-            direct = run_font_value(run, key)
+            direct = run_font_value(document, paragraph, run, key)
             values.append(fallback if direct is None else direct)
         return values or fallback
 
@@ -245,7 +243,7 @@ def paragraph_effective_value(paragraph: Any, key: str) -> Any:
             )
     elif key in {"keep_with_next", "keep_together", "page_break_before", "widow_control"}:
         direct = getattr(pf, key)
-    return style_value(style, key) if direct is None else direct
+    return style_value(document, style, key) if direct is None else direct
 
 
 def audit_paragraph_rule(
@@ -256,7 +254,7 @@ def audit_paragraph_rule(
         for key, expected in rule["properties"].items():
             if key not in STYLE_PROPERTIES:
                 continue
-            actual = paragraph_effective_value(paragraph, key)
+            actual = paragraph_effective_value(document, paragraph, key)
             if not compare_value(key, actual, expected):
                 failures.append(
                     {
@@ -282,7 +280,7 @@ def audit_style_rule(document: Any, rule: dict) -> list[dict]:
     for key, expected in rule["properties"].items():
         if key not in STYLE_PROPERTIES:
             continue
-        actual = style_value(style, key)
+        actual = style_value(document, style, key)
         if not compare_value(key, actual, expected):
             failures.append({"property": key, "expected": expected, "actual": actual})
     return failures
@@ -446,12 +444,23 @@ def audit_table_rule(
                 "column_alignments",
                 "header_bold",
                 "header_shading_hex",
-                "font_name_ascii",
-                "font_name_east_asia",
                 "font_size_pt",
                 "line_spacing_pt",
             }:
                 actual = expected
+            elif key in {
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_name_complex_script",
+            }:
+                actual = [
+                    run_font_value(document, paragraph, run, key)
+                    for row in table.rows
+                    for cell in row.cells
+                    for paragraph in cell.paragraphs
+                    for run in paragraph.runs
+                    if run.text
+                ]
             else:
                 actual = "<unsupported>"
             if not compare_value(key, actual, expected):

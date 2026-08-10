@@ -78,13 +78,10 @@ try {
     $word.Visible = $false
     $word.DisplayAlerts = 0
     $word.AutomationSecurity = 3
-    $word.Options.UpdateLinksAtOpen = $false
-    $word.Options.SaveNormalPrompt = $false
+    try { $word.Options.UpdateLinksAtOpen = $false } catch {}
+    try { $word.Options.SaveNormalPrompt = $false } catch {}
 
-    $document = $word.Documents.Open(
-        $outputPath, $false, $false, $false, "", "", $false, "", "", 0, 0,
-        $false, $false, 0, $true, $false
-    )
+    $document = $word.Documents.Open($outputPath)
     [void]$document.Repaginate()
     $updated = Update-ApprovedFields $document $allowed
     [void]$document.Repaginate()
@@ -100,10 +97,7 @@ try {
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($document) | Out-Null
     $document = $null
 
-    $verification = $word.Documents.Open(
-        $outputPath, $false, $true, $false, "", "", $false, "", "", 0, 0,
-        $false, $false, 0, $true, $false
-    )
+    $verification = $word.Documents.Open($outputPath)
     [void]$verification.Repaginate()
     $verifiedFields = Count-ApprovedFields $verification $allowed
     $updatedTotal = 0

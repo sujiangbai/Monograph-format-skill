@@ -15,6 +15,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from lxml import etree
 
@@ -23,10 +24,16 @@ from _common import (
     FormatMonographError,
     ensure_docx,
     field_cache_inventory,
+    font_alias_keys,
+    load_document,
     protected_payload_manifest,
+    run_effective_font,
+    style_effective_font,
+    style_name_for_selector,
     write_json,
 )
 from render_docx import locate_soffice
+from structure_map import approved_data_tables, has_semantic_structure_map
 from structure_map import (
     load_structure_map,
     structure_content_fingerprint,
@@ -199,6 +206,88 @@ def field_contract_preserved(before: dict, after: dict) -> bool:
     )
 
 
+def effective_font_failures(
+    path: Path, profile: dict, structure_map: dict | None = None
+) -> list[dict[str, Any]]:
+    document = load_document(path)
+    result = []
+    property_attributes = {
+        "font_name": "ascii",
+        "font_name_ascii": "ascii",
+        "font_name_east_asia": "eastAsia",
+        "font_name_complex_script": "cs",
+    }
+    for rule in profile.get("rules", []):
+        if rule.get("status") != "approved" or rule.get("application") != "automatic":
+            continue
+        if rule.get("selector", {}).get("kind") == "table_role":
+            targets = (
+                approved_data_tables(document, structure_map)
+                if structure_map and has_semantic_structure_map(structure_map)
+                else [(table, {}) for table in document.tables]
+            )
+            for table_index, (table, _entry) in enumerate(targets):
+                for property_name, attribute in property_attributes.items():
+                    expected = rule.get("properties", {}).get(property_name)
+                    if not expected:
+                        continue
+                    for row_index, row in enumerate(table.rows):
+                        for cell_index, cell in enumerate(row.cells):
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    if not run.text:
+                                        continue
+                                    actual, source = run_effective_font(
+                                        document, paragraph, run, attribute
+                                    )
+                                    if not actual or not (
+                                        font_alias_keys(str(actual))
+                                        & font_alias_keys(str(expected))
+                                    ):
+                                        result.append(
+                                            {
+                                                "rule": rule.get("id"),
+                                                "table": table_index,
+                                                "row": row_index,
+                                                "cell": cell_index,
+                                                "property": property_name,
+                                                "expected": str(expected),
+                                                "actual": actual,
+                                                "source": source,
+                                            }
+                                        )
+            continue
+        style_name = style_name_for_selector(rule.get("selector", {}))
+        if not style_name:
+            continue
+        try:
+            style = document.styles[style_name]
+        except KeyError:
+            result.append(
+                {"rule": rule.get("id"), "style": style_name, "reason": "missing_style"}
+            )
+            continue
+        for property_name, attribute in property_attributes.items():
+            expected = rule.get("properties", {}).get(property_name)
+            if not expected:
+                continue
+            actual, source = style_effective_font(document, style, attribute)
+            if not actual or not (
+                font_alias_keys(str(actual)) & font_alias_keys(str(expected))
+            ):
+                result.append(
+                    {
+                        "rule": rule.get("id"),
+                        "style": style_name,
+                        "property": property_name,
+                        "expected": str(expected),
+                        "actual": actual,
+                        "source": source,
+                    }
+                )
+    return result
+
+
 def use_deferred_output(input_path: Path, output_path: Path, reason: str) -> dict:
     output_path.unlink(missing_ok=True)
     shutil.copy2(input_path, output_path)
@@ -352,6 +441,14 @@ def main() -> int:
                 "Formatted input failed the stable pre-finalization content audit."
             )
         baseline_objects = protected_payload_manifest(baseline)
+        input_font_failures = effective_font_failures(
+            args.input, profile, structure_map
+        )
+        if input_font_failures:
+            raise FormatMonographError(
+                "Formatted input failed deterministic effective-font validation: "
+                + json.dumps(input_font_failures, ensure_ascii=False)
+            )
         input_fields = field_cache_inventory(args.input)
         backend: dict = {"backend": "not_needed"}
         delivery_status = input_fields["status"]
@@ -433,10 +530,14 @@ def main() -> int:
 
         output_fp = structure_content_fingerprint(args.output, structure_map)
         output_objects = protected_payload_manifest(args.output)
+        output_font_failures = effective_font_failures(
+            args.output, profile, structure_map
+        )
         content_ok = baseline_fp == output_fp
         objects_ok = baseline_objects == output_objects
+        fonts_ok = not output_font_failures
         if strict_backend and not (
-            field_contract_ok and refreshed_ok and content_ok and objects_ok
+            field_contract_ok and refreshed_ok and content_ok and objects_ok and fonts_ok
         ):
             if args.field_updater == "auto" and args.approve_deferred:
                 backend = use_deferred_output(
@@ -446,20 +547,25 @@ def main() -> int:
                 output_fields = field_cache_inventory(args.output)
                 output_fp = structure_content_fingerprint(args.output, structure_map)
                 output_objects = protected_payload_manifest(args.output)
+                output_font_failures = effective_font_failures(
+                    args.output, profile, structure_map
+                )
                 content_ok = baseline_fp == output_fp
                 objects_ok = baseline_objects == output_objects
+                fonts_ok = not output_font_failures
             else:
                 args.output.unlink(missing_ok=True)
                 raise FormatMonographError(
                     "Field refresh did not preserve the editable-field "
                     "contract and document integrity."
                 )
-        if not content_ok or not objects_ok:
+        if not content_ok or not objects_ok or not fonts_ok:
             args.output.unlink(missing_ok=True)
             raise FormatMonographError(
                 "Finalization integrity failed "
                 f"(content={'pass' if content_ok else 'fail'}, "
-                f"protected_objects={'pass' if objects_ok else 'fail'})."
+                f"protected_objects={'pass' if objects_ok else 'fail'}, "
+                f"effective_fonts={'pass' if fonts_ok else 'fail'})."
             )
 
         result = {
@@ -470,6 +576,7 @@ def main() -> int:
             "field_backend": backend,
             "content_integrity": "pass",
             "protected_object_integrity": "pass",
+            "effective_font_integrity": "pass",
             "workflow_state": {
                 "source_sha256": file_sha256(baseline),
                 "input_sha256": file_sha256(args.input),
