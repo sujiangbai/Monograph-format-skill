@@ -566,6 +566,62 @@ class V026DeterministicFontTests(unittest.TestCase):
             )[0]["status"],
         )
 
+    def test_unresolvable_semantic_font_target_is_an_integrity_failure(self) -> None:
+        output = self.root / "missing-semantic-target.docx"
+        document = Document()
+        document.add_paragraph("Synthetic body")
+        document.save(output)
+
+        locator = {
+            "kind": "table_cell_paragraph",
+            "table": 1,
+            "row": 0,
+            "cell": 0,
+            "paragraph": 0,
+        }
+        structure_map = {
+            "schema_version": "1.4",
+            "paragraph_roles": [
+                {
+                    "approved": True,
+                    "role": "table_caption",
+                    "text_sha256": hashlib.sha256(
+                        b"Synthetic missing caption"
+                    ).hexdigest(),
+                    "locator": locator,
+                }
+            ],
+            "captions": [
+                {
+                    "approved": True,
+                    "action": "style_only",
+                    "locator": locator,
+                }
+            ],
+            "toc_ranges": [],
+        }
+        profile = {
+            "rules": [
+                {
+                    "id": "FMT-CAP-MISSING-TARGET",
+                    "selector": {"kind": "caption_role", "value": "all"},
+                    "properties": {"font_name_ascii": "Times New Roman"},
+                    "status": "approved",
+                    "application": "automatic",
+                }
+            ]
+        }
+        self.assertEqual(
+            [
+                {
+                    "rule": "FMT-CAP-MISSING-TARGET",
+                    "selector": "caption_role",
+                    "reason": "semantic_target_unresolvable",
+                }
+            ],
+            effective_font_failures(output, profile, structure_map),
+        )
+
     def test_body_section_suppresses_inherited_duplicate_page_break(self) -> None:
         document = Document()
         document.add_paragraph("Synthetic TOC")

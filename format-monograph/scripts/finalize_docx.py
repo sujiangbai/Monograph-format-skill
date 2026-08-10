@@ -227,11 +227,21 @@ def effective_font_failures(
         selector = rule.get("selector", {})
         selector_kind = selector.get("kind")
         if selector_kind == "table_role":
-            targets = (
-                approved_data_tables(document, structure_map)
-                if structure_map and has_semantic_structure_map(structure_map)
-                else [(table, {}) for table in document.tables]
-            )
+            try:
+                targets = (
+                    approved_data_tables(document, structure_map)
+                    if structure_map and has_semantic_structure_map(structure_map)
+                    else [(table, {}) for table in document.tables]
+                )
+            except FormatMonographError:
+                result.append(
+                    {
+                        "rule": rule.get("id"),
+                        "selector": selector_kind,
+                        "reason": "semantic_target_unresolvable",
+                    }
+                )
+                continue
             for table_index, (table, entry) in enumerate(targets):
                 for property_name, attribute in property_attributes.items():
                     expected = rule.get("properties", {}).get(property_name)
@@ -273,7 +283,17 @@ def effective_font_failures(
             and selector_kind
             in {"paragraph_role", "caption_role", "bibliography_role"}
         ):
-            targets = approved_role_paragraphs(document, structure_map, selector)
+            try:
+                targets = approved_role_paragraphs(document, structure_map, selector)
+            except FormatMonographError:
+                result.append(
+                    {
+                        "rule": rule.get("id"),
+                        "selector": selector_kind,
+                        "reason": "semantic_target_unresolvable",
+                    }
+                )
+                continue
             if targets:
                 for property_name, attribute in property_attributes.items():
                     expected = rule.get("properties", {}).get(property_name)
