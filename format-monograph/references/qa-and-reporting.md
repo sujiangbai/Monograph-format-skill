@@ -36,6 +36,12 @@
 10. 渲染页数、PDF 来源、逐页检查状态和发现的问题。
 11. 最终结论：通过、带限制通过或失败。
 
+## V0.2.6 确定性字体与分页证据
+
+对每条获批的自动字体规则，报告目标字体、样式中声明的显式字体、原主题引用、沿继承链解析出的实际生效字体及其来源。正文、标题、目录、题注、表格文字、脚注/尾注、长引文、参考文献和教学框中凡已获批自动处理的对象，都必须按同一方法检查。检测到等线、等线 Light 或其他主题字体并不自动表示错误；只有它与当前任务批准字体不一致时才失败。未获批对象保持原状并列入未覆盖范围。
+
+对每个页码页脚报告 `PAGE` 字段数量、奇偶页位置、是否包含非页码内容，以及本次运行是否执行了重复字段规范化或获批的静态数字转换。每个渲染空白页必须标记为 `intentional_recto_blank`、`removable_trailing_blank` 或 `unexpected_blank`，并记录保留、删除或阻塞的依据。
+
 ## 审阅标注稿
 
 优先将批注锚定到受影响样式的第一个非空正文段落。批注必须包含规则编号、格式变化摘要和来源编号。页面或全局规则无法精确锚定时，将批注放在第一个可用正文段落，并在报告中标注为全局变化。
@@ -51,6 +57,8 @@
 ## Finalization evidence
 
 Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; updated field types and counts; repagination, save, reopen, and cache-verification status; optional target PDF; and content/protected-object audit outcomes. Do not include manuscript text in the status file.
+
+Finalization evidence must also record effective-font integrity before and after refresh. A target-software save is rejected when it reintroduces a conflicting theme font or changes an approved effective font.
 
 `deferred` is a limitation, not a refresh success. State who approved it and require the target application to update fields before final visual QA. If the renderer and target software differ, report both and set target layout to unverified until that application is checked.
 

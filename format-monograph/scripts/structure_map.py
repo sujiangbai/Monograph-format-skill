@@ -82,6 +82,9 @@ ROLE_ALIASES = {
     "heading4": "heading_4",
     "caption": "all_captions",
     "all": "all_captions",
+    "table_of_contents_level_1": "toc_level_1",
+    "table_of_contents_level_2": "toc_level_2",
+    "table_of_contents_level_3": "toc_level_3",
 }
 
 ROLE_STYLE_NAMES = {
@@ -98,6 +101,9 @@ ROLE_STYLE_NAMES = {
     "reference_entry": "Bibliography",
     "answer": "Normal",
     "teaching_callout": "Normal",
+    "toc_level_1": "TOC 1",
+    "toc_level_2": "TOC 2",
+    "toc_level_3": "TOC 3",
 }
 
 
@@ -414,6 +420,15 @@ def approved_role_paragraphs(
     seen: set[int] = set()
     for entry in structure_map.get("paragraph_roles", []):
         if not entry.get("approved"):
+            continue
+        locator = entry.get("locator", {})
+        if locator.get("kind") == "body_paragraph" and any(
+            toc.get("approved")
+            and int(toc["start_paragraph"])
+            <= int(locator.get("paragraph", -1))
+            <= int(toc["end_paragraph"])
+            for toc in structure_map.get("toc_ranges", [])
+        ):
             continue
         role = normalized_role(str(entry.get("role", "unknown")))
         matches = role == wanted or (wanted == "all_captions" and role in caption_roles)
@@ -1914,6 +1929,11 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         document,
         structure_map.get("pagination_sections", {}),
         resolve_paragraph_locator,
+        replace_static_page_text=any(
+            entry.get("approved_delete")
+            and entry.get("evidence", {}).get("approved_derived_footer_only")
+            for entry in structure_map.get("trailing_empty_sections", [])
+        ),
     )
     caption_actions: dict[str, int] = {}
     if has_caption_actions_map(structure_map):
@@ -2138,11 +2158,24 @@ def _pagination_boundary_paragraphs(
     expected = body_locator.get("text_sha256")
     if not expected:
         return result
+    expected_hashes = {expected}
+    heading = next(
+        (
+            entry
+            for entry in structure_map.get("headings", [])
+            if entry.get("approved")
+            and entry.get("locator", {}).get("text_sha256") == expected
+        ),
+        None,
+    )
+    if heading and heading.get("normalized_text_sha256"):
+        expected_hashes.add(heading["normalized_text_sha256"])
     paragraphs = root.xpath("/w:document/w:body/w:p", namespaces=NS)
     matches = [
         paragraph
         for paragraph in paragraphs
-        if text_sha256(_paragraph_text_without_field_results(paragraph)) == expected
+        if text_sha256(_paragraph_text_without_field_results(paragraph))
+        in expected_hashes
     ]
     if len(matches) != 1:
         return result
@@ -2397,7 +2430,28 @@ def structure_content_inventory(
                 values.append(value)
             if name == "word/document.xml" or any(values):
                 result[name] = values
-    return result
+    approved_derived_footer_only = bool(
+        structure_map.get("pagination_sections", {}).get("approved")
+        and any(
+            entry.get("approved_delete")
+            and entry.get("evidence", {}).get("approved_derived_footer_only")
+            for entry in structure_map.get("trailing_empty_sections", [])
+        )
+    )
+    canonical: dict[str, list[str]] = {}
+    headers: list[str] = []
+    footers: list[str] = []
+    for name, values in result.items():
+        if re.fullmatch(r"word/header\d+\.xml", name):
+            headers.extend(values)
+        elif re.fullmatch(r"word/footer\d+\.xml", name):
+            if not approved_derived_footer_only:
+                footers.extend(values)
+        else:
+            canonical[name] = values
+    canonical["word/_headers_by_content"] = sorted(headers)
+    canonical["word/_footers_by_content"] = sorted(footers)
+    return canonical
 
 
 def structure_content_fingerprint(path: Path, structure_map: dict[str, Any]) -> str:

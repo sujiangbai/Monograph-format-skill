@@ -20,7 +20,9 @@ Schema 1.4 adds approved page-number sections, stable trailing-section evidence,
 
 `pagination_sections` requires separate stable locators for `toc_start` and `body_start`. Approval also records decimal numbering, `start_at={"toc":1,"body":1}`, continuation after the body start, odd outer-right/even outer-left placement, and visible first-page numbers.
 
-Application inserts a real next-page section before the body when needed. It starts the TOC and body independently at 1, removes later unapproved restarts, disables first-page hiding, enables odd/even footers, and ensures editable `PAGE` fields in both default and even footers. Audit fails for missing even footers, hidden first-page numbers, body restarts, or unreachable header/footer parts. Physical page counts still require target-software repagination or PDF export.
+Application inserts a real next-page section before the body when needed. It starts the TOC and body independently at 1, removes later unapproved restarts, disables first-page hiding, enables odd/even footers, and ensures exactly one editable `PAGE` field in each default and even page-number footer. Reapplication is idempotent: a page-only footer with duplicate fields is canonicalized to one field. A footer containing publisher text, a logo, another field, or mixed payload blocks automatic replacement. Static digits may be converted only when approved trailing-section evidence marks them as derived footer-only content. Audit fails for missing even footers, duplicate PAGE fields, hidden first-page numbers, body restarts, or unreachable header/footer parts. Physical page counts still require target-software repagination or PDF export.
+
+Classify rendered blank pages as `intentional_recto_blank`, `removable_trailing_blank`, or `unexpected_blank`. A recto blank created by an approved odd-page section start is retained without a visible page number. A trailing blank is deleted only through approved stable cleanup. Header/footer integrity compares canonical content rather than physical part names so Word's harmless relationship renumbering does not mask a payload change.
 
 ### Table visuals
 
@@ -96,7 +98,7 @@ Candidates report visible payload, header/footer references and payload, page-nu
 - `pagination_sections`: create and audit approved TOC/body numbering sections and odd/even PAGE footers.
 - `trailing_empty_sections`: remove safe approved final sections from the end inward.
 
-Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, and revisions.
+Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. Approved font rules also clear the corresponding theme-font attributes and are audited after resolving run, character-style, paragraph-style, base-style, document-default, and theme inheritance. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, revisions, and formula formatting.
 
 ## Privacy and integrity
 

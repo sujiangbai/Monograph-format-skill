@@ -19,6 +19,8 @@ from _common import (
     field_inventory,
     load_document,
     protected_object_manifest,
+    style_effective_font,
+    theme_font_inventory,
     word_xml_counts,
     write_json,
 )
@@ -34,12 +36,21 @@ def length_mm(value) -> float | None:
     return None if value is None else round(value.mm, 3)
 
 
-def style_definition(style) -> dict:
+def style_definition(document, style) -> dict:
     r_pr = style.element.rPr
     r_fonts = None if r_pr is None else r_pr.rFonts
     attrs = {}
     if r_fonts is not None:
-        for name in ("ascii", "hAnsi", "eastAsia", "cs"):
+        for name in (
+            "ascii",
+            "hAnsi",
+            "eastAsia",
+            "cs",
+            "asciiTheme",
+            "hAnsiTheme",
+            "eastAsiaTheme",
+            "cstheme",
+        ):
             attrs[name] = r_fonts.get(qn(f"w:{name}"))
     spacing = style.paragraph_format.line_spacing
     return {
@@ -47,6 +58,22 @@ def style_definition(style) -> dict:
         "font_name_ascii": attrs.get("ascii") or attrs.get("hAnsi"),
         "font_name_east_asia": attrs.get("eastAsia"),
         "font_name_complex_script": attrs.get("cs"),
+        "font_theme_references": {
+            name: attrs.get(name)
+            for name in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme")
+            if attrs.get(name)
+        },
+        "effective_fonts": {
+            name: {
+                "name": style_effective_font(document, style, attribute)[0],
+                "source": style_effective_font(document, style, attribute)[1],
+            }
+            for name, attribute in (
+                ("ascii", "ascii"),
+                ("east_asia", "eastAsia"),
+                ("complex_script", "cs"),
+            )
+        },
         "font_size_pt": length_points(style.font.size),
         "bold": style.font.bold,
         "line_spacing": (
@@ -157,10 +184,23 @@ def inventory(path: Path) -> dict:
         "nonempty_paragraph_count": sum(bool(p.text.strip()) for p in document.paragraphs),
         "style_counts": dict(sorted(style_counts.items())),
         "style_definitions": {
-            name: style_definition(document.styles[name])
-            for name in ("Normal", "Heading 1", "Heading 2", "Heading 3", "Heading 4", "Caption")
+            name: style_definition(document, document.styles[name])
+            for name in (
+                "Normal",
+                "Heading 1",
+                "Heading 2",
+                "Heading 3",
+                "Heading 4",
+                "TOC 1",
+                "TOC 2",
+                "TOC 3",
+                "Caption",
+                "Quote",
+                "Bibliography",
+            )
             if name in document.styles
         },
+        "theme_fonts": theme_font_inventory(document),
         "headings": headings,
         "direct_outline_level_paragraphs": outline_paragraphs,
         "section_count": len(document.sections),

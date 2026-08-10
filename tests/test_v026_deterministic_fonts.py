@@ -1,0 +1,382 @@
+from __future__ import annotations
+
+import hashlib
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from lxml import etree
+
+REPO = Path(__file__).resolve().parents[1]
+SCRIPTS = REPO / "format-monograph" / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+from _common import (  # noqa: E402
+    FormatMonographError,
+    apply_style_rule_to_paragraphs,
+    apply_table_properties,
+    ensure_paragraph_style,
+    style_effective_font,
+    style_name_for_selector,
+)
+from audit_docx import audit_paragraph_rule, audit_table_rule  # noqa: E402
+from docx_pagination import (  # noqa: E402
+    _ensure_page_field,
+    _page_field_count,
+    pagination_inventory,
+)
+from finalize_docx import effective_font_failures  # noqa: E402
+from structure_map import approved_role_paragraphs, structure_content_fingerprint  # noqa: E402
+
+
+def set_theme_fonts(element, ascii_theme: str, east_asia_theme: str) -> None:
+    r_pr = element.get_or_add_rPr()
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, r_fonts)
+    for name in ("ascii", "hAnsi", "eastAsia", "cs"):
+        r_fonts.attrib.pop(qn(f"w:{name}"), None)
+    r_fonts.set(qn("w:asciiTheme"), ascii_theme)
+    r_fonts.set(qn("w:hAnsiTheme"), ascii_theme)
+    r_fonts.set(qn("w:eastAsiaTheme"), east_asia_theme)
+
+
+def replace_theme_fonts(path: Path) -> None:
+    temp = path.with_suffix(".theme.docx")
+    with zipfile.ZipFile(path) as source, zipfile.ZipFile(
+        temp, "w", zipfile.ZIP_DEFLATED
+    ) as target:
+        for info in source.infolist():
+            data = source.read(info.filename)
+            if info.filename == "word/theme/theme1.xml":
+                root = etree.fromstring(data)
+                namespace = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+                for family, typeface in (
+                    ("majorFont", "Synthetic Heading Theme"),
+                    ("minorFont", "Synthetic Body Theme"),
+                ):
+                    fonts = root.xpath(
+                        f"//a:fontScheme/a:{family}/a:font[@script='Hans']",
+                        namespaces=namespace,
+                    )
+                    if fonts:
+                        fonts[0].set("typeface", typeface)
+                data = etree.tostring(
+                    root, xml_declaration=True, encoding="UTF-8", standalone=True
+                )
+            target.writestr(info, data)
+    temp.replace(path)
+
+
+def add_page_field(paragraph) -> None:
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), "PAGE")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "1"
+    run.append(text)
+    field.append(run)
+    paragraph._p.append(field)
+
+
+class V026DeterministicFontTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_theme_fonts_are_resolved_then_removed_for_controlled_roles(self) -> None:
+        source = self.root / "theme-source.docx"
+        document = Document()
+        body = document.add_paragraph("Synthetic body")
+        heading = document.add_paragraph("Synthetic heading", style="Heading 2")
+        set_theme_fonts(document.styles["Normal"].element, "minorHAnsi", "minorEastAsia")
+        set_theme_fonts(document.styles["Heading 2"].element, "majorHAnsi", "majorEastAsia")
+        set_theme_fonts(body.runs[0]._r, "minorHAnsi", "minorEastAsia")
+        set_theme_fonts(heading.runs[0]._r, "majorHAnsi", "majorEastAsia")
+        document.save(source)
+        replace_theme_fonts(source)
+
+        document = Document(source)
+        self.assertEqual(
+            "Synthetic Body Theme",
+            style_effective_font(document, document.styles["Normal"], "eastAsia")[0],
+        )
+        self.assertEqual(
+            "Synthetic Heading Theme",
+            style_effective_font(document, document.styles["Heading 2"], "eastAsia")[0],
+        )
+
+        body_rule = {
+            "id": "FMT-BODY-TEST",
+            "selector": {"kind": "paragraph_role", "value": "body_text"},
+            "properties": {
+                "font_name_ascii": "Times New Roman",
+                "font_name_east_asia": "宋体",
+                "font_name_complex_script": "Times New Roman",
+            },
+        }
+        heading_rule = {
+            "id": "FMT-HEAD-TEST",
+            "selector": {"kind": "paragraph_role", "value": "level_2_section"},
+            "properties": {
+                "font_name_ascii": "Arial",
+                "font_name_east_asia": "黑体",
+                "font_name_complex_script": "Arial",
+            },
+        }
+        apply_style_rule_to_paragraphs(document, body_rule, [document.paragraphs[0]])
+        apply_style_rule_to_paragraphs(document, heading_rule, [document.paragraphs[1]])
+        output = self.root / "deterministic.docx"
+        document.save(output)
+
+        formatted = Document(output)
+        for style_name, ascii_name, east_asia_name in (
+            ("Normal", "Times New Roman", "宋体"),
+            ("Heading 2", "Arial", "黑体"),
+        ):
+            r_fonts = formatted.styles[style_name].element.rPr.rFonts
+            self.assertEqual(ascii_name, r_fonts.get(qn("w:ascii")))
+            self.assertEqual(east_asia_name, r_fonts.get(qn("w:eastAsia")))
+            for attribute in (
+                "asciiTheme",
+                "hAnsiTheme",
+                "eastAsiaTheme",
+                "cstheme",
+            ):
+                self.assertIsNone(r_fonts.get(qn(f"w:{attribute}")))
+        self.assertFalse(audit_paragraph_rule(formatted, body_rule, [formatted.paragraphs[0]]))
+        self.assertFalse(
+            audit_paragraph_rule(formatted, heading_rule, [formatted.paragraphs[1]])
+        )
+        profile = {
+            "rules": [
+                {**body_rule, "status": "approved", "application": "automatic"},
+                {**heading_rule, "status": "approved", "application": "automatic"},
+            ]
+        }
+        self.assertFalse(effective_font_failures(output, profile))
+
+    def test_all_controlled_text_styles_receive_mixed_script_fonts(self) -> None:
+        source = self.root / "role-styles.docx"
+        document = Document()
+        cases = (
+            ("Normal", {"kind": "paragraph_role", "value": "body_text"}, "宋体", "Times New Roman"),
+            ("Heading 1", {"kind": "paragraph_role", "value": "heading_1"}, "黑体", "Arial"),
+            ("Heading 2", {"kind": "paragraph_role", "value": "heading_2"}, "黑体", "Arial"),
+            ("Heading 3", {"kind": "paragraph_role", "value": "heading_3"}, "黑体", "Arial"),
+            ("Heading 4", {"kind": "paragraph_role", "value": "heading_4"}, "宋体", "Times New Roman"),
+            ("TOC 1", {"kind": "paragraph_role", "value": "toc_level_1"}, "宋体", "Times New Roman"),
+            ("TOC 2", {"kind": "paragraph_role", "value": "toc_level_2"}, "宋体", "Times New Roman"),
+            ("TOC 3", {"kind": "paragraph_role", "value": "toc_level_3"}, "宋体", "Times New Roman"),
+            ("Caption", {"kind": "caption_role", "value": "all"}, "宋体", "Times New Roman"),
+            ("Quote", {"kind": "paragraph_role", "value": "long_quote"}, "宋体", "Times New Roman"),
+            ("Bibliography", {"kind": "bibliography_role", "value": "entries"}, "宋体", "Times New Roman"),
+            ("Footnote Text", {"kind": "style_name", "value": "Footnote Text"}, "宋体", "Times New Roman"),
+        )
+        for style_name, _selector, _east_asia, _ascii in cases:
+            style = ensure_paragraph_style(document, style_name)
+            set_theme_fonts(style.element, "minorHAnsi", "minorEastAsia")
+        document.save(source)
+        replace_theme_fonts(source)
+
+        document = Document(source)
+        profile_rules = []
+        for index, (style_name, selector, east_asia, ascii_name) in enumerate(cases):
+            paragraph = document.add_paragraph(f"Synthetic role {index}", style=style_name)
+            rule = {
+                "id": f"FMT-ROLE-{index}",
+                "selector": selector,
+                "properties": {
+                    "font_name_ascii": ascii_name,
+                    "font_name_east_asia": east_asia,
+                    "font_name_complex_script": ascii_name,
+                },
+            }
+            apply_style_rule_to_paragraphs(document, rule, [paragraph])
+            profile_rules.append(
+                {**rule, "status": "approved", "application": "automatic"}
+            )
+        output = self.root / "role-styles-formatted.docx"
+        document.save(output)
+
+        formatted = Document(output)
+        for style_name, _selector, east_asia, ascii_name in cases:
+            self.assertEqual(
+                ascii_name,
+                style_effective_font(formatted, formatted.styles[style_name], "ascii")[0],
+            )
+            self.assertEqual(
+                east_asia,
+                style_effective_font(formatted, formatted.styles[style_name], "eastAsia")[0],
+            )
+        self.assertFalse(
+            effective_font_failures(output, {"rules": profile_rules})
+        )
+
+    def test_page_footer_rebuild_is_idempotent_and_protects_other_content(self) -> None:
+        document = Document()
+        footer = document.sections[0].footer
+        paragraph = footer.paragraphs[0]
+        add_page_field(paragraph)
+        add_page_field(paragraph)
+        self.assertTrue(_ensure_page_field(footer, 2))
+        self.assertEqual(1, _page_field_count(footer._element))
+        self.assertEqual(1, len(footer.paragraphs))
+        self.assertFalse(_ensure_page_field(footer, 2))
+        self.assertEqual(1, _page_field_count(footer._element))
+
+        protected = Document().sections[0].footer
+        protected.paragraphs[0].text = "Synthetic chapter footer"
+        with self.assertRaises(FormatMonographError):
+            _ensure_page_field(protected, 2)
+
+        static_page = Document().sections[0].footer
+        static_page.paragraphs[0].text = "315"
+        self.assertTrue(
+            _ensure_page_field(static_page, 2, replace_static_page_text=True)
+        )
+        self.assertEqual(1, _page_field_count(static_page._element))
+
+        duplicate_path = self.root / "duplicate-footer.docx"
+        duplicated = Document()
+        add_page_field(duplicated.sections[0].footer.paragraphs[0])
+        add_page_field(duplicated.sections[0].footer.paragraphs[0])
+        duplicated.save(duplicate_path)
+        inventory = pagination_inventory(duplicate_path)
+        self.assertEqual(
+            2, inventory["sections"][0]["footer_page_field_counts"]["default"]
+        )
+
+    def test_table_fonts_are_explicit_and_effectively_audited(self) -> None:
+        output = self.root / "table-fonts.docx"
+        document = Document()
+        table = document.add_table(rows=2, cols=2)
+        for row_index, row in enumerate(table.rows):
+            for cell_index, cell in enumerate(row.cells):
+                cell.text = f"Synthetic {row_index}-{cell_index}"
+        properties = {
+            "font_name_ascii": "Times New Roman",
+            "font_name_east_asia": "宋体",
+            "font_name_complex_script": "Times New Roman",
+        }
+        apply_table_properties(
+            document,
+            properties,
+            [(table, {"header_rows": [0], "repeat_header_rows": [0]})],
+        )
+        document.save(output)
+
+        formatted = Document(output)
+        rule = {
+            "id": "FMT-TABLE-FONT-TEST",
+            "selector": {"kind": "table_role", "value": "all"},
+            "properties": properties,
+        }
+        self.assertFalse(
+            audit_table_rule(formatted, rule, [(formatted.tables[0], {})])
+        )
+        profile = {
+            "rules": [{**rule, "status": "approved", "application": "automatic"}]
+        }
+        self.assertFalse(effective_font_failures(output, profile))
+        r_fonts = formatted.tables[0].cell(0, 0).paragraphs[0].runs[0]._r.rPr.rFonts
+        self.assertEqual("Times New Roman", r_fonts.get(qn("w:cs")))
+        for attribute in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
+            self.assertIsNone(r_fonts.get(qn(f"w:{attribute}")))
+
+    def test_approved_derived_footers_are_path_and_cache_independent(self) -> None:
+        source = self.root / "source.docx"
+        document = Document()
+        document.add_paragraph("Synthetic content")
+        document.sections[0].footer.paragraphs[0].text = "315"
+        document.save(source)
+
+        formatted = self.root / "formatted.docx"
+        document = Document(source)
+        footer = document.sections[0].footer
+        footer.paragraphs[0].clear()
+        add_page_field(footer.paragraphs[0])
+        document.save(formatted)
+
+        structure_map = {
+            "schema_version": "1.4",
+            "pagination_sections": {"approved": True},
+            "trailing_empty_sections": [
+                {
+                    "section": 99,
+                    "approved_delete": True,
+                    "previous_boundary_paragraph": 0,
+                    "previous_boundary_sha256": hashlib.sha256(
+                        "Synthetic content".encode("utf-8")
+                    ).hexdigest(),
+                    "evidence": {"approved_derived_footer_only": True},
+                }
+            ],
+            "headings": [],
+            "captions": [],
+            "tables": [],
+            "toc_ranges": [],
+        }
+        self.assertEqual(
+            structure_content_fingerprint(source, structure_map),
+            structure_content_fingerprint(formatted, structure_map),
+        )
+
+    def test_static_toc_role_locators_are_not_audited_after_toc_rebuild(self) -> None:
+        document = Document()
+        document.add_paragraph("TOC marker")
+        document.add_paragraph("Old static entry")
+        document.add_paragraph("Synthetic body")
+        structure_map = {
+            "schema_version": "1.4",
+            "toc_ranges": [
+                {"approved": True, "start_paragraph": 0, "end_paragraph": 1}
+            ],
+            "paragraph_roles": [
+                {
+                    "approved": True,
+                    "role": "body",
+                    "text_sha256": "unused-after-toc-rebuild",
+                    "locator": {"kind": "body_paragraph", "paragraph": 1},
+                }
+            ],
+        }
+        self.assertEqual(
+            [],
+            approved_role_paragraphs(
+                document,
+                structure_map,
+                {"kind": "paragraph_role", "value": "body_text"},
+            ),
+        )
+        self.assertEqual(
+            "TOC 1",
+            style_name_for_selector(
+                {"kind": "paragraph_role", "value": "toc_level_1"}
+            ),
+        )
+
+    def test_word_adapter_uses_compatible_open_calls(self) -> None:
+        adapter = (
+            REPO
+            / "adapters"
+            / "microsoft-word"
+            / "windows"
+            / "word_field_updater.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Documents.Open($outputPath)", adapter)
+        self.assertNotIn("$outputPath, $false, $false", adapter)
+        self.assertIn("try { $word.Options.UpdateLinksAtOpen", adapter)
+
+
+if __name__ == "__main__":
+    unittest.main()

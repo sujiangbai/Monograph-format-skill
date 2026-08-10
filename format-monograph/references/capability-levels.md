@@ -45,4 +45,6 @@ Treat field finalization as an independent capability. `field_finalization=true`
 
 If a field updater removes field instructions, changes authored content, or changes protected payloads, reject its output. In `auto` mode, an explicitly approved deferred fallback may be used; otherwise stop.
 
+Before accepting a finalized copy, resolve approved fonts through direct formatting, styles, base styles, document defaults, and the theme font scheme. Reject a backend result that reintroduces a theme-font mismatch even when its field-cache checks pass.
+
 `target_pdf_ready_for_visual_qa` means the target application exported a PDF, not that layout passed. Mark `target_layout_verified` only after every exported page is inspected for page-number sequences, TOC entries, clipping, overlap, tables, captions, headers, footers, and equations.

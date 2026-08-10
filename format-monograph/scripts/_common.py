@@ -59,6 +59,12 @@ ROLE_STYLE_MAP = {
     "reference_entry": "Bibliography",
     "answer": "Normal",
     "teaching_callout": "Normal",
+    "toc_level_1": "TOC 1",
+    "toc_level_2": "TOC 2",
+    "toc_level_3": "TOC 3",
+    "table_of_contents_level_1": "TOC 1",
+    "table_of_contents_level_2": "TOC 2",
+    "table_of_contents_level_3": "TOC 3",
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
@@ -133,6 +139,7 @@ TABLE_PROPERTIES = {
     "header_shading_hex",
     "font_name_ascii",
     "font_name_east_asia",
+    "font_name_complex_script",
     "font_size_pt",
     "line_spacing_pt",
 }
@@ -173,6 +180,15 @@ TABLE_ALIGNMENTS = {
     "center": WD_TABLE_ALIGNMENT.CENTER,
     "right": WD_TABLE_ALIGNMENT.RIGHT,
 }
+
+FONT_THEME_ATTRIBUTES = {
+    "ascii": "asciiTheme",
+    "hAnsi": "hAnsiTheme",
+    "eastAsia": "eastAsiaTheme",
+    "cs": "cstheme",
+}
+
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
 class FormatMonographError(RuntimeError):
@@ -504,6 +520,98 @@ def unsupported_properties(rule: dict[str, Any]) -> list[str]:
     return sorted(set(rule["properties"]) - supported_properties(rule))
 
 
+def theme_font_inventory(document: Any) -> dict[str, str]:
+    cached = getattr(document, "_format_monograph_theme_fonts", None)
+    if cached is not None:
+        return cached
+    result: dict[str, str] = {}
+    theme_part = next(
+        (
+            part
+            for part in document.part.package.parts
+            if str(part.partname) == "/word/theme/theme1.xml"
+        ),
+        None,
+    )
+    if theme_part is not None:
+        root = etree.fromstring(theme_part.blob)
+        namespaces = {"a": A_NS}
+        for family, element_name in (("major", "majorFont"), ("minor", "minorFont")):
+            container = root.find(
+                f".//{{{A_NS}}}fontScheme/{{{A_NS}}}{element_name}"
+            )
+            if container is None:
+                continue
+            latin = container.find(f"{{{A_NS}}}latin")
+            east_asia = container.find(f"{{{A_NS}}}ea")
+            complex_script = container.find(f"{{{A_NS}}}cs")
+            hans = container.xpath("./a:font[@script='Hans']", namespaces=namespaces)
+            latin_name = "" if latin is None else latin.get("typeface", "")
+            east_asia_name = (
+                "" if east_asia is None else east_asia.get("typeface", "")
+            ) or (hans[0].get("typeface", "") if hans else "")
+            complex_name = (
+                "" if complex_script is None else complex_script.get("typeface", "")
+            )
+            result[f"{family}HAnsi"] = latin_name
+            result[f"{family}Ascii"] = latin_name
+            result[f"{family}EastAsia"] = east_asia_name
+            result[f"{family}Bidi"] = complex_name
+    setattr(document, "_format_monograph_theme_fonts", result)
+    return result
+
+
+def rpr_effective_font(
+    document: Any, r_pr: Any, attribute: str
+) -> tuple[str | None, str | None]:
+    if r_pr is None:
+        return None, None
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        return None, None
+    explicit = r_fonts.get(qn(f"w:{attribute}"))
+    if explicit:
+        return explicit, "explicit"
+    theme_attribute = FONT_THEME_ATTRIBUTES[attribute]
+    theme_key = r_fonts.get(qn(f"w:{theme_attribute}"))
+    if not theme_key:
+        return None, None
+    resolved = theme_font_inventory(document).get(theme_key) or None
+    return resolved, f"theme:{theme_key}"
+
+
+def style_effective_font(
+    document: Any, style: Any, attribute: str
+) -> tuple[str | None, str | None]:
+    current = style
+    visited: set[str] = set()
+    while current is not None and current.style_id not in visited:
+        visited.add(current.style_id)
+        value, source = rpr_effective_font(document, current.element.rPr, attribute)
+        if value:
+            return value, f"style:{current.name}:{source}"
+        current = current.base_style
+    defaults = document.styles.element.find(
+        qn("w:docDefaults") + "/" + qn("w:rPrDefault") + "/" + qn("w:rPr")
+    )
+    value, source = rpr_effective_font(document, defaults, attribute)
+    return value, None if source is None else f"docDefaults:{source}"
+
+
+def run_effective_font(
+    document: Any, paragraph: Any, run: Any, attribute: str
+) -> tuple[str | None, str | None]:
+    value, source = rpr_effective_font(document, run._r.rPr, attribute)
+    if value:
+        return value, f"run:{source}"
+    run_style = run.style
+    if run_style is not None and run_style.name != "Default Paragraph Font":
+        value, source = style_effective_font(document, run_style, attribute)
+        if value:
+            return value, f"character-{source}"
+    return style_effective_font(document, paragraph.style, attribute)
+
+
 def _font_attributes(font_element: Any) -> Any:
     r_pr = font_element.get_or_add_rPr()
     r_fonts = r_pr.rFonts
@@ -517,6 +625,9 @@ def _set_font_attributes(font_element: Any, name: str, attributes: tuple[str, ..
     r_fonts = _font_attributes(font_element)
     for attr in attributes:
         r_fonts.set(qn(f"w:{attr}"), name)
+        theme_attribute = FONT_THEME_ATTRIBUTES.get(attr)
+        if theme_attribute:
+            r_fonts.attrib.pop(qn(f"w:{theme_attribute}"), None)
 
 
 def _set_east_asian_font(font_element: Any, name: str) -> None:
@@ -535,6 +646,8 @@ def apply_style_properties(style: Any, properties: dict[str, Any]) -> None:
         _set_font_attributes(
             style.element, properties["font_name_ascii"], ("ascii", "hAnsi")
         )
+        if "font_name_complex_script" not in properties:
+            _set_font_attributes(style.element, properties["font_name_ascii"], ("cs",))
     if "font_name_east_asia" in properties:
         _set_font_attributes(
             style.element, properties["font_name_east_asia"], ("eastAsia",)
@@ -690,13 +803,26 @@ def clear_controlled_direct_format(paragraph: Any, properties: dict[str, Any]) -
             if r_fonts is not None:
                 attrs = []
                 if "font_name" in properties:
-                    attrs.extend(("ascii", "hAnsi", "eastAsia", "cs"))
+                    attrs.extend(
+                        (
+                            "ascii",
+                            "hAnsi",
+                            "eastAsia",
+                            "cs",
+                            "asciiTheme",
+                            "hAnsiTheme",
+                            "eastAsiaTheme",
+                            "cstheme",
+                        )
+                    )
                 if "font_name_ascii" in properties:
-                    attrs.extend(("ascii", "hAnsi"))
+                    attrs.extend(("ascii", "hAnsi", "asciiTheme", "hAnsiTheme"))
+                    if "font_name_complex_script" not in properties:
+                        attrs.extend(("cs", "cstheme"))
                 if "font_name_east_asia" in properties:
-                    attrs.append("eastAsia")
+                    attrs.extend(("eastAsia", "eastAsiaTheme"))
                 if "font_name_complex_script" in properties:
-                    attrs.append("cs")
+                    attrs.extend(("cs", "cstheme"))
                 _drop_attributes(r_fonts, tuple(attrs))
         for key, tags in (
             ("font_size_pt", ("sz", "szCs")),
@@ -1002,11 +1128,23 @@ def _format_table_text(
                             str(properties["font_name_ascii"]),
                             ("ascii", "hAnsi"),
                         )
+                        if "font_name_complex_script" not in properties:
+                            _set_font_attributes(
+                                run._element,
+                                str(properties["font_name_ascii"]),
+                                ("cs",),
+                            )
                     if "font_name_east_asia" in properties:
                         _set_font_attributes(
                             run._element,
                             str(properties["font_name_east_asia"]),
                             ("eastAsia",),
+                        )
+                    if "font_name_complex_script" in properties:
+                        _set_font_attributes(
+                            run._element,
+                            str(properties["font_name_complex_script"]),
+                            ("cs",),
                         )
                     if "font_size_pt" in properties:
                         run.font.size = Pt(float(properties["font_size_pt"]))

@@ -64,6 +64,14 @@ When an approved target-application backend is available, call the finalizer wit
 
 For a whole book, use one source-bound structure map that covers the entire DOCX. A chapter trial is evidence for tuning the rules, not the final scope of the skill.
 
+## Fonts and themes
+
+- Treat a font rule as satisfied only when the effective Word font matches after resolving direct formatting, character style, paragraph style, base styles, document defaults, and the theme font scheme.
+- For every approved automatic font rule, write explicit `ascii`, `hAnsi`, `eastAsia`, and, when applicable, `cs` values on the controlled style. Remove conflicting `asciiTheme`, `hAnsiTheme`, `eastAsiaTheme`, and `cstheme` references from that style and from controlled direct formatting.
+- Do not change theme definitions globally. Unapproved roles, character styles, formula objects, symbols, hyperlinks, superscript/subscript, and other uncontrolled content retain their original formatting.
+- Inspect and report both the declared font and the resolved effective font. A theme-resolved mismatch, including DengXian/等线 or DengXian Light/等线 Light inherited from the source theme, is an audit failure rather than an acceptable fallback.
+- Apply the same deterministic check after target-software field refresh. Reject the refreshed copy when any approved effective font changes.
+
 ## Equations
 
 - Keep Word OMML and editable MathType/OLE equations editable and unchanged.
@@ -77,7 +85,7 @@ For a whole book, use one source-bound structure map that covers the entire DOCX
 
 Use real Word fields and linked numbering only when the profile and structure map explicitly approve them. Figure and table identifiers default to editable manual text, not `SEQ`; preserve existing `SEQ`, `REF`, and `PAGEREF` fields. A new caption conversion requires both an approved profile rule with `numbering_mode=seq_field` and `allow_automatic_renumbering=true`, plus an individually approved `convert_to_seq` map entry. Explicit markers are `[[TOC]]`, `[[PAGE]]`, `[[SEQ:name]]`, `[[REF:name]]`, and `[[PAGEREF:name]]`. Remove manual heading prefixes only when they match an approved, unambiguous pattern. Use the approved `chapter_start` for a chapter excerpt and validate progression across a whole book. Otherwise stop and ask.
 
-For the technical-textbook baseline, create separate TOC and body sections only through approved `pagination_sections`. Start each at decimal 1, continue numbering through later body and landscape sections, show the first-page number, and require both default/odd and even footers with PAGE fields. Never treat the number of PAGE fields as the physical page count.
+For the technical-textbook baseline, create separate TOC and body sections only through approved `pagination_sections`. Start each at decimal 1, continue numbering through later body and landscape sections, show the first-page number, and require both default/odd and even footers with exactly one editable PAGE field per page-number footer. Repeated application must not add another field. A footer containing publisher text, a logo, another field, or mixed payload is blocking QA; replace static digits only when the structure map explicitly approves them as derived page text. Never treat the number of PAGE fields as the physical page count.
 
 ## Render and verify
 
@@ -86,6 +94,8 @@ In full mode, run:
 `<python> scripts/render_docx.py <finalized.docx> --output-dir <render-directory> [--renderer <path>] [--target-software <name>] [--target-pdf <target-export.pdf>]`
 
 Open every generated page image at full readable size. Check every page for clipping, overlap, missing glyphs, broken tables, bad page breaks, misplaced figures, incorrect headers or footers, and visibly rasterized or missing equations. Fix, re-audit, and re-render after every layout-sensitive change.
+
+Classify every blank page as `intentional_recto_blank`, `removable_trailing_blank`, or `unexpected_blank`. An intentional recto blank preserves the approved next-odd-page structure and carries no visible page number; do not delete it. Remove a trailing blank only with approved stable cleanup evidence. Treat every other blank as a layout defect or blocking QA.
 
 Rendering with LibreOffice does not prove Microsoft Word layout compatibility. When an approved backend exports a target-software PDF, render that PDF with `--target-pdf`; it becomes target-layout evidence only after every page image is inspected. Otherwise record `target_layout_unverified` and require a final check in the target application.
 
@@ -114,7 +124,9 @@ Stop and ask the caller when:
 - content or protected-object integrity fails;
 - field migration is ambiguous;
 - field finalization changes authored content, protected objects, or the editable-field contract;
+- an approved automatic font does not match its resolved effective Word font before or after finalization;
 - an approved pagination map lacks a TOC/body boundary, an even PAGE footer, or contains an unapproved body restart;
+- a page-number footer contains multiple PAGE fields or non-page payload without explicit structural approval;
 - a table has unknown column roles, complex merges, floating objects, visible control marks, or landscape layout without individual approval;
 - a structure map does not match the current source fingerprint or is not approved;
 - rendering fails for a reason other than an unavailable renderer.

@@ -130,8 +130,72 @@ def _field_types(root: Any) -> set[str]:
     return result
 
 
-def _ensure_page_field(footer: Any, alignment: Any) -> bool:
-    if "PAGE" in _field_types(footer._element):
+def _page_field_count(root: Any) -> int:
+    def xpath(expression: str) -> list[Any]:
+        try:
+            return root.xpath(expression, namespaces=NS)
+        except TypeError:
+            return root.xpath(expression)
+
+    simple = xpath(
+        ".//w:fldSimple[starts-with(translate(normalize-space(@w:instr), 'page', 'PAGE'), 'PAGE')]"
+    )
+    complex_instructions = [
+        value
+        for value in xpath(".//w:instrText/text()")
+        if value.strip().upper().startswith("PAGE")
+    ]
+    return len(simple) + len(complex_instructions)
+
+
+def _page_only_footer(footer: Any) -> bool:
+    if footer._element.xpath(".//w:tbl | .//w:drawing | .//w:object | .//w:pict"):
+        return False
+    if _field_types(footer._element) - {"PAGE"}:
+        return False
+    visible = [
+        value.strip()
+        for value in footer._element.xpath(".//w:t/text()")
+        if value.strip()
+    ]
+    return all(value.isdigit() for value in visible)
+
+
+def _replace_with_page_field(footer: Any, alignment: Any) -> None:
+    paragraphs = list(footer.paragraphs)
+    paragraph = paragraphs[0] if paragraphs else footer.add_paragraph()
+    for extra in paragraphs[1:]:
+        footer._element.remove(extra._p)
+    for child in list(paragraph._p):
+        if child.tag != qn("w:pPr"):
+            paragraph._p.remove(child)
+    paragraph.alignment = alignment
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), "PAGE")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "1"
+    run.append(text)
+    field.append(run)
+    paragraph._p.append(field)
+
+
+def _ensure_page_field(
+    footer: Any, alignment: Any, *, replace_static_page_text: bool = False
+) -> bool:
+    page_fields = _page_field_count(footer._element)
+    page_only = _page_only_footer(footer)
+    if page_fields > 1:
+        if not page_only:
+            raise FormatMonographError(
+                "Footer contains multiple PAGE fields mixed with non-page content."
+            )
+        _replace_with_page_field(footer, alignment)
+        return True
+    if page_fields == 1:
+        if page_only and len(footer.paragraphs) != 1:
+            _replace_with_page_field(footer, alignment)
+            return True
         field = footer._element.xpath(
             ".//w:fldSimple[starts-with(translate(normalize-space(@w:instr), 'page', 'PAGE'), 'PAGE')]"
         )
@@ -143,6 +207,17 @@ def _ensure_page_field(footer: Any, alignment: Any) -> bool:
 
             Paragraph(paragraph, footer._element).alignment = alignment
         return False
+    visible = "".join(footer._element.xpath(".//w:t/text()")).strip()
+    has_non_text_payload = bool(
+        footer._element.xpath(".//w:tbl | .//w:drawing | .//w:object | .//w:pict")
+    )
+    if visible or has_non_text_payload:
+        if replace_static_page_text and visible.isdigit() and not has_non_text_payload:
+            _replace_with_page_field(footer, alignment)
+            return True
+        raise FormatMonographError(
+            "Footer contains non-page content; page fields require explicit QA."
+        )
     paragraph = next((item for item in footer.paragraphs if not item.text.strip()), None)
     if paragraph is None:
         paragraph = footer.add_paragraph()
@@ -158,15 +233,27 @@ def _ensure_page_field(footer: Any, alignment: Any) -> bool:
     return True
 
 
-def _ensure_visible_footers(document: Any, start_index: int) -> int:
+def _ensure_visible_footers(
+    document: Any, start_index: int, *, replace_static_page_text: bool = False
+) -> int:
     changed = 0
     document.settings.odd_and_even_pages_header_footer = True
     sections = list(document.sections)
     for index, section in enumerate(sections[start_index:], start=start_index):
         section.different_first_page_header_footer = False
-        changed += int(_ensure_page_field(section.footer, WD_ALIGN_PARAGRAPH.RIGHT))
         changed += int(
-            _ensure_page_field(section.even_page_footer, WD_ALIGN_PARAGRAPH.LEFT)
+            _ensure_page_field(
+                section.footer,
+                WD_ALIGN_PARAGRAPH.RIGHT,
+                replace_static_page_text=replace_static_page_text,
+            )
+        )
+        changed += int(
+            _ensure_page_field(
+                section.even_page_footer,
+                WD_ALIGN_PARAGRAPH.LEFT,
+                replace_static_page_text=replace_static_page_text,
+            )
         )
         if index > start_index:
             # A missing relationship inherits the prior footer. Existing independent
@@ -179,6 +266,8 @@ def apply_pagination_sections(
     document: Any,
     settings: dict[str, Any],
     resolver: Callable[[Any, dict[str, Any]], Any],
+    *,
+    replace_static_page_text: bool = False,
 ) -> dict[str, Any]:
     if not settings.get("approved"):
         return {}
@@ -210,7 +299,11 @@ def apply_pagination_sections(
         for sect_pr in sections[body_index + 1 :]:
             _set_page_numbering(sect_pr, None, number_format)
 
-    fields_added = _ensure_visible_footers(document, toc_index)
+    fields_added = _ensure_visible_footers(
+        document,
+        toc_index,
+        replace_static_page_text=replace_static_page_text,
+    )
     return {
         "toc_section": toc_index,
         "body_section": body_index,
@@ -262,14 +355,32 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                         referenced_parts.add(target)
             effective = dict(inherited)
             footer_fields = {}
+            footer_page_field_counts = {}
+            footer_non_page_payload = {}
             for kind, rel_id in effective.items():
                 target = relationships.get(rel_id)
                 if target and target in package.namelist():
-                    footer_fields[kind] = sorted(
-                        _field_types(etree.fromstring(package.read(target)))
+                    footer_root = etree.fromstring(package.read(target))
+                    field_types = _field_types(footer_root)
+                    footer_fields[kind] = sorted(field_types)
+                    footer_page_field_counts[kind] = _page_field_count(footer_root)
+                    visible = [
+                        value.strip()
+                        for value in footer_root.xpath(".//w:t/text()", namespaces=NS)
+                        if value.strip()
+                    ]
+                    footer_non_page_payload[kind] = bool(
+                        field_types - {"PAGE"}
+                        or footer_root.xpath(
+                            ".//w:tbl | .//w:drawing | .//w:object | .//w:pict",
+                            namespaces=NS,
+                        )
+                        or any(not value.isdigit() for value in visible)
                     )
                 else:
                     footer_fields[kind] = []
+                    footer_page_field_counts[kind] = 0
+                    footer_non_page_payload[kind] = False
             pg_num = sect_pr.find(qn("w:pgNumType"))
             sections.append(
                 {
@@ -284,6 +395,8 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                     "footer_references": explicit,
                     "effective_footer_references": effective,
                     "footer_fields": footer_fields,
+                    "footer_page_field_counts": footer_page_field_counts,
+                    "footer_non_page_payload": footer_non_page_payload,
                     "missing_page_footer_types": [
                         kind
                         for kind in ("default", "even")
@@ -359,6 +472,27 @@ def audit_pagination_sections(
                     "missing": item["missing_page_footer_types"],
                 }
             )
+        for kind in ("default", "even"):
+            count = item["footer_page_field_counts"].get(kind, 0)
+            if count != 1:
+                failures.append(
+                    {
+                        "section": item["index"],
+                        "property": "page_footer_field_count",
+                        "footer_type": kind,
+                        "expected": 1,
+                        "actual": count,
+                    }
+                )
+            if item["footer_non_page_payload"].get(kind, False):
+                failures.append(
+                    {
+                        "section": item["index"],
+                        "property": "page_footer_non_page_payload",
+                        "footer_type": kind,
+                        "expected": False,
+                    }
+                )
     if inventory["orphan_header_footer_parts"]:
         failures.append(
             {
