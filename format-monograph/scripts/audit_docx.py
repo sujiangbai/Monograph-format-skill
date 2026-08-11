@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -101,10 +102,19 @@ def style_value(document: Any, style: Any, key: str) -> Any:
             current = current.base_style
         return 0.0 if key in {"space_before_pt", "space_after_pt"} else None
     if key == "first_line_indent_chars":
-        p_pr = style.element.pPr
-        ind = None if p_pr is None else p_pr.find(qn("w:ind"))
-        value = None if ind is None else ind.get(qn("w:firstLineChars"))
-        return None if value is None else int(value) / 100
+        current = style
+        while current is not None:
+            p_pr = current.element.pPr
+            ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+            if ind is not None:
+                value = ind.get(qn("w:firstLineChars"))
+                if value is not None:
+                    return int(value) / 100
+                point_value = ind.get(qn("w:firstLine"))
+                if point_value == "0":
+                    return 0
+            current = current.base_style
+        return None
     if key == "line_spacing":
         value = pf.line_spacing
         return float(value) if isinstance(value, (int, float)) else None
@@ -248,6 +258,21 @@ def paragraph_effective_value(document: Any, paragraph: Any, key: str) -> Any:
         ind = None if p_pr is None else p_pr.find(qn("w:ind"))
         value = None if ind is None else ind.get(qn("w:firstLineChars"))
         direct = None if value is None else int(value) / 100
+        if direct is None and ind is not None and ind.get(qn("w:firstLine")) == "0":
+            direct = 0
+        if direct is None and paragraph.style is not None:
+            match = re.fullmatch(r"Heading ([1-4])", paragraph.style.name)
+            if match:
+                lvl = heading_numbering_level(document, int(match.group(1)) - 1)
+                lvl_ind = None if lvl is None else lvl.find(
+                    qn("w:pPr") + "/" + qn("w:ind")
+                )
+                if lvl_ind is not None:
+                    chars = lvl_ind.get(qn("w:firstLineChars"))
+                    if chars is not None:
+                        direct = int(chars) / 100
+                    elif lvl_ind.get(qn("w:firstLine")) == "0":
+                        direct = 0
     elif key == "line_spacing":
         value = pf.line_spacing
         direct = float(value) if isinstance(value, (int, float)) else None
@@ -610,6 +635,111 @@ def heading_numbering_start(document: Any) -> int | None:
     return None
 
 
+def heading_numbering_level(document: Any, level: int) -> Any | None:
+    style = document.styles[f"Heading {level + 1}"]
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    num = next(
+        (item for item in root.findall(qn("w:num")) if item.get(qn("w:numId")) == num_id),
+        None,
+    )
+    abstract_ref = None if num is None else num.find(qn("w:abstractNumId"))
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(qn("w:val"))
+    abstract = next(
+        (
+            item
+            for item in root.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        ),
+        None,
+    )
+    if abstract is None:
+        return None
+    return next(
+        (
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == str(level)
+        ),
+        None,
+    )
+
+
+def heading_numbering_format_failures(document: Any, levels: int) -> list[dict]:
+    failures = []
+    for level in range(levels):
+        style = document.styles[f"Heading {level + 1}"]
+        lvl = heading_numbering_level(document, level)
+        if lvl is None:
+            continue
+        ind = lvl.find(qn("w:pPr") + "/" + qn("w:ind"))
+        has_zero_indent = ind is not None and (
+            ind.get(qn("w:firstLineChars")) == "0"
+            or ind.get(qn("w:firstLine")) == "0"
+        )
+        if not has_zero_indent:
+            failures.append(
+                {
+                    "property": "heading_first_line_indent",
+                    "heading_level": level + 1,
+                    "expected": 0,
+                }
+            )
+        r_pr = lvl.find(qn("w:rPr"))
+        r_fonts = None if r_pr is None else r_pr.find(qn("w:rFonts"))
+        expected_fonts = {
+            "ascii": style_effective_font(document, style, "ascii")[0],
+            "hAnsi": style_effective_font(document, style, "ascii")[0],
+            "eastAsia": style_effective_font(document, style, "eastAsia")[0],
+            "cs": style_effective_font(document, style, "cs")[0],
+        }
+        actual_fonts = {
+            attribute: None if r_fonts is None else r_fonts.get(qn(f"w:{attribute}"))
+            for attribute in expected_fonts
+        }
+        if actual_fonts != expected_fonts:
+            failures.append(
+                {
+                    "property": "heading_numbering_fonts",
+                    "heading_level": level + 1,
+                    "expected": expected_fonts,
+                    "actual": actual_fonts,
+                }
+            )
+        expected_size = style_value(document, style, "font_size_pt")
+        size = None if r_pr is None else r_pr.find(qn("w:sz"))
+        actual_size = None if size is None else int(size.get(qn("w:val"))) / 2
+        if not close(actual_size, expected_size):
+            failures.append(
+                {
+                    "property": "heading_numbering_font_size_pt",
+                    "heading_level": level + 1,
+                    "expected": expected_size,
+                    "actual": actual_size,
+                }
+            )
+        expected_bold = style_value(document, style, "bold")
+        bold = None if r_pr is None else r_pr.find(qn("w:b"))
+        actual_bold = None if bold is None else bold.get(qn("w:val"), "1") not in {"0", "false"}
+        if actual_bold != expected_bold:
+            failures.append(
+                {
+                    "property": "heading_numbering_bold",
+                    "heading_level": level + 1,
+                    "expected": expected_bold,
+                    "actual": actual_bold,
+                }
+            )
+    return failures
+
+
 def audit_field_rule(
     document: Any,
     rule: dict,
@@ -649,6 +779,7 @@ def audit_field_rule(
                         "actual": "missing",
                     }
                 )
+        failures.extend(heading_numbering_format_failures(document, levels))
         if chapter_start is not None:
             actual_start = heading_numbering_start(document)
             if actual_start != chapter_start:

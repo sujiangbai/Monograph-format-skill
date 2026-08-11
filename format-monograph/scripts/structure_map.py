@@ -25,6 +25,8 @@ from _common import (
     FormatMonographError,
     _heading_prefix_pattern,
     _paragraph_text_without_field_results,
+    apply_style_properties,
+    clear_controlled_direct_format,
     content_fingerprint,
     ensure_paragraph_style,
 )
@@ -51,6 +53,15 @@ DRAWING_MARK_PATTERN = re.compile(
 BOOK_TITLE_STYLE = "Monograph Book Title"
 TOC_HEADING_STYLE = "Monograph TOC Heading"
 BLOCK_SPACER_STYLE = "Monograph Figure Table Spacer"
+DEFAULT_BOOK_TITLE_FORMAT = {
+    "font_name_east_asia": "黑体",
+    "font_name_ascii": "Times New Roman",
+    "font_name_complex_script": "Times New Roman",
+    "font_size_pt": 22,
+    "bold": True,
+    "alignment": "center",
+    "first_line_indent_chars": 0,
+}
 ARCHITECTURE_TERMS = ("建筑", "平面图", "立面图", "剖面图", "详图", "大样")
 CIVIL_ENGINEERING_TERMS = (
     "土木",
@@ -726,7 +737,8 @@ def _candidate_front_matter(
         ),
         "separate_title_page": True,
         "title_page_numbering": "none",
-        "toc_heading_text": "目录",
+        "book_title_format": dict(DEFAULT_BOOK_TITLE_FORMAT),
+        "toc_heading_text": "目    录",
         "insert_toc_heading_if_missing": True,
     }
 
@@ -1294,9 +1306,28 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Approved title page must be unnumbered and excluded from TOC pagination."
                     )
-                if front_matter.get("toc_heading_text") != "目录":
+                if front_matter.get("toc_heading_text") not in {"目录", "目    录"}:
                     raise FormatMonographError(
-                        "The technical-textbook TOC heading must be 目录."
+                        "The technical-textbook TOC heading must be 目录 or 目    录."
+                    )
+                book_title_format = front_matter.get("book_title_format", {})
+                if not isinstance(book_title_format, dict):
+                    raise FormatMonographError(
+                        "front_matter.book_title_format must be an object."
+                    )
+                unsupported_title_properties = set(book_title_format) - {
+                    "font_name_ascii",
+                    "font_name_east_asia",
+                    "font_name_complex_script",
+                    "font_size_pt",
+                    "bold",
+                    "alignment",
+                    "first_line_indent_chars",
+                }
+                if unsupported_title_properties:
+                    raise FormatMonographError(
+                        "Unsupported book title format properties: "
+                        + ", ".join(sorted(unsupported_title_properties))
                     )
                 if front_matter.get("insert_toc_heading_if_missing") is not True:
                     raise FormatMonographError(
@@ -1850,12 +1881,19 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     if not settings.get("approved"):
         return 0
     title = resolve_paragraph_locator(document, settings["book_title"])
-    title.style = _special_paragraph_style(
-        document, BOOK_TITLE_STYLE, size_pt=18, bold=True
+    title_format = dict(DEFAULT_BOOK_TITLE_FORMAT)
+    title_format.update(settings.get("book_title_format", {}))
+    title_style = _special_paragraph_style(
+        document,
+        BOOK_TITLE_STYLE,
+        size_pt=float(title_format["font_size_pt"]),
+        bold=bool(title_format["bold"]),
     )
+    apply_style_properties(title_style, title_format)
+    title.style = title_style
+    clear_controlled_direct_format(title, title_format)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    for run in title.runs:
-        run.bold = True
+    title.paragraph_format.first_line_indent = Pt(0)
 
     toc = resolve_paragraph_locator(
         document, structure_map["pagination_sections"]["toc_start"]
@@ -1864,7 +1902,13 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     toc_heading = None
     if previous is not None and previous.tag == qn("w:p"):
         candidate = Paragraph(previous, document)
-        if candidate.text.strip() == settings["toc_heading_text"]:
+        if (
+            candidate.text.strip() == settings["toc_heading_text"]
+            or (
+                candidate.style is not None
+                and candidate.style.name == TOC_HEADING_STYLE
+            )
+        ):
             toc_heading = candidate
     inserted = False
     if toc_heading is None:
@@ -1873,10 +1917,13 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
         toc_heading = Paragraph(element, document)
         toc_heading.add_run(settings["toc_heading_text"])
         inserted = True
+    elif toc_heading.text != settings["toc_heading_text"]:
+        toc_heading.text = settings["toc_heading_text"]
     toc_heading.style = _special_paragraph_style(
         document, TOC_HEADING_STYLE, size_pt=18, bold=True
     )
     toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    toc_heading.paragraph_format.first_line_indent = Pt(0)
     for run in toc_heading.runs:
         run.bold = True
     setattr(document, "_format_monograph_book_title", title)

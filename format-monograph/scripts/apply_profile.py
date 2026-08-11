@@ -19,6 +19,7 @@ from _common import (
     load_document,
     profile_font_resolutions,
     protected_object_manifest,
+    synchronize_heading_numbering_format,
     summarize_rule,
 )
 from validate_profile import validate
@@ -306,6 +307,7 @@ def main() -> int:
         document = load_document(args.input)
         changes: list[dict] = []
         manual: list[dict] = []
+        heading_numbering_levels = 0
 
         if structure_map:
             prime_structure_map_locators(document, structure_map)
@@ -321,6 +323,13 @@ def main() -> int:
                 manual.append(rule)
                 continue
             kind = rule["selector"]["kind"]
+            if kind == "field_role" and rule["properties"].get(
+                "rebuild_heading_numbering"
+            ):
+                heading_numbering_levels = max(
+                    heading_numbering_levels,
+                    int(rule["properties"].get("heading_levels", 4)),
+                )
             paragraph_targets = None
             table_targets = None
             chapter_start = None
@@ -349,6 +358,9 @@ def main() -> int:
                     "properties": rule["properties"],
                 }
             )
+
+        if heading_numbering_levels:
+            synchronize_heading_numbering_format(document, heading_numbering_levels)
 
         if structure_map and finalize_pagination_sections(
             document,

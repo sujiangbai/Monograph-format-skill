@@ -14,7 +14,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from lxml import etree
 
-from _common import NS, FormatMonographError
+from _common import NS, FormatMonographError, style_effective_font
 
 
 FOOTER_PART = re.compile(r"word/footer\d+\.xml$")
@@ -711,10 +711,49 @@ def audit_pagination_sections(
             failures.append(
                 {"property": "book_title_style", "expected": "Monograph Book Title"}
             )
-        if title_paragraph.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+        title_alignment = title_paragraph.alignment
+        if title_alignment is None and title_paragraph.style is not None:
+            title_alignment = title_paragraph.style.paragraph_format.alignment
+        if title_alignment != WD_ALIGN_PARAGRAPH.CENTER:
             failures.append(
                 {"property": "book_title_alignment", "expected": "center"}
             )
+        expected_title_format = {
+            "font_name_east_asia": "黑体",
+            "font_name_ascii": "Times New Roman",
+            "font_size_pt": 22,
+            "bold": True,
+        }
+        expected_title_format.update(front_matter.get("book_title_format", {}))
+        title_style = title_paragraph.style
+        if title_style is not None:
+            actual_ascii = style_effective_font(document, title_style, "ascii")[0]
+            actual_east_asia = style_effective_font(document, title_style, "eastAsia")[0]
+            if actual_ascii != expected_title_format["font_name_ascii"]:
+                failures.append(
+                    {
+                        "property": "book_title_font_name_ascii",
+                        "expected": expected_title_format["font_name_ascii"],
+                        "actual": actual_ascii,
+                    }
+                )
+            if actual_east_asia != expected_title_format["font_name_east_asia"]:
+                failures.append(
+                    {
+                        "property": "book_title_font_name_east_asia",
+                        "expected": expected_title_format["font_name_east_asia"],
+                        "actual": actual_east_asia,
+                    }
+                )
+            actual_size = None if title_style.font.size is None else title_style.font.size.pt
+            if actual_size != float(expected_title_format["font_size_pt"]):
+                failures.append(
+                    {
+                        "property": "book_title_font_size_pt",
+                        "expected": float(expected_title_format["font_size_pt"]),
+                        "actual": actual_size,
+                    }
+                )
         style_bold = (
             title_paragraph.style is not None
             and title_paragraph.style.font.bold is True

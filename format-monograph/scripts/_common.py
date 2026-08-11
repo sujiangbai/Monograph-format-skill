@@ -1578,6 +1578,131 @@ def _next_numbering_id(root: Any, tag: str, attribute: str) -> int:
     return max(values, default=0) + 1
 
 
+def _style_scalar(style: Any, attribute: str) -> Any:
+    current = style
+    while current is not None:
+        value = getattr(current.font, attribute)
+        if value is not None:
+            return value
+        current = current.base_style
+    return None
+
+
+def _heading_numbering_run_properties(document: Any, style: Any) -> Any:
+    r_pr = OxmlElement("w:rPr")
+    r_fonts = OxmlElement("w:rFonts")
+    for attribute in ("ascii", "hAnsi", "eastAsia", "cs"):
+        effective_attribute = "ascii" if attribute == "hAnsi" else attribute
+        value = style_effective_font(document, style, effective_attribute)[0]
+        if value:
+            r_fonts.set(qn(f"w:{attribute}"), value)
+    if r_fonts.attrib:
+        r_pr.append(r_fonts)
+
+    size = _style_scalar(style, "size")
+    if size is not None:
+        half_points = str(int(round(size.pt * 2)))
+        for tag in ("sz", "szCs"):
+            element = OxmlElement(f"w:{tag}")
+            element.set(qn("w:val"), half_points)
+            r_pr.append(element)
+
+    bold = _style_scalar(style, "bold")
+    if bold is not None:
+        for tag in ("b", "bCs"):
+            element = OxmlElement(f"w:{tag}")
+            element.set(qn("w:val"), "1" if bold else "0")
+            r_pr.append(element)
+    return r_pr
+
+
+def _zero_heading_first_line_indent(document: Any, levels: int) -> None:
+    controlled = ("firstLine", "firstLineChars", "hanging", "hangingChars")
+    for level in range(levels):
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        ind = style.element.get_or_add_pPr().get_or_add_ind()
+        ind.set(qn("w:firstLine"), "0")
+        ind.set(qn("w:firstLineChars"), "0")
+        for attribute in ("hanging", "hangingChars"):
+            ind.attrib.pop(qn(f"w:{attribute}"), None)
+        for paragraph in iter_document_paragraphs(document):
+            if paragraph.style is None or paragraph.style.name != style.name:
+                continue
+            p_pr = paragraph._p.pPr
+            direct_ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+            if direct_ind is None:
+                continue
+            for attribute in controlled:
+                direct_ind.attrib.pop(qn(f"w:{attribute}"), None)
+            if not direct_ind.attrib and len(direct_ind) == 0:
+                p_pr.remove(direct_ind)
+
+
+def _numbering_level_for_style(document: Any, level: int) -> Any | None:
+    style = ensure_paragraph_style(document, f"Heading {level + 1}")
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    num = next(
+        (item for item in root.findall(qn("w:num")) if item.get(qn("w:numId")) == num_id),
+        None,
+    )
+    abstract_ref = None if num is None else num.find(qn("w:abstractNumId"))
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(qn("w:val"))
+    abstract = next(
+        (
+            item
+            for item in root.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        ),
+        None,
+    )
+    if abstract is None:
+        return None
+    return next(
+        (
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == str(level)
+        ),
+        None,
+    )
+
+
+def synchronize_heading_numbering_format(document: Any, levels: int) -> int:
+    _zero_heading_first_line_indent(document, levels)
+    changed = 0
+    for level in range(levels):
+        lvl = _numbering_level_for_style(document, level)
+        if lvl is None:
+            continue
+        p_pr = lvl.find(qn("w:pPr"))
+        if p_pr is None:
+            p_pr = OxmlElement("w:pPr")
+            lvl.append(p_pr)
+        ind = p_pr.find(qn("w:ind"))
+        if ind is None:
+            ind = OxmlElement("w:ind")
+            p_pr.append(ind)
+        ind.set(qn("w:firstLine"), "0")
+        ind.set(qn("w:firstLineChars"), "0")
+        for attribute in ("hanging", "hangingChars"):
+            ind.attrib.pop(qn(f"w:{attribute}"), None)
+        previous = lvl.find(qn("w:rPr"))
+        if previous is not None:
+            lvl.remove(previous)
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        lvl.append(_heading_numbering_run_properties(document, style))
+        changed += 1
+    return changed
+
+
 def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1) -> int:
     if not 1 <= levels <= 4:
         raise FormatMonographError("heading_levels must be between 1 and 4.")
@@ -1593,6 +1718,7 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
     multi.set(qn("w:val"), "multilevel")
     abstract.append(multi)
 
+    _zero_heading_first_line_indent(document, levels)
     for level in range(levels):
         lvl = OxmlElement("w:lvl")
         lvl.set(qn("w:ilvl"), str(level))
@@ -1613,6 +1739,14 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
         suff = OxmlElement("w:suff")
         suff.set(qn("w:val"), "space")
         lvl.extend([start, num_fmt, p_style, lvl_text, suff])
+        lvl_p_pr = OxmlElement("w:pPr")
+        lvl_ind = OxmlElement("w:ind")
+        lvl_ind.set(qn("w:firstLine"), "0")
+        lvl_ind.set(qn("w:firstLineChars"), "0")
+        lvl_p_pr.append(lvl_ind)
+        lvl.append(lvl_p_pr)
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        lvl.append(_heading_numbering_run_properties(document, style))
         abstract.append(lvl)
     root.insert(0, abstract)
 
@@ -1646,6 +1780,7 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
         number = OxmlElement("w:numId")
         number.set(qn("w:val"), str(num_id))
         num_pr.extend([ilvl, number])
+    synchronize_heading_numbering_format(document, levels)
     return levels
 
 

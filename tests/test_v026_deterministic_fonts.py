@@ -19,13 +19,15 @@ sys.path.insert(0, str(SCRIPTS))
 
 from _common import (  # noqa: E402
     FormatMonographError,
+    apply_field_properties,
+    apply_style_properties,
     apply_style_rule_to_paragraphs,
     apply_table_properties,
     ensure_paragraph_style,
     style_effective_font,
     style_name_for_selector,
 )
-from audit_docx import audit_paragraph_rule, audit_table_rule  # noqa: E402
+from audit_docx import audit_field_rule, audit_paragraph_rule, audit_table_rule  # noqa: E402
 from docx_pagination import (  # noqa: E402
     apply_pagination_sections,
     audit_pagination_sections,
@@ -796,7 +798,14 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertEqual(source_inventory, output_inventory)
         reloaded = Document(output)
         self.assertEqual("Monograph Book Title", reloaded.paragraphs[0].style.name)
-        self.assertTrue(all(run.bold for run in reloaded.paragraphs[0].runs if run.text))
+        title_style = reloaded.paragraphs[0].style
+        self.assertTrue(title_style.font.bold)
+        self.assertEqual(22, title_style.font.size.pt)
+        self.assertEqual(
+            "Times New Roman",
+            style_effective_font(reloaded, title_style, "ascii")[0],
+        )
+        self.assertEqual("黑体", style_effective_font(reloaded, title_style, "eastAsia")[0])
         self.assertEqual(
             1,
             sum(
@@ -818,6 +827,7 @@ class V026DeterministicFontTests(unittest.TestCase):
             if paragraph.style is not None
             and paragraph.style.name == "Monograph TOC Heading"
         )
+        self.assertEqual("目    录", toc_heading.text)
         self.assertIs(False, toc_heading.paragraph_format.page_break_before)
         self.assertEqual(
             1,
@@ -854,6 +864,54 @@ class V026DeterministicFontTests(unittest.TestCase):
                 shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
                 self.assertIsNotNone(shading)
                 self.assertEqual("auto", shading.get(qn("w:fill")))
+
+    def test_heading_numbering_inherits_mixed_fonts_size_weight_and_zero_indent(self) -> None:
+        document = Document()
+        specifications = (
+            ("Heading 1", "黑体", "Times New Roman", 18),
+            ("Heading 2", "黑体", "Times New Roman", 14),
+            ("Heading 3", "黑体", "Times New Roman", 12),
+            ("Heading 4", "宋体", "Times New Roman", 10.5),
+        )
+        for style_name, east_asia, ascii_name, size in specifications:
+            style = ensure_paragraph_style(document, style_name)
+            apply_style_properties(
+                style,
+                {
+                    "font_name_east_asia": east_asia,
+                    "font_name_ascii": ascii_name,
+                    "font_name_complex_script": ascii_name,
+                    "font_size_pt": size,
+                    "bold": True,
+                    "first_line_indent_chars": 2,
+                },
+            )
+            paragraph = document.add_paragraph("Synthetic heading", style=style_name)
+            paragraph.paragraph_format.first_line_indent = Pt(18)
+
+        properties = {
+            "rebuild_heading_numbering": True,
+            "heading_levels": 4,
+            "chapter_start": 4,
+        }
+        apply_field_properties(document, properties)
+        output = self.root / "heading-numbering-format.docx"
+        document.save(output)
+        reloaded = Document(output)
+
+        self.assertFalse(
+            audit_field_rule(
+                reloaded,
+                {"properties": properties},
+                chapter_start=4,
+                path=output,
+            )
+        )
+        for paragraph in reloaded.paragraphs:
+            self.assertIsNone(paragraph.paragraph_format.first_line_indent)
+        for style_name, _east_asia, _ascii_name, _size in specifications:
+            ind = reloaded.styles[style_name].element.pPr.find(qn("w:ind"))
+            self.assertEqual("0", ind.get(qn("w:firstLineChars")))
 
 
 if __name__ == "__main__":

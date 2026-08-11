@@ -84,7 +84,7 @@ An in-cell table caption remains in its first row by default. Move it only with 
 
 Each table has `kind`: `data`, `layout`, `callout`, or `unknown`. Only approved `data` tables receive table rules. Use `caption_row`, `header_rows`, `repeat_header_rows`, and `prevent_normal_row_split` to authorize exact rows. Layout tables, image containers, teaching boxes, and unknown tables remain unchanged.
 
-For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered title page, and insertion of the derived `目录` heading before the main TOC. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
+For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered title page, an optional `book_title_format`, and insertion of the derived `目    录` heading (four ASCII spaces) before the main TOC. Legacy approved maps using `目录` remain readable. The `TOC` field does not create its own heading; the skill inserts and maintains the separate derived paragraph. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
 
 ### Trailing sections
 
