@@ -13,6 +13,8 @@ from typing import Any
 
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.shared import Pt
 from docx.text.paragraph import Paragraph
 from lxml import etree
 
@@ -46,6 +48,9 @@ CAPTION_IDENTIFIER_PATTERN = re.compile(
 DRAWING_MARK_PATTERN = re.compile(
     r"(?:^|\s)\d+(?:-\d+)+\s*(?:剖面|断面|截面|节点|详图|大样|立面|平面)"
 )
+BOOK_TITLE_STYLE = "Monograph Book Title"
+TOC_HEADING_STYLE = "Monograph TOC Heading"
+BLOCK_SPACER_STYLE = "Monograph Figure Table Spacer"
 ARCHITECTURE_TERMS = ("建筑", "平面图", "立面图", "剖面图", "详图", "大样")
 CIVIL_ENGINEERING_TERMS = (
     "土木",
@@ -376,6 +381,19 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
                 cache[key] = paragraph
                 verified.add(key)
     if structure_map.get("schema_version") == "1.4":
+        front_matter = structure_map.get("front_matter", {})
+        if front_matter.get("approved"):
+            locator = front_matter.get("book_title")
+            if isinstance(locator, dict):
+                paragraph = resolve_paragraph_locator(document, locator)
+                expected = locator.get("text_sha256")
+                if expected and text_sha256(paragraph.text) != expected:
+                    raise FormatMonographError(
+                        f"Book-title locator hash mismatch at {_locator_key(locator)}."
+                    )
+                key = _locator_key(locator)
+                cache[key] = paragraph
+                verified.add(key)
         pagination = structure_map.get("pagination_sections", {})
         if pagination.get("approved"):
             for name in ("toc_start", "body_start"):
@@ -681,6 +699,45 @@ def _candidate_pagination_sections(
         "odd_position": "outer_right",
         "even_position": "outer_left",
         "show_on_first_page": True,
+    }
+
+
+def _candidate_front_matter(
+    document: Any, pagination: dict[str, Any], body_values: list[str]
+) -> dict[str, Any]:
+    toc_locator = pagination.get("toc_start")
+    toc_index = (
+        int(toc_locator["paragraph"])
+        if isinstance(toc_locator, dict) and "paragraph" in toc_locator
+        else None
+    )
+    title_index = next(
+        (
+            index
+            for index, value in enumerate(body_values)
+            if value.strip() and (toc_index is None or index < toc_index)
+        ),
+        None,
+    )
+    return {
+        "approved": False,
+        "book_title": (
+            _body_locator(title_index, body_values) if title_index is not None else None
+        ),
+        "separate_title_page": True,
+        "title_page_numbering": "none",
+        "toc_heading_text": "目录",
+        "insert_toc_heading_if_missing": True,
+    }
+
+
+def _candidate_block_spacing() -> dict[str, Any]:
+    return {
+        "approved": False,
+        "mode": "actual_blank_paragraph",
+        "blank_lines": 1,
+        "same_page_only": True,
+        "after": ["approved_data_table", "approved_figure_caption"],
     }
 
 
@@ -1018,6 +1075,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
             }
         )
 
+    pagination_sections = _candidate_pagination_sections(document, headings)
     return {
         "schema_version": "1.4",
         "status": "candidate",
@@ -1036,7 +1094,11 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         "captions": captions,
         "tables": tables,
         "pagination_groups": _candidate_pagination_groups(document, captions, body_values),
-        "pagination_sections": _candidate_pagination_sections(document, headings),
+        "front_matter": _candidate_front_matter(
+            document, pagination_sections, body_values
+        ),
+        "block_spacing": _candidate_block_spacing(),
+        "pagination_sections": pagination_sections,
         "trailing_empty_sections": _trailing_empty_sections(document),
         "conflicts": [],
     }
@@ -1218,6 +1280,42 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                         "Approved pagination group requires an anchor locator."
                     )
         if value.get("schema_version") == "1.4":
+            front_matter = value.get("front_matter", {})
+            if front_matter.get("approved"):
+                if not isinstance(front_matter.get("book_title"), dict):
+                    raise FormatMonographError(
+                        "Approved front_matter requires a book_title locator."
+                    )
+                if front_matter.get("separate_title_page") is not True:
+                    raise FormatMonographError(
+                        "Approved book title must occupy a separate page."
+                    )
+                if front_matter.get("title_page_numbering") != "none":
+                    raise FormatMonographError(
+                        "Approved title page must be unnumbered and excluded from TOC pagination."
+                    )
+                if front_matter.get("toc_heading_text") != "目录":
+                    raise FormatMonographError(
+                        "The technical-textbook TOC heading must be 目录."
+                    )
+                if front_matter.get("insert_toc_heading_if_missing") is not True:
+                    raise FormatMonographError(
+                        "Approved front_matter must insert a missing TOC heading."
+                    )
+            block_spacing = value.get("block_spacing", {})
+            if block_spacing.get("approved"):
+                if block_spacing.get("mode") != "actual_blank_paragraph":
+                    raise FormatMonographError(
+                        "Approved figure/table spacing requires an actual blank paragraph."
+                    )
+                if block_spacing.get("blank_lines") != 1:
+                    raise FormatMonographError(
+                        "Approved figure/table spacing requires exactly one blank line."
+                    )
+                if block_spacing.get("same_page_only") is not True:
+                    raise FormatMonographError(
+                        "Figure/table blank spacing must be removed at a page boundary."
+                    )
             pagination = value.get("pagination_sections", {})
             if pagination.get("approved"):
                 required = {
@@ -1278,8 +1376,21 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     "preserve",
                     "three_line",
                     "full_grid",
+                    "technical_textbook",
                 }:
                     raise FormatMonographError("Invalid approved table border preset.")
+                header_rows = sorted({int(row) for row in table.get("header_rows", [])})
+                if visual.get("border_preset") == "technical_textbook":
+                    if not header_rows:
+                        raise FormatMonographError(
+                            "Technical-textbook borders require approved header rows."
+                        )
+                    if header_rows != list(
+                        range(header_rows[0], header_rows[-1] + 1)
+                    ):
+                        raise FormatMonographError(
+                            "Multi-row table headers must be contiguous."
+                        )
                 if visual.get("orientation") == "landscape" and visual.get(
                     "landscape_approved"
                 ) is not True:
@@ -1318,6 +1429,12 @@ def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> 
         if entry.get("table_text_sha256") and _table_text_hash(document.tables[index]) != entry["table_text_sha256"]:
             raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
     pagination = structure_map.get("pagination_sections", {})
+    front_matter = structure_map.get("front_matter", {})
+    if front_matter.get("approved"):
+        title = resolve_paragraph_locator(document, front_matter["book_title"])
+        expected = front_matter["book_title"].get("text_sha256")
+        if expected and text_sha256(title.text) != expected:
+            raise FormatMonographError("Approved book-title locator hash mismatch.")
     if pagination.get("approved"):
         starts = [
             resolve_paragraph_locator(document, pagination[name])
@@ -1716,6 +1833,125 @@ def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> in
     return changed
 
 
+def _special_paragraph_style(
+    document: Any, name: str, *, size_pt: float, bold: bool
+) -> Any:
+    style = ensure_paragraph_style(document, name)
+    style.base_style = document.styles["Normal"]
+    style.font.size = Pt(size_pt)
+    style.font.bold = bold
+    style.paragraph_format.space_before = Pt(0)
+    style.paragraph_format.space_after = Pt(0)
+    return style
+
+
+def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
+    settings = structure_map.get("front_matter", {})
+    if not settings.get("approved"):
+        return 0
+    title = resolve_paragraph_locator(document, settings["book_title"])
+    title.style = _special_paragraph_style(
+        document, BOOK_TITLE_STYLE, size_pt=18, bold=True
+    )
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in title.runs:
+        run.bold = True
+
+    toc = resolve_paragraph_locator(
+        document, structure_map["pagination_sections"]["toc_start"]
+    )
+    previous = toc._p.getprevious()
+    toc_heading = None
+    if previous is not None and previous.tag == qn("w:p"):
+        candidate = Paragraph(previous, document)
+        if candidate.text.strip() == settings["toc_heading_text"]:
+            toc_heading = candidate
+    inserted = False
+    if toc_heading is None:
+        element = OxmlElement("w:p")
+        toc._p.addprevious(element)
+        toc_heading = Paragraph(element, document)
+        toc_heading.add_run(settings["toc_heading_text"])
+        inserted = True
+    toc_heading.style = _special_paragraph_style(
+        document, TOC_HEADING_STYLE, size_pt=18, bold=True
+    )
+    toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in toc_heading.runs:
+        run.bold = True
+    setattr(document, "_format_monograph_book_title", title)
+    setattr(document, "_format_monograph_toc_heading", toc_heading)
+    return 1 + int(inserted)
+
+
+def _new_block_spacer(document: Any) -> Any:
+    style = _special_paragraph_style(
+        document, BLOCK_SPACER_STYLE, size_pt=10.5, bold=False
+    )
+    style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    style.paragraph_format.line_spacing = Pt(18)
+    paragraph = OxmlElement("w:p")
+    p_pr = OxmlElement("w:pPr")
+    p_style = OxmlElement("w:pStyle")
+    p_style.set(qn("w:val"), style.style_id)
+    p_pr.append(p_style)
+    paragraph.append(p_pr)
+    return paragraph
+
+
+def _is_block_spacer(element: Any) -> bool:
+    return bool(
+        element is not None
+        and element.tag == qn("w:p")
+        and element.xpath(f"./w:pPr/w:pStyle[@w:val='{BLOCK_SPACER_STYLE.replace(' ', '')}']")
+    )
+
+
+def _starts_new_page(element: Any) -> bool:
+    if element is None or element.tag != qn("w:p"):
+        return False
+    sect_pr = element.find("./w:pPr/w:sectPr", namespaces=NS)
+    if sect_pr is not None:
+        section_type = sect_pr.find(qn("w:type"))
+        return section_type is None or section_type.get(qn("w:val")) != "continuous"
+    return element.find("./w:pPr/w:pageBreakBefore", namespaces=NS) is not None
+
+
+def _apply_block_spacing(document: Any, structure_map: dict[str, Any]) -> int:
+    settings = structure_map.get("block_spacing", {})
+    if not settings.get("approved"):
+        return 0
+    body = document.element.body
+    targets: list[Any] = []
+    requested = set(settings.get("after", []))
+    if "approved_data_table" in requested:
+        targets.extend(
+            table._tbl
+            for table, _ in approved_data_tables(document, structure_map)
+            if table._tbl.getparent() is body
+        )
+    if "approved_figure_caption" in requested:
+        for group in structure_map.get("pagination_groups", []):
+            if not group.get("approved") or group.get("kind") != "figure_with_caption":
+                continue
+            caption = resolve_paragraph_locator(document, group["caption"])
+            if caption._p.getparent() is body:
+                targets.append(caption._p)
+
+    changed = 0
+    for target in sorted(set(targets), key=lambda item: list(body).index(item), reverse=True):
+        following = target.getnext()
+        if following is None or following.tag == qn("w:sectPr"):
+            continue
+        if _is_block_spacer(following):
+            continue
+        if _starts_new_page(following):
+            continue
+        target.addnext(_new_block_spacer(document))
+        changed += 1
+    return changed
+
+
 def _section_properties_for_body_child(document: Any, child: Any) -> Any:
     children = list(document.element.body)
     position = children.index(child)
@@ -1935,15 +2171,18 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
     trailing_targets = _apply_trailing_sections(document, structure_map)
     orphan_parts = _cleanup_orphan_header_footer_relationships(document)
     toc_targets = _apply_toc_ranges(document, structure_map)
+    front_matter_targets = _apply_front_matter(document, structure_map)
     heading_targets = _apply_headings(document, structure_map)
     outline_targets = _apply_outline_cleanup(document, structure_map)
     table_targets = _apply_tables(document, structure_map)
     caption_targets = _apply_captions(document, structure_map)
     pagination_targets = _apply_pagination_groups(document, structure_map)
+    spacing_targets = _apply_block_spacing(document, structure_map)
     pagination_sections = apply_pagination_sections(
         document,
         structure_map.get("pagination_sections", {}),
         resolve_paragraph_locator,
+        front_matter=structure_map.get("front_matter", {}),
         replace_static_page_text=any(
             entry.get("approved_delete")
             and entry.get("evidence", {}).get("approved_derived_footer_only")
@@ -1963,6 +2202,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
             caption_actions[action] = caption_actions.get(action, 0) + 1
     changes = [
         {"kind": "structure_toc", "targets": toc_targets},
+        {"kind": "structure_front_matter", "targets": front_matter_targets},
         {"kind": "structure_headings", "targets": heading_targets},
         {"kind": "structure_outline_cleanup", "targets": outline_targets},
         {"kind": "structure_tables", "targets": table_targets},
@@ -1972,6 +2212,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
             "actions": caption_actions,
         },
         {"kind": "structure_pagination", "targets": pagination_targets},
+        {"kind": "structure_block_spacing", "targets": spacing_targets},
         {
             "kind": "structure_trailing_sections",
             "targets": trailing_targets,
@@ -2169,6 +2410,21 @@ def _pagination_boundary_paragraphs(
         )
     if not pagination.get("approved"):
         return result
+    if structure_map.get("front_matter", {}).get("approved"):
+        toc_style = TOC_HEADING_STYLE.replace(" ", "")
+        toc_headings = root.xpath(
+            f"/w:document/w:body/w:p[w:pPr/w:pStyle[@w:val='{toc_style}']]",
+            namespaces=NS,
+        )
+        if len(toc_headings) == 1:
+            previous = toc_headings[0].getprevious()
+            if (
+                previous is not None
+                and previous.tag == qn("w:p")
+                and previous.find("./w:pPr/w:sectPr", namespaces=NS) is not None
+                and not _paragraph_text_without_field_results(previous)
+            ):
+                result.add(previous)
     body_locator = pagination.get("body_start", {})
     expected = body_locator.get("text_sha256")
     if not expected:
@@ -2346,6 +2602,10 @@ def structure_content_inventory(
     has_migrated_captions = bool(
         migrated_caption_hashes - manual_migrated_caption_hashes
     )
+    approved_front_matter = structure_map.get("front_matter", {}).get("approved")
+    approved_block_spacing = structure_map.get("block_spacing", {}).get("approved")
+    toc_heading_style_id = TOC_HEADING_STYLE.replace(" ", "")
+    block_spacer_style_id = BLOCK_SPACER_STYLE.replace(" ", "")
     result: dict[str, list[str]] = {}
     with zipfile.ZipFile(path) as package:
         document_root = etree.fromstring(package.read("word/document.xml"))
@@ -2379,6 +2639,11 @@ def structure_content_inventory(
             values = []
             body_index = -1
             for paragraph in root.xpath(".//w:p", namespaces=NS):
+                style_ids = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
+                if approved_front_matter and style_ids == [toc_heading_style_id]:
+                    continue
+                if approved_block_spacing and style_ids == [block_spacer_style_id]:
+                    continue
                 direct_body_paragraph = (
                     name == "word/document.xml"
                     and paragraph.getparent() is not None

@@ -354,6 +354,7 @@ def main() -> int:
             document,
             structure_map.get("pagination_sections", {}),
             resolve_paragraph_locator,
+            front_matter=structure_map.get("front_matter", {}),
         ):
             _changes = getattr(document, "_format_monograph_derived_changes", [])
             _changes.append(

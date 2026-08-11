@@ -1036,7 +1036,95 @@ def _set_border(element: Any, name: str, *, style: str, size: int = 4) -> None:
     border.set(qn("w:color"), "000000")
 
 
-def _set_table_borders(table: Any, preset: str, header_rows: list[int]) -> None:
+def _cell_borders(cell: Any) -> Any:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = tc_pr.find(qn("w:tcBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tcBorders")
+        tc_pr.append(borders)
+    return borders
+
+
+def _unique_row_cells(row: Any) -> list[Any]:
+    seen: set[int] = set()
+    result = []
+    for cell in row.cells:
+        identity = id(cell._tc)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(cell)
+    return result
+
+
+def _clear_cell_shading(cell: Any) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
+    shading.set(qn("w:fill"), "auto")
+
+
+def _set_technical_textbook_borders(
+    table: Any, borders: Any, header_rows: list[int], caption_row: int | None
+) -> None:
+    for row in table.rows:
+        for cell in _unique_row_cells(row):
+            _clear_cell_shading(cell)
+
+    has_caption_row = (
+        caption_row is not None and 0 <= caption_row < len(table.rows)
+    )
+    _set_border(
+        borders,
+        "top",
+        style="nil" if has_caption_row else "single",
+        size=0 if has_caption_row else 8,
+    )
+    _set_border(borders, "bottom", style="single", size=8)
+    for name in ("left", "right", "insideH"):
+        _set_border(borders, name, style="nil", size=0)
+    _set_border(borders, "insideV", style="single", size=4)
+
+    if has_caption_row:
+        for cell in _unique_row_cells(table.rows[caption_row]):
+            _set_border(_cell_borders(cell), "top", style="nil", size=0)
+            _set_border(_cell_borders(cell), "bottom", style="single", size=8)
+
+    valid_headers = sorted(
+        {index for index in header_rows if 0 <= index < len(table.rows)}
+    )
+    if not valid_headers:
+        return
+    if has_caption_row:
+        for cell in _unique_row_cells(table.rows[valid_headers[0]]):
+            _set_border(_cell_borders(cell), "top", style="single", size=8)
+
+    for position, row_index in enumerate(valid_headers):
+        next_row = (
+            table.rows[valid_headers[position + 1]]
+            if position + 1 < len(valid_headers)
+            and valid_headers[position + 1] == row_index + 1
+            else None
+        )
+        continuing = (
+            {id(cell._tc) for cell in next_row.cells} if next_row is not None else set()
+        )
+        for cell in _unique_row_cells(table.rows[row_index]):
+            if id(cell._tc) in continuing:
+                continue
+            _set_border(_cell_borders(cell), "bottom", style="single", size=4)
+
+
+def _set_table_borders(
+    table: Any,
+    preset: str,
+    header_rows: list[int],
+    caption_row: int | None = None,
+) -> None:
     if preset == "preserve":
         return
     tbl_pr = table._tbl.tblPr
@@ -1047,6 +1135,9 @@ def _set_table_borders(table: Any, preset: str, header_rows: list[int]) -> None:
     if preset == "full_grid":
         for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
             _set_border(borders, name, style="single", size=4)
+        return
+    if preset == "technical_textbook":
+        _set_technical_textbook_borders(table, borders, header_rows, caption_row)
         return
     if preset != "three_line":
         raise FormatMonographError(f"Unsupported table border preset: {preset}")
@@ -1240,15 +1331,19 @@ def apply_table_properties(
                     continue
                 _set_prevent_row_split(row, bool(effective["prevent_row_split"]))
         header_rows = [int(value) for value in entry.get("header_rows", [0])]
-        _set_table_borders(
-            table, str(effective.get("border_preset", "preserve")), header_rows
-        )
         caption_row = entry.get("caption_row")
+        caption_row_index = None if caption_row is None else int(caption_row)
+        _set_table_borders(
+            table,
+            str(effective.get("border_preset", "preserve")),
+            header_rows,
+            caption_row_index,
+        )
         _format_table_text(
             table,
             effective,
             header_rows,
-            None if caption_row is None else int(caption_row),
+            caption_row_index,
         )
     return len(selected)
 

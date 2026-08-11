@@ -45,13 +45,19 @@ V1.1 可自动执行：
 - `prevent_row_split`
 - `available_width_percent`、`preferred_column_widths_percent`、`allow_autofit`
 - `cell_margins_mm`、`vertical_alignment`
-- `border_preset`：`preserve`、`three_line` 或 `full_grid`
+- `border_preset`：`preserve`、`three_line`、`full_grid` 或 `technical_textbook`
 - `column_roles`、`column_alignments`
 - 未批准列角色时保留原单元格段落对齐；不得把正文首行缩进泄漏到表格。仅由正文样式继承的首行缩进应归零，原单元格直接设置的有意缩进保持不变。
 - `header_bold`、`header_shading_hex`
 - `font_name_east_asia`、`font_name_ascii`、`font_size_pt`、`line_spacing_pt`
 
 `prevent_row_split` 适用于普通行。视觉属性只作用于结构映射逐表批准的数据表；逐列角色不明确时不得自动对齐。超高行、复杂合并、可见控制标记、续表标签、断点和横向分节必须先盘点并通过 QA。
+
+`technical_textbook` 取消全部底纹、左右外边框和数据行内部横线。表题行上方无线；表题下方/首层表头上方及末行下方使用 1.0 pt，表头层级线、完整表头下方线和内部竖线使用 0.5 pt。多行表头的层级线只覆盖实际拆分的列，不得切穿纵向合并单元格。
+
+获批 `front_matter` 将整本书书名置于独立、不显示且不计入页码的书名页；下一页插入居中加粗的“目录”，目录页码从 1 开始。获批 `block_spacing` 在图表完整内容块后插入一个真实空段落；目标软件重新分页后，若该空段落落在新页页首，则删除。空段落属于批准的派生结构，重复运行不得叠加。
+
+镜像边距与连续物理页可能发生冲突：Microsoft Word 在镜像版式的新分节从 1 重启时可能自动补齐奇偶空白页。若调用者同时批准镜像边距、书名页后立即开始目录、目录后立即开始正文，以及目录和正文分别从可见页码 1 开始，则 Word 适配器应按下一内容页的物理奇偶性选择分节起始类型；物理起始页为偶数时使用可编辑的 `{ = { PAGE } - 1 }` 字段，并在最终更新目录后校正受影响的 `PAGEREF` 结果。skill 必须自动完成刷新、锁定交付缓存并逐页验证，不要求调用者手动更新；分页变化后应重新运行 skill。不得静默保留补齐空白页或关闭镜像边距。
 
 ## 字段属性
 

@@ -37,8 +37,13 @@ from docx_pagination import (  # noqa: E402
 )
 from finalize_docx import effective_font_failures  # noqa: E402
 from structure_map import (  # noqa: E402
+    apply_structure_map,
+    approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    candidate_structure_map,
+    prime_structure_map_locators,
+    structure_content_inventory,
     structure_content_fingerprint,
 )
 
@@ -517,6 +522,15 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertIn("Documents.Open($outputPath)", adapter)
         self.assertNotIn("$outputPath, $false, $false", adapter)
         self.assertIn("try { $word.Options.UpdateLinksAtOpen", adapter)
+        self.assertIn("Normalize-FrontMatterPagination", adapter)
+        self.assertIn("Normalize-DisplayedPageReferences", adapter)
+        self.assertIn("page_number_display_offsets", adapter)
+        self.assertIn("$footer.Range.Duplicate", adapter)
+        self.assertNotIn("$doc.Range($code.Start", adapter)
+        self.assertIn(
+            "[void]($doc.Sections.Item($index).Range.Paragraphs.First.Format.PageBreakBefore = 0)",
+            adapter,
+        )
 
     def test_localized_caption_style_keeps_semantic_audit_contract(self) -> None:
         source = self.root / "caption-source.docx"
@@ -722,6 +736,124 @@ class V026DeterministicFontTests(unittest.TestCase):
         plain_result = apply_pagination_sections(plain, settings, resolver)
         self.assertFalse(plain_result["suppressed_redundant_body_page_break"])
         self.assertIsNone(plain_body.paragraph_format.page_break_before)
+
+    def test_front_matter_blank_block_spacing_and_table_rules_are_structural(self) -> None:
+        source = self.root / "front-matter-tables.docx"
+        document = Document()
+        document.add_paragraph("Synthetic whole-book title")
+        document.add_paragraph("[[TOC]]")
+        document.add_paragraph("第1章 Synthetic body")
+        table = document.add_table(rows=5, cols=4)
+        table.cell(0, 0).merge(table.cell(0, 3)).text = "表 1.1 Synthetic table"
+        table.cell(1, 0).merge(table.cell(1, 1)).text = "Grouped header"
+        table.cell(1, 2).merge(table.cell(2, 2)).text = "Merged Y"
+        table.cell(1, 3).merge(table.cell(2, 3)).text = "Merged Z"
+        table.cell(2, 0).text = "Header A"
+        table.cell(2, 1).text = "Header B"
+        for row_index in (3, 4):
+            for column_index in range(4):
+                table.cell(row_index, column_index).text = f"R{row_index}C{column_index}"
+        document.add_paragraph("Synthetic following body")
+        document.save(source)
+
+        structure = candidate_structure_map(source)
+        structure["status"] = "approved"
+        structure["pagination_sections"]["approved"] = True
+        structure["front_matter"]["approved"] = True
+        structure["block_spacing"]["approved"] = True
+        table_entry = structure["tables"][0]
+        table_entry.update(
+            {
+                "approved": True,
+                "kind": "data",
+                "caption_row": 0,
+                "header_rows": [1, 2],
+                "repeat_header_rows": [1, 2],
+            }
+        )
+        table_entry["visual"].update(
+            {
+                "approved": True,
+                "border_preset": "technical_textbook",
+                "column_roles": ["narrative"] * 4,
+            }
+        )
+
+        formatted = Document(source)
+        prime_structure_map_locators(formatted, structure)
+        apply_structure_map(formatted, structure)
+        apply_table_properties(
+            formatted,
+            {"border_preset": "technical_textbook"},
+            approved_data_tables(formatted, structure),
+        )
+        apply_structure_map(formatted, structure)
+        output = self.root / "front-matter-tables-formatted.docx"
+        formatted.save(output)
+
+        source_inventory = structure_content_inventory(source, structure)
+        output_inventory = structure_content_inventory(output, structure)
+        self.assertEqual(source_inventory, output_inventory)
+        reloaded = Document(output)
+        self.assertEqual("Monograph Book Title", reloaded.paragraphs[0].style.name)
+        self.assertTrue(all(run.bold for run in reloaded.paragraphs[0].runs if run.text))
+        self.assertEqual(
+            1,
+            sum(
+                paragraph.style is not None
+                and paragraph.style.name == "Monograph TOC Heading"
+                for paragraph in reloaded.paragraphs
+            ),
+        )
+        self.assertEqual(
+            ["nextPage", "nextPage"],
+            [
+                section._sectPr.find(qn("w:type")).get(qn("w:val"))
+                for section in reloaded.sections[:2]
+            ],
+        )
+        toc_heading = next(
+            paragraph
+            for paragraph in reloaded.paragraphs
+            if paragraph.style is not None
+            and paragraph.style.name == "Monograph TOC Heading"
+        )
+        self.assertIs(False, toc_heading.paragraph_format.page_break_before)
+        self.assertEqual(
+            1,
+            sum(
+                paragraph.style is not None
+                and paragraph.style.name == "Monograph Figure Table Spacer"
+                for paragraph in reloaded.paragraphs
+            ),
+        )
+        audit_entry = dict(table_entry)
+        audit_entry["visual"] = {"approved": False}
+        self.assertFalse(
+            audit_table_rule(
+                reloaded,
+                {"properties": {"border_preset": "technical_textbook"}},
+                [(reloaded.tables[0], audit_entry)],
+            )
+        )
+        borders = reloaded.tables[0]._tbl.tblPr.find(qn("w:tblBorders"))
+        expected = {
+            "top": ("nil", "0"),
+            "bottom": ("single", "8"),
+            "left": ("nil", "0"),
+            "right": ("nil", "0"),
+            "insideH": ("nil", "0"),
+            "insideV": ("single", "4"),
+        }
+        for name, (style, size) in expected.items():
+            border = borders.find(qn(f"w:{name}"))
+            self.assertEqual(style, border.get(qn("w:val")))
+            self.assertEqual(size, border.get(qn("w:sz")))
+        for row in reloaded.tables[0].rows:
+            for cell in row.cells:
+                shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
+                self.assertIsNotNone(shading)
+                self.assertEqual("auto", shading.get(qn("w:fill")))
 
 
 if __name__ == "__main__":

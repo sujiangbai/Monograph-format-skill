@@ -96,6 +96,7 @@ def semantic_errors(profile: dict) -> list[str]:
                 "preserve",
                 "three_line",
                 "full_grid",
+                "technical_textbook",
             }:
                 errors.append(f"Table rule {rule['id']} has invalid border_preset.")
             width = properties.get("available_width_percent")

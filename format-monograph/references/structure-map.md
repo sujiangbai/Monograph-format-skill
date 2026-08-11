@@ -20,9 +20,9 @@ Schema 1.4 adds approved page-number sections, stable trailing-section evidence,
 
 `pagination_sections` requires separate stable locators for `toc_start` and `body_start`. Approval also records decimal numbering, `start_at={"toc":1,"body":1}`, continuation after the body start, odd outer-right/even outer-left placement, and visible first-page numbers.
 
-Application inserts a real next-page section before the body when needed. It starts the TOC and body independently at 1, removes later unapproved restarts, disables first-page hiding, enables odd/even footers, and ensures exactly one editable `PAGE` field in each default and even page-number footer. Reapplication is idempotent: a page-only footer with duplicate fields is canonicalized to one field. A footer containing publisher text, a logo, another field, or mixed payload blocks automatic replacement. Static digits may be converted only when approved trailing-section evidence marks them as derived footer-only content. Audit fails for missing even footers, duplicate PAGE fields, hidden first-page numbers, body restarts, or unreachable header/footer parts. Physical page counts still require target-software repagination or PDF export.
+Application inserts a real next-page section before the body when needed. It starts the TOC and body independently at visible 1, removes later unapproved restarts, disables first-page hiding, enables odd/even footers, and ensures exactly one editable `PAGE` field in each default and even page-number footer. With approved mirror margins, the Microsoft Word adapter uses odd/even physical section starts to avoid parity blanks. When the physical start must remain even, it writes the editable calculated field `{ = { PAGE } - 1 }`; after updating the TOC, it corrects affected `PAGEREF` results and locks the delivered TOC cache. A subsequent skill run unlocks and rebuilds those fields. The caller does not perform a manual field update and must rerun the skill after pagination-changing edits. Reapplication is idempotent: a page-only footer with duplicate fields is canonicalized to one field. A footer containing publisher text, a logo, another field, or mixed payload blocks automatic replacement. Static digits may be converted only when approved trailing-section evidence marks them as derived footer-only content. Audit fails for missing even footers, duplicate PAGE fields, hidden first-page numbers, body restarts, an unapproved page formula, or unreachable header/footer parts. Physical page counts still require target-software repagination or PDF export.
 
-Classify rendered blank pages as `intentional_recto_blank`, `removable_trailing_blank`, or `unexpected_blank`. A recto blank created by an approved odd-page section start is retained without a visible page number. A trailing blank is deleted only through approved stable cleanup. Header/footer integrity compares canonical content rather than physical part names so Word's harmless relationship renumbering does not mask a payload change.
+Classify rendered blank pages as `intentional_recto_blank`, `removable_trailing_blank`, or `unexpected_blank`. When mirror margins and consecutive title/TOC/body content are both approved, a parity blank at either approved boundary is unexpected and the Word adapter must normalize the physical section start before delivery. A trailing blank is deleted only through approved stable cleanup. Header/footer integrity compares canonical content rather than physical part names so Word's harmless relationship renumbering does not mask a payload change.
 
 ### Table visuals
 
@@ -84,6 +84,8 @@ An in-cell table caption remains in its first row by default. Move it only with 
 
 Each table has `kind`: `data`, `layout`, `callout`, or `unknown`. Only approved `data` tables receive table rules. Use `caption_row`, `header_rows`, `repeat_header_rows`, and `prevent_normal_row_split` to authorize exact rows. Layout tables, image containers, teaching boxes, and unknown tables remain unchanged.
 
+For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered title page, and insertion of the derived `目录` heading before the main TOC. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
+
 ### Trailing sections
 
 Candidates report visible payload, header/footer references and payload, page-number start, first-page behavior, section type, page geometry, stable boundary context, and section-properties hash. Delete only an approved candidate whose evidence says `safe_to_delete`. Independent or ambiguous settings block deletion.
@@ -96,6 +98,8 @@ Candidates report visible payload, header/footer references and payload, page-nu
 - `tables`: apply exact approved header, row-split, visual, and landscape controls to data tables.
 - `pagination_groups`: apply only approved `keepNext`/`cantSplit` relationships to figures, captions, and tables.
 - `pagination_sections`: create and audit approved TOC/body numbering sections and odd/even PAGE footers.
+- `front_matter`: separate the whole-book title page from the TOC and insert the approved TOC heading.
+- `block_spacing`: insert idempotent same-page-only empty paragraphs after approved figure/table blocks.
 - `trailing_empty_sections`: remove safe approved final sections from the end inward.
 
 Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. Approved font rules also clear the corresponding theme-font attributes and are audited after resolving run, character-style, paragraph-style, base-style, document-default, and theme inheritance. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, revisions, and formula formatting.
