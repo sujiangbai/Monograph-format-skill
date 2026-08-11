@@ -45,7 +45,9 @@ V1.1 可自动执行：
 - `prevent_row_split`
 - `available_width_percent`、`preferred_column_widths_percent`、`allow_autofit`
 - `cell_margins_mm`、`vertical_alignment`
-- `border_preset`：`preserve`、`three_line`、`full_grid` 或 `technical_textbook`
+- `border_preset`：`preserve`、`three_line`、`full_grid`、`technical_textbook` 或严格限于图版布局表的 `borderless`
+- `major_border_pt`、`minor_border_pt`、`inside_vertical_borders`、`horizontal_rule_rows`：分别控制主线、细线、内部竖线和语义分隔行；理工科教材默认 1.0 pt/0.5 pt，不能仅凭行号猜测分隔语义
+- `all_cell_alignment`、`text_wrapping`：图版布局表使用 `center` 和 `none`
 - `column_roles`、`column_alignments`
 - 未批准列角色时保留原单元格段落对齐；不得把正文首行缩进泄漏到表格。仅由正文样式继承的首行缩进应归零，原单元格直接设置的有意缩进保持不变。
 - `header_bold`、`header_shading_hex`
@@ -56,6 +58,10 @@ V1.1 可自动执行：
 `technical_textbook` 取消全部底纹、左右外边框和数据行内部横线。表题行上方无线；表题下方/首层表头上方及末行下方使用 1.0 pt，表头层级线、完整表头下方线和内部竖线使用 0.5 pt。多行表头的层级线只覆盖实际拆分的列，不得切穿纵向合并单元格。
 
 获批 `front_matter` 将整本书书名置于独立、不显示且不计入页码的书名页，并按调用者批准的 `book_title_format` 排版；理工科教材候选缺省为中文黑体、西文 Times New Roman、22 pt、加粗、居中。下一页自动插入居中加粗的“目    录”（中间四个半角空格），目录页码从 1 开始。Word `TOC` 字段只生成目录条目，不生成该题名；题名由 skill 作为可重复维护的派生段落生成。获批 `block_spacing` 在图表完整内容块后插入一个真实空段落；目标软件重新分页后，若该空段落落在新页页首，则删除。空段落属于批准的派生结构，重复运行不得叠加。
+
+数据表先清除原稿中会覆盖新规则的单元格级边框，再按获批模型重建；默认无底纹、无左右外边框，主线 1.0 pt、内部线 0.5 pt。表头边界、汇总行或分组行通过 `horizontal_rule_rows` 明确，不能把所有数据行机械地画成同一种网格。图版布局表不属于数据表：获批 `layout_purpose=figure_panel` 后去除全部边框、关闭环绕并居中，标签行和图片后的短说明可使用图名格式，但文字与编号保持原样。
+
+`table_cell_cleanups` 只允许删除获批单元格开头的空段落。条目必须绑定表格、行、单元格、源文本哈希、结果文本哈希和删除数量；正文审计只忽略这些已批准的空白结构，不忽略任何非空文字。
 
 标题编号使用与 Heading 1-4 关联的多级列表，不使用题注 `SEQ`。每一级编号的中文字体、西文字体、字号和字重必须复制对应标题样式的实际值，编号与标题文字不得出现字体、大小或粗细差异；标题段首行缩进必须为 0。
 

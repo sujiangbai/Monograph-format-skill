@@ -59,6 +59,8 @@
 
 审计失败时不得交付为通过。若用户批准的派生字段在 Word 打开后更新，只在报告中记录，不将其视为正文修改。任何公式栅格化、嵌入对象变化或媒体替换均视为失败。
 
+报告应分别列出数据表边框模型、语义分隔行、图版布局表、无编号图名和表格单元格空白清理。图版标签和无编号图名必须证明文字未变化且未添加编号；空白清理必须证明只删除了获批的前导空段落。旧单元格边框未被清除、图版表仍有可见边框或环绕、汇总行缺少获批分隔线，均视为结构审计失败。
+
 ## Finalization evidence
 
 Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; updated field types and counts; repagination, save, reopen, and cache-verification status; optional target PDF; and content/protected-object audit outcomes. Do not include manuscript text in the status file.

@@ -13,6 +13,7 @@ from typing import Any
 
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.shared import Pt
 from docx.text.paragraph import Paragraph
@@ -25,6 +26,8 @@ from _common import (
     FormatMonographError,
     _heading_prefix_pattern,
     _paragraph_text_without_field_results,
+    _unique_row_cells,
+    apply_table_properties,
     apply_style_properties,
     clear_controlled_direct_format,
     content_fingerprint,
@@ -111,6 +114,8 @@ ROLE_STYLE_NAMES = {
     "heading_3": "Heading 3",
     "heading_4": "Heading 4",
     "figure_caption": "Caption",
+    "figure_caption_unnumbered": "Caption",
+    "figure_panel_label": "Caption",
     "table_caption": "Caption",
     "equation_caption": "Caption",
     "long_quote": "Quote",
@@ -444,7 +449,13 @@ def approved_role_paragraphs(
     if not has_semantic_structure_map(structure_map):
         return []
     wanted = normalized_role(selector["value"])
-    caption_roles = {"figure_caption", "table_caption", "equation_caption"}
+    caption_roles = {
+        "figure_caption",
+        "figure_caption_unnumbered",
+        "figure_panel_label",
+        "table_caption",
+        "equation_caption",
+    }
     result = []
     seen: set[int] = set()
     for entry in structure_map.get("paragraph_roles", []):
@@ -902,6 +913,49 @@ def _table_text_hash(table: Any) -> str:
     return text_sha256(value)
 
 
+def _unnumbered_figure_caption_indexes(document: Any) -> set[int]:
+    result: set[int] = set()
+    for index, paragraph in enumerate(document.paragraphs):
+        value = paragraph.text.strip()
+        if not value or len(value) > 80 or "\n" in value:
+            continue
+        if paragraph.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+            continue
+        if LOOSE_CAPTION_PATTERN.match(value) or any(
+            pattern.match(value) for _, pattern in HEADING_PATTERNS
+        ):
+            continue
+        if value.endswith(("\u3002", "\uff01", "\uff1f", "\uff1b", "\uff1a")):
+            continue
+        previous = paragraph._p.getprevious()
+        if previous is None or previous.tag != qn("w:p"):
+            continue
+        if previous.xpath(".//w:drawing | .//w:pict"):
+            result.add(index)
+    return result
+
+
+def _figure_panel_rows(table: Any) -> tuple[list[int], list[int]]:
+    image_rows = [
+        index
+        for index, row in enumerate(table.rows)
+        if row._tr.xpath(".//w:drawing | .//w:pict")
+    ]
+    label_rows: list[int] = []
+    for image_row in image_rows:
+        label_row = image_row + 1
+        if label_row >= len(table.rows):
+            continue
+        row = table.rows[label_row]
+        if row._tr.xpath(".//w:drawing | .//w:pict"):
+            continue
+        values = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+        if not values or any(len(value) > 80 or "\n" in value for value in values):
+            continue
+        label_rows.append(label_row)
+    return image_rows, sorted(set(label_rows))
+
+
 def _candidate_pagination_groups(
     document: Any, captions: list[dict[str, Any]], body_values: list[str]
 ) -> list[dict[str, Any]]:
@@ -953,6 +1007,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
     paragraph_roles = []
     chapter_starts = []
     body_values = [paragraph.text for paragraph in document.paragraphs]
+    unnumbered_figure_captions = _unnumbered_figure_caption_indexes(document)
     for index, paragraph in enumerate(document.paragraphs):
         value = paragraph.text
         detected_level = None
@@ -984,6 +1039,8 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
             caption["paragraph"] = index
             captions.append(caption)
             role = "figure_caption" if caption["label"] == "图" else "table_caption"
+        elif index in unnumbered_figure_captions:
+            role = "figure_caption_unnumbered"
         else:
             role = _role_for_paragraph(paragraph, detected_level)
         if value.strip():
@@ -1006,12 +1063,12 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         caption_row = None
         header_rows: list[int] = []
         table_text = "\n".join(cell.text for row in table.rows for cell in row.cells)
-        seen_cells: set[int] = set()
+        seen_cells: set[Any] = set()
         for row_index, row in enumerate(table.rows):
             for cell_index, cell in enumerate(row.cells):
-                if id(cell._tc) in seen_cells:
+                if cell._tc in seen_cells:
                     continue
-                seen_cells.add(id(cell._tc))
+                seen_cells.add(cell._tc)
                 for paragraph_index, paragraph in enumerate(cell.paragraphs):
                     locator = _cell_locator(
                         table_index, row_index, cell_index, paragraph_index
@@ -1035,14 +1092,45 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                             "approved": False,
                         }
                     )
-                    if row_index == 0 and len({id(item._tc) for item in row.cells}) == 1:
+                    if row_index == 0 and len({item._tc for item in row.cells}) == 1:
                         caption_row = 0
                         if len(table.rows) > 1:
                             header_rows = [1]
 
+        image_rows, label_rows = _figure_panel_rows(table)
+        if image_rows and label_rows:
+            for row_index in label_rows:
+                seen_label_cells: set[Any] = set()
+                for cell_index, cell in enumerate(table.rows[row_index].cells):
+                    if cell._tc in seen_label_cells:
+                        continue
+                    seen_label_cells.add(cell._tc)
+                    for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                        if not paragraph.text.strip():
+                            continue
+                        paragraph_roles.append(
+                            {
+                                "locator": _cell_locator(
+                                    table_index,
+                                    row_index,
+                                    cell_index,
+                                    paragraph_index,
+                                ),
+                                "text_sha256": text_sha256(paragraph.text),
+                                "role": "figure_panel_label",
+                                "source_style": (
+                                    paragraph.style.name if paragraph.style else None
+                                ),
+                                "direct_format_sha256": _paragraph_style_signature(
+                                    paragraph
+                                ),
+                                "approved": False,
+                            }
+                        )
+
         first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
         unique_cells = {
-            id(cell._tc) for row in table.rows for cell in row.cells
+            cell._tc for row in table.rows for cell in row.cells
         }
         visible_controls = sum(
             1
@@ -1056,9 +1144,15 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         tables.append(
             {
                 "table": table_index,
+                "row_count": len(table.rows),
                 "table_text_sha256": _table_text_hash(table),
                 "first_row_sha256": text_sha256(first_row),
-                "kind": "unknown",
+                "kind": "layout" if image_rows and label_rows else "unknown",
+                "layout_purpose": (
+                    "figure_panel" if image_rows and label_rows else None
+                ),
+                "image_rows": image_rows,
+                "label_rows": label_rows,
                 "caption_row": caption_row,
                 "header_rows": header_rows,
                 "repeat_header_rows": [],
@@ -1069,6 +1163,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                 "visible_control_mark_candidates": visible_controls,
                 "visual": {
                     "approved": False,
+                    "alignment": "center" if image_rows and label_rows else None,
                     "available_width_percent": 100,
                     "allow_autofit": True,
                     "cell_margins_mm": {
@@ -1078,8 +1173,18 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                         "left": 1.5,
                     },
                     "vertical_alignment": "center",
-                    "border_preset": "preserve",
-                    "column_roles": ["unknown"] * len(table.columns),
+                    "border_preset": (
+                        "borderless" if image_rows and label_rows else "preserve"
+                    ),
+                    "all_cell_alignment": (
+                        "center" if image_rows and label_rows else None
+                    ),
+                    "text_wrapping": "none" if image_rows and label_rows else None,
+                    "column_roles": (
+                        []
+                        if image_rows and label_rows
+                        else ["unknown"] * len(table.columns)
+                    ),
                     "orientation": "portrait",
                     "landscape_approved": False,
                 },
@@ -1106,6 +1211,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         "captions": captions,
         "tables": tables,
         "pagination_groups": _candidate_pagination_groups(document, captions, body_values),
+        "table_cell_cleanups": [],
         "front_matter": _candidate_front_matter(
             document, pagination_sections, body_values
         ),
@@ -1263,11 +1369,20 @@ def load_structure_map(path: Path) -> dict[str, Any]:
             for table in value.get("tables", []):
                 if not table.get("approved"):
                     continue
-                if table.get("kind") == "layout" and not table.get(
-                    "pagination_only"
+                visual = table.get("visual", {})
+                approved_figure_panel = (
+                    visual.get("approved")
+                    and table.get("layout_purpose") == "figure_panel"
+                    and visual.get("border_preset") == "borderless"
+                )
+                if (
+                    table.get("kind") == "layout"
+                    and not table.get("pagination_only")
+                    and not approved_figure_panel
                 ):
                     raise FormatMonographError(
-                        "Approved layout tables must set pagination_only=true."
+                        "Approved layout tables must be pagination-only or an explicitly "
+                        "approved borderless figure panel."
                     )
                 if table.get("repeat_caption_with_header") and not (
                     table.get("caption_row") == 0 and 1 in table.get("header_rows", [])
@@ -1391,9 +1506,31 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                 visual = table.get("visual", {})
                 if not table.get("approved") or not visual.get("approved"):
                     continue
+                if table.get("kind") == "layout":
+                    if table.get("layout_purpose") != "figure_panel":
+                        raise FormatMonographError(
+                            "Visually formatted layout tables require layout_purpose=figure_panel."
+                        )
+                    if visual.get("border_preset") != "borderless":
+                        raise FormatMonographError(
+                            "Figure-panel layout tables must be borderless."
+                        )
+                    if visual.get("all_cell_alignment") != "center":
+                        raise FormatMonographError(
+                            "Figure-panel layout-table cells must be centered."
+                        )
+                    if visual.get("text_wrapping") != "none":
+                        raise FormatMonographError(
+                            "Figure-panel layout tables must use no text wrapping."
+                        )
+                    if not table.get("image_rows") or not table.get("label_rows"):
+                        raise FormatMonographError(
+                            "Figure-panel layout tables require approved image and label rows."
+                        )
+                    continue
                 if table.get("kind") != "data":
                     raise FormatMonographError(
-                        "Only approved data tables may receive visual formatting."
+                        "Only approved data or figure-panel layout tables may receive visual formatting."
                     )
                 roles = visual.get("column_roles", [])
                 if not roles or any(
@@ -1408,6 +1545,7 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     "three_line",
                     "full_grid",
                     "technical_textbook",
+                    "borderless",
                 }:
                     raise FormatMonographError("Invalid approved table border preset.")
                 header_rows = sorted({int(row) for row in table.get("header_rows", [])})
@@ -1422,11 +1560,50 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                         raise FormatMonographError(
                             "Multi-row table headers must be contiguous."
                         )
+                    for key in ("major_border_pt", "minor_border_pt"):
+                        if key in visual and not 0.25 <= float(visual[key]) <= 4:
+                            raise FormatMonographError(
+                                f"Approved table {key} must be between 0.25 and 4 pt."
+                            )
+                    for row_index in visual.get("horizontal_rule_rows", []):
+                        if not 0 < int(row_index) < int(table.get("row_count", 10**9)):
+                            raise FormatMonographError(
+                                "Approved horizontal_rule_rows contains an invalid row."
+                            )
                 if visual.get("orientation") == "landscape" and visual.get(
                     "landscape_approved"
                 ) is not True:
                     raise FormatMonographError(
                         "Landscape table layout requires landscape_approved=true."
+                    )
+            table_entries = {
+                int(entry["table"]): entry for entry in value.get("tables", [])
+            }
+            for cleanup in value.get("table_cell_cleanups", []):
+                if not cleanup.get("approved"):
+                    continue
+                table = table_entries.get(int(cleanup.get("table", -1)))
+                if table is None or not table.get("approved"):
+                    raise FormatMonographError(
+                        "Approved table-cell cleanup requires an approved table."
+                    )
+                if table.get("complex_merge"):
+                    raise FormatMonographError(
+                        "Table-cell whitespace cleanup is blocked for complex merged tables."
+                    )
+                if cleanup.get("action") != "remove_leading_empty_paragraphs":
+                    raise FormatMonographError(
+                        "Unsupported table-cell cleanup action."
+                    )
+                if int(cleanup.get("count", 0)) < 1:
+                    raise FormatMonographError(
+                        "Table-cell cleanup requires a positive paragraph count."
+                    )
+                if not cleanup.get("cell_text_sha256") or not cleanup.get(
+                    "result_cell_text_sha256"
+                ):
+                    raise FormatMonographError(
+                        "Table-cell cleanup requires source and result cell hashes."
                     )
     return value
 
@@ -1648,7 +1825,7 @@ def _move_caption_before_table(
     row_index = int(locator["row"])
     table = document.tables[table_index]
     row = table.rows[row_index]
-    unique_cells = {id(cell._tc): cell for cell in row.cells}
+    unique_cells = {cell._tc: cell for cell in row.cells}
     if len(unique_cells) != 1:
         raise FormatMonographError("Approved caption row must contain one merged cell.")
     cell = next(iter(unique_cells.values()))
@@ -2053,18 +2230,50 @@ def _wrap_table_landscape(document: Any, table: Any) -> None:
     body.insert(position + 2, landscape_boundary)
 
 
+def _table_matches_approved_cleanup_result(
+    table: Any, table_index: int, structure_map: dict[str, Any]
+) -> bool:
+    cleanups = [
+        entry
+        for entry in structure_map.get("table_cell_cleanups", [])
+        if entry.get("approved") and int(entry.get("table", -1)) == table_index
+    ]
+    if not cleanups:
+        return False
+    for entry in cleanups:
+        row_index = int(entry["row"])
+        cell_index = int(entry["cell"])
+        if not 0 <= row_index < len(table.rows):
+            return False
+        if not 0 <= cell_index < len(table.rows[row_index].cells):
+            return False
+        cell = table.rows[row_index].cells[cell_index]
+        if (
+            text_sha256(cell.text) != entry.get("result_cell_text_sha256")
+            or not cell.paragraphs
+            or not _paragraph_has_payload(cell.paragraphs[0]._p)
+        ):
+            return False
+    return True
+
+
 def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
     changed = 0
     for entry in structure_map.get("tables", []):
         if not entry.get("approved"):
             continue
+        figure_panel = (
+            entry.get("kind") == "layout"
+            and entry.get("layout_purpose") == "figure_panel"
+            and entry.get("visual", {}).get("approved")
+        )
         if (
             has_semantic_structure_map(structure_map)
             and entry.get("kind") != "data"
             and not (
                 structure_map.get("schema_version") in {"1.3", "1.4"}
                 and entry.get("kind") == "layout"
-                and entry.get("pagination_only")
+                and (entry.get("pagination_only") or figure_panel)
             )
         ):
             raise FormatMonographError(
@@ -2075,7 +2284,13 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
             raise FormatMonographError(f"Structure-map table is out of range: {index}")
         table = document.tables[index]
         expected_table_hash = entry.get("table_text_sha256")
-        if expected_table_hash and _table_text_hash(table) != expected_table_hash:
+        if (
+            expected_table_hash
+            and _table_text_hash(table) != expected_table_hash
+            and not _table_matches_approved_cleanup_result(
+                table, index, structure_map
+            )
+        ):
             raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
         first_row = "\u241f".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
         if text_sha256(first_row) != entry["first_row_sha256"]:
@@ -2099,9 +2314,69 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
                     continue
                 _set_row_property(row, "cantSplit", True)
         visual = entry.get("visual", {})
+        if figure_panel:
+            apply_table_properties(document, visual, [(table, entry)])
+            for row_index in entry.get("label_rows", []):
+                row_index = int(row_index)
+                if not 0 <= row_index < len(table.rows):
+                    raise FormatMonographError(
+                        "Figure-panel label row is out of range."
+                    )
+                for cell in _unique_row_cells(table.rows[row_index]):
+                    for paragraph in cell.paragraphs:
+                        if paragraph.text.strip():
+                            paragraph.style = ensure_paragraph_style(
+                                document, "Caption"
+                            )
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         if visual.get("approved") and visual.get("orientation") == "landscape":
             _wrap_table_landscape(document, table)
         changed += 1
+    return changed
+
+
+def _apply_table_cell_cleanups(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    for entry in structure_map.get("table_cell_cleanups", []):
+        if not entry.get("approved"):
+            continue
+        table_index = int(entry["table"])
+        row_index = int(entry["row"])
+        cell_index = int(entry["cell"])
+        if not 0 <= table_index < len(document.tables):
+            raise FormatMonographError("Table-cell cleanup table is out of range.")
+        table = document.tables[table_index]
+        if not 0 <= row_index < len(table.rows):
+            raise FormatMonographError("Table-cell cleanup row is out of range.")
+        if not 0 <= cell_index < len(table.rows[row_index].cells):
+            raise FormatMonographError("Table-cell cleanup cell is out of range.")
+        cell = table.rows[row_index].cells[cell_index]
+        count = int(entry["count"])
+        current_cell_hash = text_sha256(cell.text)
+        if (
+            current_cell_hash == entry.get("result_cell_text_sha256")
+            and cell.paragraphs
+            and _paragraph_has_payload(cell.paragraphs[0]._p)
+        ):
+            continue
+        if entry.get("table_text_sha256") != _table_text_hash(table):
+            raise FormatMonographError("Table-cell cleanup source hash mismatch.")
+        if current_cell_hash != entry.get("cell_text_sha256"):
+            raise FormatMonographError("Table-cell cleanup cell hash mismatch.")
+        if count >= len(cell.paragraphs):
+            raise FormatMonographError(
+                "Table-cell cleanup must retain at least one paragraph."
+            )
+        candidates = cell.paragraphs[:count]
+        if any(_paragraph_has_payload(paragraph._p) for paragraph in candidates):
+            raise FormatMonographError(
+                "Table-cell cleanup can remove only leading empty paragraphs."
+            )
+        for paragraph in candidates:
+            cell._tc.remove(paragraph._p)
+            changed += 1
+        if text_sha256(cell.text) != entry.get("result_cell_text_sha256"):
+            raise FormatMonographError("Table-cell cleanup result hash mismatch.")
     return changed
 
 
@@ -2222,6 +2497,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
     heading_targets = _apply_headings(document, structure_map)
     outline_targets = _apply_outline_cleanup(document, structure_map)
     table_targets = _apply_tables(document, structure_map)
+    table_cell_cleanup_targets = _apply_table_cell_cleanups(document, structure_map)
     caption_targets = _apply_captions(document, structure_map)
     pagination_targets = _apply_pagination_groups(document, structure_map)
     spacing_targets = _apply_block_spacing(document, structure_map)
@@ -2254,6 +2530,10 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         {"kind": "structure_outline_cleanup", "targets": outline_targets},
         {"kind": "structure_tables", "targets": table_targets},
         {
+            "kind": "structure_table_cell_cleanup",
+            "targets": table_cell_cleanup_targets,
+        },
+        {
             "kind": "structure_captions",
             "targets": caption_targets,
             "actions": caption_actions,
@@ -2275,6 +2555,95 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         },
     ]
     return [change for change in changes if change["targets"]]
+
+
+def audit_structure_table_operations(
+    document: Any, structure_map: dict[str, Any]
+) -> list[dict[str, Any]]:
+    def effective_alignment(paragraph: Any) -> Any:
+        alignment = paragraph.alignment
+        style = paragraph.style
+        while alignment is None and style is not None:
+            alignment = style.paragraph_format.alignment
+            style = style.base_style
+        return alignment
+
+    failures: list[dict[str, Any]] = []
+    for entry in structure_map.get("tables", []):
+        visual = entry.get("visual", {})
+        if not (
+            entry.get("approved")
+            and entry.get("kind") == "layout"
+            and entry.get("layout_purpose") == "figure_panel"
+            and visual.get("approved")
+        ):
+            continue
+        table_index = int(entry["table"])
+        if not 0 <= table_index < len(document.tables):
+            failures.append({"table": table_index, "reason": "table_out_of_range"})
+            continue
+        table = document.tables[table_index]
+        borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+        borderless = borders is not None and all(
+            (borders.find(qn(f"w:{name}")) is not None)
+            and borders.find(qn(f"w:{name}")).get(qn("w:val")) == "nil"
+            for name in ("top", "left", "bottom", "right", "insideH", "insideV")
+        )
+        cell_overrides = table._tbl.xpath(
+            ".//w:tcBorders/*[not(@w:val='nil') and not(@w:val='none')]"
+        )
+        label_paragraphs = [
+            paragraph
+            for row_index in entry.get("label_rows", [])
+            if 0 <= int(row_index) < len(table.rows)
+            for cell in table.rows[int(row_index)].cells
+            for paragraph in cell.paragraphs
+            if paragraph.text.strip()
+        ]
+        checks = {
+            "borderless": borderless,
+            "no_cell_border_overrides": not cell_overrides,
+            "no_text_wrapping": table._tbl.tblPr.find(qn("w:tblpPr")) is None,
+            "table_centered": table.alignment == WD_TABLE_ALIGNMENT.CENTER,
+            "cells_vertically_centered": all(
+                cell.vertical_alignment == WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                for row in table.rows
+                for cell in row.cells
+            ),
+            "labels_present": bool(label_paragraphs),
+            "labels_centered_and_styled": bool(label_paragraphs)
+            and all(
+                effective_alignment(paragraph) == WD_ALIGN_PARAGRAPH.CENTER
+                and paragraph.style is not None
+                for paragraph in label_paragraphs
+            ),
+        }
+        if not all(checks.values()):
+            failures.append(
+                {
+                    "table": table_index,
+                    "reason": "figure_panel_visual_mismatch",
+                    "checks": checks,
+                }
+            )
+    for entry in structure_map.get("table_cell_cleanups", []):
+        if not entry.get("approved"):
+            continue
+        table_index = int(entry["table"])
+        row_index = int(entry["row"])
+        cell_index = int(entry["cell"])
+        try:
+            cell = document.tables[table_index].rows[row_index].cells[cell_index]
+        except IndexError:
+            failures.append(
+                {"table": table_index, "reason": "cleanup_target_out_of_range"}
+            )
+            continue
+        if not cell.paragraphs or not _paragraph_has_payload(cell.paragraphs[0]._p):
+            failures.append(
+                {"table": table_index, "reason": "leading_empty_paragraph_remains"}
+            )
+    return failures
 
 
 def _approved_indexes(structure_map: dict[str, Any], key: str) -> dict[int, dict[str, Any]]:
@@ -2606,6 +2975,41 @@ def _approved_deleted_header_footer_parts(
     return result
 
 
+def _approved_table_cell_cleanup_paragraphs(
+    root: etree._Element, structure_map: dict[str, Any]
+) -> set[Any]:
+    tables = root.xpath("/w:document/w:body/w:tbl", namespaces=NS)
+    ignored: set[Any] = set()
+    for entry in structure_map.get("table_cell_cleanups", []):
+        if not entry.get("approved"):
+            continue
+        table_index = int(entry["table"])
+        row_index = int(entry["row"])
+        cell_index = int(entry["cell"])
+        if not 0 <= table_index < len(tables):
+            continue
+        rows = tables[table_index].xpath("./w:tr", namespaces=NS)
+        if not 0 <= row_index < len(rows):
+            continue
+        cells = rows[row_index].xpath("./w:tc", namespaces=NS)
+        if not 0 <= cell_index < len(cells):
+            continue
+        paragraphs = cells[cell_index].xpath("./w:p", namespaces=NS)
+        for paragraph in paragraphs[: int(entry["count"])]:
+            text = "".join(
+                paragraph.xpath(".//w:t/text()", namespaces=NS)
+            ).strip()
+            protected = paragraph.xpath(
+                ".//w:tbl | .//w:drawing | .//w:object | .//w:pict | "
+                ".//w:bookmarkStart | .//w:commentRangeStart | "
+                ".//w:footnoteReference | .//w:endnoteReference | .//w:fldChar",
+                namespaces=NS,
+            )
+            if not text and not protected:
+                ignored.add(paragraph)
+    return ignored
+
+
 def structure_content_inventory(
     path: Path, structure_map: dict[str, Any]
 ) -> dict[str, list[str]]:
@@ -2683,9 +3087,16 @@ def structure_content_inventory(
                 if name == "word/document.xml"
                 else set()
             )
+            approved_cell_cleanup_paragraphs = (
+                _approved_table_cell_cleanup_paragraphs(root, structure_map)
+                if name == "word/document.xml"
+                else set()
+            )
             values = []
             body_index = -1
             for paragraph in root.xpath(".//w:p", namespaces=NS):
+                if paragraph in approved_cell_cleanup_paragraphs:
+                    continue
                 style_ids = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
                 if approved_front_matter and style_ids == [toc_heading_style_id]:
                     continue

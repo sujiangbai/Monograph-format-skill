@@ -8,6 +8,8 @@ import zipfile
 from pathlib import Path
 
 from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
@@ -43,10 +45,12 @@ from structure_map import (  # noqa: E402
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    audit_structure_table_operations,
     candidate_structure_map,
     prime_structure_map_locators,
     structure_content_inventory,
     structure_content_fingerprint,
+    text_sha256,
 )
 
 
@@ -864,6 +868,153 @@ class V026DeterministicFontTests(unittest.TestCase):
                 shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
                 self.assertIsNotNone(shading)
                 self.assertEqual("auto", shading.get(qn("w:fill")))
+
+    def test_technical_table_rebuilds_cell_borders_and_adds_semantic_separator(self) -> None:
+        document = Document()
+        table = document.add_table(rows=4, cols=2)
+        for row_index, row in enumerate(table.rows):
+            for column_index, cell in enumerate(row.cells):
+                cell.text = f"R{row_index}C{column_index}"
+                tc_pr = cell._tc.get_or_add_tcPr()
+                borders = OxmlElement("w:tcBorders")
+                for name in ("top", "left", "bottom", "right"):
+                    border = OxmlElement(f"w:{name}")
+                    border.set(qn("w:val"), "single")
+                    border.set(qn("w:sz"), "12")
+                    borders.append(border)
+                tc_pr.append(borders)
+                shading = OxmlElement("w:shd")
+                shading.set(qn("w:fill"), "00FF00")
+                tc_pr.append(shading)
+
+        properties = {
+            "border_preset": "technical_textbook",
+            "major_border_pt": 1,
+            "minor_border_pt": 0.5,
+            "inside_vertical_borders": True,
+            "horizontal_rule_rows": [3],
+        }
+        entry = {"header_rows": [0], "visual": {"approved": False}}
+        apply_table_properties(document, properties, [(table, entry)])
+
+        table_borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+        expected = {
+            "top": ("single", "8"),
+            "bottom": ("single", "8"),
+            "left": ("nil", "0"),
+            "right": ("nil", "0"),
+            "insideH": ("nil", "0"),
+            "insideV": ("single", "4"),
+        }
+        for name, (style, size) in expected.items():
+            border = table_borders.find(qn(f"w:{name}"))
+            self.assertEqual(style, border.get(qn("w:val")))
+            self.assertEqual(size, border.get(qn("w:sz")))
+        for cell in table.rows[3].cells:
+            border = cell._tc.get_or_add_tcPr().find(qn("w:tcBorders")).find(
+                qn("w:top")
+            )
+            self.assertEqual("single", border.get(qn("w:val")))
+            self.assertEqual("4", border.get(qn("w:sz")))
+        self.assertFalse(audit_table_rule(document, {"properties": properties}, [(table, entry)]))
+
+    def test_figure_panel_unnumbered_caption_and_cell_cleanup_are_structural(self) -> None:
+        source = self.root / "figure-panel-cleanup.docx"
+        document = Document()
+        image = document.add_paragraph()
+        image._p.append(OxmlElement("w:drawing"))
+        unnumbered = document.add_paragraph("Synthetic waveform A")
+        unnumbered.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        panel = document.add_table(rows=2, cols=2)
+        for cell in panel.rows[0].cells:
+            cell.paragraphs[0]._p.append(OxmlElement("w:drawing"))
+        for index, cell in enumerate(panel.rows[1].cells):
+            cell.text = f"Panel {index + 1}"
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        data = document.add_table(rows=2, cols=2)
+        data.cell(0, 0).text = "Header A"
+        data.cell(0, 1).text = "Header B"
+        cleanup_cell = data.cell(1, 0)
+        cleanup_cell.add_paragraph("Conclusion")
+        data.cell(1, 1).text = "Result"
+        document.save(source)
+
+        structure = candidate_structure_map(source)
+        structure["status"] = "approved"
+        panel_entry = structure["tables"][0]
+        self.assertEqual("layout", panel_entry["kind"])
+        self.assertEqual("figure_panel", panel_entry["layout_purpose"])
+        panel_entry["approved"] = True
+        panel_entry["pagination_only"] = False
+        panel_entry["visual"]["approved"] = True
+        for role in structure["paragraph_roles"]:
+            if role["role"] in {"figure_caption_unnumbered", "figure_panel_label"}:
+                role["approved"] = True
+
+        data_entry = structure["tables"][1]
+        data_entry.update({"approved": True, "kind": "data", "header_rows": [0]})
+        structure["table_cell_cleanups"] = [
+            {
+                "table": 1,
+                "row": 1,
+                "cell": 0,
+                "action": "remove_leading_empty_paragraphs",
+                "count": 1,
+                "table_text_sha256": data_entry["table_text_sha256"],
+                "cell_text_sha256": text_sha256(cleanup_cell.text),
+                "result_cell_text_sha256": text_sha256("Conclusion"),
+                "approved": True,
+            }
+        ]
+
+        formatted = Document(source)
+        prime_structure_map_locators(formatted, structure)
+        apply_structure_map(formatted, structure)
+        apply_structure_map(formatted, structure)
+        output = self.root / "figure-panel-cleanup-formatted.docx"
+        formatted.save(output)
+
+        reloaded = Document(output)
+        self.assertEqual(WD_TABLE_ALIGNMENT.CENTER, reloaded.tables[0].alignment)
+        self.assertTrue(
+            all(
+                cell.vertical_alignment == WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                for row in reloaded.tables[0].rows
+                for cell in row.cells
+            )
+        )
+        self.assertTrue(
+            all(
+                paragraph.style.name == "Caption"
+                for cell in reloaded.tables[0].rows[1].cells
+                for paragraph in cell.paragraphs
+                if paragraph.text
+            )
+        )
+        self.assertEqual("Conclusion", reloaded.tables[1].cell(1, 0).text)
+        self.assertEqual(
+            structure_content_fingerprint(source, structure),
+            structure_content_fingerprint(output, structure),
+        )
+        reloaded.styles["Caption"].paragraph_format.alignment = (
+            WD_ALIGN_PARAGRAPH.CENTER
+        )
+        reloaded.styles["Caption"].element.find(qn("w:name")).set(
+            qn("w:val"), "Localized Figure Label"
+        )
+        for cell in reloaded.tables[0].rows[1].cells:
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = None
+        self.assertFalse(audit_structure_table_operations(reloaded, structure))
+        roles = {
+            role["role"]
+            for role in structure["paragraph_roles"]
+            if role["approved"]
+        }
+        self.assertIn("figure_caption_unnumbered", roles)
+        self.assertIn("figure_panel_label", roles)
 
     def test_heading_numbering_inherits_mixed_fonts_size_weight_and_zero_indent(self) -> None:
         document = Document()

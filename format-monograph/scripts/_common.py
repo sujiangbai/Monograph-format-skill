@@ -54,6 +54,8 @@ ROLE_STYLE_MAP = {
     "heading_3": "Heading 3",
     "heading_4": "Heading 4",
     "figure_caption": "Caption",
+    "figure_caption_unnumbered": "Caption",
+    "figure_panel_label": "Caption",
     "table_caption": "Caption",
     "equation_caption": "Caption",
     "reference_entry": "Bibliography",
@@ -132,7 +134,13 @@ TABLE_PROPERTIES = {
     "allow_autofit",
     "cell_margins_mm",
     "vertical_alignment",
+    "all_cell_alignment",
+    "text_wrapping",
     "border_preset",
+    "major_border_pt",
+    "minor_border_pt",
+    "inside_vertical_borders",
+    "horizontal_rule_rows",
     "column_roles",
     "column_alignments",
     "header_bold",
@@ -964,6 +972,7 @@ def _table_effective_properties(
                 key: value
                 for key, value in visual.items()
                 if key not in {"approved", "orientation", "landscape_approved"}
+                and value is not None
             }
         )
     return result
@@ -1046,10 +1055,10 @@ def _cell_borders(cell: Any) -> Any:
 
 
 def _unique_row_cells(row: Any) -> list[Any]:
-    seen: set[int] = set()
+    seen: set[Any] = set()
     result = []
     for cell in row.cells:
-        identity = id(cell._tc)
+        identity = cell._tc
         if identity in seen:
             continue
         seen.add(identity)
@@ -1068,9 +1077,37 @@ def _clear_cell_shading(cell: Any) -> None:
     shading.set(qn("w:fill"), "auto")
 
 
+def _clear_cell_border_overrides(table: Any) -> None:
+    seen: set[Any] = set()
+    for row in table.rows:
+        for cell in row.cells:
+            identity = cell._tc
+            if identity in seen:
+                continue
+            seen.add(identity)
+            tc_pr = cell._tc.get_or_add_tcPr()
+            borders = tc_pr.find(qn("w:tcBorders"))
+            if borders is not None:
+                tc_pr.remove(borders)
+
+
+def _border_size(value: Any, name: str, default: float) -> int:
+    points = float(default if value is None else value)
+    if not 0.25 <= points <= 4:
+        raise FormatMonographError(f"{name} must be between 0.25 and 4 pt.")
+    return round(points * 8)
+
+
 def _set_technical_textbook_borders(
-    table: Any, borders: Any, header_rows: list[int], caption_row: int | None
+    table: Any,
+    borders: Any,
+    header_rows: list[int],
+    caption_row: int | None,
+    properties: dict[str, Any],
 ) -> None:
+    major_size = _border_size(properties.get("major_border_pt"), "major_border_pt", 1)
+    minor_size = _border_size(properties.get("minor_border_pt"), "minor_border_pt", 0.5)
+    _clear_cell_border_overrides(table)
     for row in table.rows:
         for cell in _unique_row_cells(row):
             _clear_cell_shading(cell)
@@ -1082,17 +1119,24 @@ def _set_technical_textbook_borders(
         borders,
         "top",
         style="nil" if has_caption_row else "single",
-        size=0 if has_caption_row else 8,
+        size=0 if has_caption_row else major_size,
     )
-    _set_border(borders, "bottom", style="single", size=8)
+    _set_border(borders, "bottom", style="single", size=major_size)
     for name in ("left", "right", "insideH"):
         _set_border(borders, name, style="nil", size=0)
-    _set_border(borders, "insideV", style="single", size=4)
+    _set_border(
+        borders,
+        "insideV",
+        style="single" if properties.get("inside_vertical_borders", True) else "nil",
+        size=minor_size if properties.get("inside_vertical_borders", True) else 0,
+    )
 
     if has_caption_row:
         for cell in _unique_row_cells(table.rows[caption_row]):
             _set_border(_cell_borders(cell), "top", style="nil", size=0)
-            _set_border(_cell_borders(cell), "bottom", style="single", size=8)
+            _set_border(
+                _cell_borders(cell), "bottom", style="single", size=major_size
+            )
 
     valid_headers = sorted(
         {index for index in header_rows if 0 <= index < len(table.rows)}
@@ -1101,7 +1145,9 @@ def _set_technical_textbook_borders(
         return
     if has_caption_row:
         for cell in _unique_row_cells(table.rows[valid_headers[0]]):
-            _set_border(_cell_borders(cell), "top", style="single", size=8)
+            _set_border(
+                _cell_borders(cell), "top", style="single", size=major_size
+            )
 
     for position, row_index in enumerate(valid_headers):
         next_row = (
@@ -1111,12 +1157,24 @@ def _set_technical_textbook_borders(
             else None
         )
         continuing = (
-            {id(cell._tc) for cell in next_row.cells} if next_row is not None else set()
+            {cell._tc for cell in next_row.cells} if next_row is not None else set()
         )
         for cell in _unique_row_cells(table.rows[row_index]):
-            if id(cell._tc) in continuing:
+            if cell._tc in continuing:
                 continue
-            _set_border(_cell_borders(cell), "bottom", style="single", size=4)
+            _set_border(
+                _cell_borders(cell), "bottom", style="single", size=minor_size
+            )
+
+    for row_index in sorted(
+        {int(value) for value in properties.get("horizontal_rule_rows", [])}
+    ):
+        if not 0 < row_index < len(table.rows):
+            raise FormatMonographError(
+                "horizontal_rule_rows must identify existing non-first rows."
+            )
+        for cell in _unique_row_cells(table.rows[row_index]):
+            _set_border(_cell_borders(cell), "top", style="single", size=minor_size)
 
 
 def _set_table_borders(
@@ -1124,6 +1182,7 @@ def _set_table_borders(
     preset: str,
     header_rows: list[int],
     caption_row: int | None = None,
+    properties: dict[str, Any] | None = None,
 ) -> None:
     if preset == "preserve":
         return
@@ -1136,8 +1195,15 @@ def _set_table_borders(
         for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
             _set_border(borders, name, style="single", size=4)
         return
+    if preset == "borderless":
+        _clear_cell_border_overrides(table)
+        for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            _set_border(borders, name, style="nil", size=0)
+        return
     if preset == "technical_textbook":
-        _set_technical_textbook_borders(table, borders, header_rows, caption_row)
+        _set_technical_textbook_borders(
+            table, borders, header_rows, caption_row, properties or {}
+        )
         return
     if preset != "three_line":
         raise FormatMonographError(f"Unsupported table border preset: {preset}")
@@ -1236,6 +1302,11 @@ def _format_table_text(
         "narrative": "left",
     }
     role_alignments.update(properties.get("column_alignments", {}))
+    all_cell_alignment = properties.get("all_cell_alignment")
+    if all_cell_alignment is not None and all_cell_alignment not in ALIGNMENTS:
+        raise FormatMonographError(
+            f"Unsupported table cell alignment: {all_cell_alignment}"
+        )
     for row_index, row in enumerate(table.rows):
         if caption_row is not None and row_index == caption_row:
             continue
@@ -1243,7 +1314,7 @@ def _format_table_text(
             cell.vertical_alignment = vertical[vertical_name]
             if row_index in header_rows:
                 _set_cell_shading(cell, properties.get("header_shading_hex"))
-            alignment = None
+            alignment = all_cell_alignment
             if row_index in header_rows:
                 alignment = "center"
             elif roles:
@@ -1315,6 +1386,15 @@ def apply_table_properties(
             )
         if "allow_autofit" in effective:
             table.autofit = bool(effective["allow_autofit"])
+        if "text_wrapping" in effective:
+            value = str(effective["text_wrapping"])
+            if value != "none":
+                raise FormatMonographError(
+                    "Only text_wrapping=none is supported for deterministic tables."
+                )
+            floating = table._tbl.tblPr.find(qn("w:tblpPr"))
+            if floating is not None:
+                table._tbl.tblPr.remove(floating)
         if "cell_margins_mm" in effective:
             _set_table_cell_margins(table, effective["cell_margins_mm"])
         if "repeat_header_row" in effective and table.rows:
@@ -1338,6 +1418,7 @@ def apply_table_properties(
             str(effective.get("border_preset", "preserve")),
             header_rows,
             caption_row_index,
+            effective,
         )
         _format_table_text(
             table,

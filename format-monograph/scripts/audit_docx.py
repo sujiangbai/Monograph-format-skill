@@ -37,6 +37,7 @@ from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    audit_structure_table_operations,
     has_semantic_structure_map,
     load_structure_map,
     resolve_paragraph_locator,
@@ -431,33 +432,62 @@ def _border_value(container: Any, name: str) -> tuple[str | None, int | None]:
     )
 
 
-def _technical_textbook_table_matches(table: Any, entry: dict) -> bool:
+def _technical_textbook_table_matches(
+    table: Any, entry: dict, properties: dict | None = None
+) -> bool:
+    properties = properties or {}
+    major_size = round(float(properties.get("major_border_pt", 1)) * 8)
+    minor_size = round(float(properties.get("minor_border_pt", 0.5)) * 8)
+    inside_vertical = bool(properties.get("inside_vertical_borders", True))
     borders = table._tbl.tblPr.find(qn("w:tblBorders"))
     caption_row = entry.get("caption_row")
     has_caption = caption_row is not None and 0 <= int(caption_row) < len(table.rows)
     expected = {
-        "top": (("nil", 0) if has_caption else ("single", 8)),
-        "bottom": ("single", 8),
+        "top": (("nil", 0) if has_caption else ("single", major_size)),
+        "bottom": ("single", major_size),
         "left": ("nil", 0),
         "right": ("nil", 0),
         "insideH": ("nil", 0),
-        "insideV": ("single", 4),
+        "insideV": (
+            ("single", minor_size) if inside_vertical else ("nil", 0)
+        ),
     }
     if any(_border_value(borders, name) != value for name, value in expected.items()):
         return False
     for row in table.rows:
-        seen: set[int] = set()
+        seen: set[Any] = set()
         for cell in row.cells:
-            if id(cell._tc) in seen:
+            if cell._tc in seen:
                 continue
-            seen.add(id(cell._tc))
+            seen.add(cell._tc)
             shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
             if shading is not None and shading.get(qn("w:fill")) not in {None, "auto"}:
+                return False
+            cell_borders = cell._tc.get_or_add_tcPr().find(qn("w:tcBorders"))
+            if cell_borders is not None and any(
+                _border_value(cell_borders, name)[0] not in {None, "nil"}
+                for name in ("left", "right", "insideH", "insideV")
+            ):
+                return False
+    for row_index in properties.get("horizontal_rule_rows", []):
+        if not 0 < int(row_index) < len(table.rows):
+            return False
+        for cell in table.rows[int(row_index)].cells:
+            if _border_value(_cell_border_container(cell), "top") != (
+                "single",
+                minor_size,
+            ):
                 return False
     return True
 
 
-def _table_visual_value(table: Any, entry: dict, key: str) -> Any:
+def _cell_border_container(cell: Any) -> Any:
+    return cell._tc.get_or_add_tcPr().find(qn("w:tcBorders"))
+
+
+def _table_visual_value(
+    table: Any, entry: dict, key: str, properties: dict | None = None
+) -> Any:
     tbl_pr = table._tbl.tblPr
     if key == "available_width_percent":
         width = tbl_pr.find(qn("w:tblW"))
@@ -519,8 +549,10 @@ def _table_visual_value(table: Any, entry: dict, key: str) -> Any:
             values[name] == "nil" for name in ("left", "right", "insideH", "insideV")
         ):
             return "three_line"
-        if _technical_textbook_table_matches(table, entry):
+        if _technical_textbook_table_matches(table, entry, properties):
             return "technical_textbook"
+        if all(value == "nil" for value in values.values()):
+            return "borderless"
         return "custom"
     return "<verified_by_content_and_visual_qa>"
 
@@ -559,13 +591,31 @@ def audit_table_rule(
                 "allow_autofit",
                 "cell_margins_mm",
                 "vertical_alignment",
+                "all_cell_alignment",
+                "text_wrapping",
                 "border_preset",
             }:
-                actual = (
-                    "preserve"
-                    if key == "border_preset" and expected == "preserve"
-                    else _table_visual_value(table, entry, key)
-                )
+                if key == "all_cell_alignment":
+                    values = {
+                        normalized_alignment(str(paragraph.alignment))
+                        for row in table.rows
+                        for cell in row.cells
+                        for paragraph in cell.paragraphs
+                        if paragraph.text.strip()
+                    }
+                    actual = values.pop() if len(values) == 1 else sorted(values)
+                elif key == "text_wrapping":
+                    actual = (
+                        "around"
+                        if table._tbl.tblPr.find(qn("w:tblpPr")) is not None
+                        else "none"
+                    )
+                else:
+                    actual = (
+                        "preserve"
+                        if key == "border_preset" and expected == "preserve"
+                        else _table_visual_value(table, entry, key, effective)
+                    )
             elif key in {
                 "column_roles",
                 "column_alignments",
@@ -573,6 +623,10 @@ def audit_table_rule(
                 "header_shading_hex",
                 "font_size_pt",
                 "line_spacing_pt",
+                "major_border_pt",
+                "minor_border_pt",
+                "inside_vertical_borders",
+                "horizontal_rule_rows",
             }:
                 actual = expected
             elif key in {
@@ -935,7 +989,16 @@ def main() -> int:
             else ([], {})
         )
         content_ok = original_fp == formatted_fp
-        rules_ok = all(item["status"] != "fail" for item in rule_results) and not pagination_failures
+        structure_table_failures = (
+            audit_structure_table_operations(document, structure_map)
+            if structure_map
+            else []
+        )
+        rules_ok = (
+            all(item["status"] != "fail" for item in rule_results)
+            and not pagination_failures
+            and not structure_table_failures
+        )
         caption_replacements = (
             audit_caption_identifier_replacements(
                 args.original, args.formatted, structure_map
@@ -980,6 +1043,10 @@ def main() -> int:
                 "passed": not pagination_failures,
                 "failures": pagination_failures,
                 "inventory": pagination,
+            },
+            "structure_table_operations": {
+                "passed": not structure_table_failures,
+                "failures": structure_table_failures,
             },
             "rules": rule_results,
         }
