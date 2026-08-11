@@ -54,6 +54,8 @@ ROLE_STYLE_MAP = {
     "heading_3": "Heading 3",
     "heading_4": "Heading 4",
     "figure_caption": "Caption",
+    "figure_caption_unnumbered": "Caption",
+    "figure_panel_label": "Caption",
     "table_caption": "Caption",
     "equation_caption": "Caption",
     "reference_entry": "Bibliography",
@@ -132,7 +134,13 @@ TABLE_PROPERTIES = {
     "allow_autofit",
     "cell_margins_mm",
     "vertical_alignment",
+    "all_cell_alignment",
+    "text_wrapping",
     "border_preset",
+    "major_border_pt",
+    "minor_border_pt",
+    "inside_vertical_borders",
+    "horizontal_rule_rows",
     "column_roles",
     "column_alignments",
     "header_bold",
@@ -964,6 +972,7 @@ def _table_effective_properties(
                 key: value
                 for key, value in visual.items()
                 if key not in {"approved", "orientation", "landscape_approved"}
+                and value is not None
             }
         )
     return result
@@ -1036,7 +1045,145 @@ def _set_border(element: Any, name: str, *, style: str, size: int = 4) -> None:
     border.set(qn("w:color"), "000000")
 
 
-def _set_table_borders(table: Any, preset: str, header_rows: list[int]) -> None:
+def _cell_borders(cell: Any) -> Any:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = tc_pr.find(qn("w:tcBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tcBorders")
+        tc_pr.append(borders)
+    return borders
+
+
+def _unique_row_cells(row: Any) -> list[Any]:
+    seen: set[Any] = set()
+    result = []
+    for cell in row.cells:
+        identity = cell._tc
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(cell)
+    return result
+
+
+def _clear_cell_shading(cell: Any) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
+    shading.set(qn("w:fill"), "auto")
+
+
+def _clear_cell_border_overrides(table: Any) -> None:
+    seen: set[Any] = set()
+    for row in table.rows:
+        for cell in row.cells:
+            identity = cell._tc
+            if identity in seen:
+                continue
+            seen.add(identity)
+            tc_pr = cell._tc.get_or_add_tcPr()
+            borders = tc_pr.find(qn("w:tcBorders"))
+            if borders is not None:
+                tc_pr.remove(borders)
+
+
+def _border_size(value: Any, name: str, default: float) -> int:
+    points = float(default if value is None else value)
+    if not 0.25 <= points <= 4:
+        raise FormatMonographError(f"{name} must be between 0.25 and 4 pt.")
+    return round(points * 8)
+
+
+def _set_technical_textbook_borders(
+    table: Any,
+    borders: Any,
+    header_rows: list[int],
+    caption_row: int | None,
+    properties: dict[str, Any],
+) -> None:
+    major_size = _border_size(properties.get("major_border_pt"), "major_border_pt", 1)
+    minor_size = _border_size(properties.get("minor_border_pt"), "minor_border_pt", 0.5)
+    _clear_cell_border_overrides(table)
+    for row in table.rows:
+        for cell in _unique_row_cells(row):
+            _clear_cell_shading(cell)
+
+    has_caption_row = (
+        caption_row is not None and 0 <= caption_row < len(table.rows)
+    )
+    _set_border(
+        borders,
+        "top",
+        style="nil" if has_caption_row else "single",
+        size=0 if has_caption_row else major_size,
+    )
+    _set_border(borders, "bottom", style="single", size=major_size)
+    for name in ("left", "right", "insideH"):
+        _set_border(borders, name, style="nil", size=0)
+    _set_border(
+        borders,
+        "insideV",
+        style="single" if properties.get("inside_vertical_borders", True) else "nil",
+        size=minor_size if properties.get("inside_vertical_borders", True) else 0,
+    )
+
+    if has_caption_row:
+        for cell in _unique_row_cells(table.rows[caption_row]):
+            _set_border(_cell_borders(cell), "top", style="nil", size=0)
+            _set_border(
+                _cell_borders(cell), "bottom", style="single", size=major_size
+            )
+
+    valid_headers = sorted(
+        {index for index in header_rows if 0 <= index < len(table.rows)}
+    )
+    if not valid_headers:
+        return
+    if has_caption_row:
+        for cell in _unique_row_cells(table.rows[valid_headers[0]]):
+            _set_border(
+                _cell_borders(cell), "top", style="single", size=major_size
+            )
+
+    for position, row_index in enumerate(valid_headers):
+        next_row = (
+            table.rows[valid_headers[position + 1]]
+            if position + 1 < len(valid_headers)
+            and valid_headers[position + 1] == row_index + 1
+            else None
+        )
+        continuing = (
+            {cell._tc for cell in next_row.cells} if next_row is not None else set()
+        )
+        for cell in _unique_row_cells(table.rows[row_index]):
+            if cell._tc in continuing:
+                continue
+            _set_border(
+                _cell_borders(cell), "bottom", style="single", size=minor_size
+            )
+
+    for row_index in sorted(
+        {int(value) for value in properties.get("horizontal_rule_rows", [])}
+    ):
+        if not 0 < row_index < len(table.rows):
+            raise FormatMonographError(
+                "horizontal_rule_rows must identify existing non-first rows."
+            )
+        for cell in _unique_row_cells(table.rows[row_index]):
+            _set_border(_cell_borders(cell), "top", style="single", size=minor_size)
+
+
+def _set_table_borders(
+    table: Any,
+    preset: str,
+    header_rows: list[int],
+    caption_row: int | None = None,
+    properties: dict[str, Any] | None = None,
+) -> None:
     if preset == "preserve":
         return
     tbl_pr = table._tbl.tblPr
@@ -1047,6 +1194,16 @@ def _set_table_borders(table: Any, preset: str, header_rows: list[int]) -> None:
     if preset == "full_grid":
         for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
             _set_border(borders, name, style="single", size=4)
+        return
+    if preset == "borderless":
+        _clear_cell_border_overrides(table)
+        for name in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            _set_border(borders, name, style="nil", size=0)
+        return
+    if preset == "technical_textbook":
+        _set_technical_textbook_borders(
+            table, borders, header_rows, caption_row, properties or {}
+        )
         return
     if preset != "three_line":
         raise FormatMonographError(f"Unsupported table border preset: {preset}")
@@ -1081,8 +1238,49 @@ def _set_cell_shading(cell: Any, color: str | None) -> None:
     shading.set(qn("w:fill"), value)
 
 
+def _table_no_indent_style(paragraph: Any, base_style: Any) -> Any:
+    document = paragraph.part.document
+    suffix = "" if base_style.name == "Normal" else f" ({base_style.style_id})"
+    style_name = f"Monograph Table Text{suffix}"
+    try:
+        style = document.styles[style_name]
+    except KeyError:
+        style = document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+    style.base_style = base_style
+    ind = style.element.get_or_add_pPr().get_or_add_ind()
+    ind.set(qn("w:firstLine"), "0")
+    ind.set(qn("w:firstLineChars"), "0")
+    ind.attrib.pop(qn("w:hanging"), None)
+    ind.attrib.pop(qn("w:hangingChars"), None)
+    return style
+
+
+def _neutralize_inherited_table_first_line_indent(paragraph: Any) -> None:
+    p_pr = paragraph._p.pPr
+    direct_ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+    controlled = ("firstLine", "firstLineChars", "hanging", "hangingChars")
+    if direct_ind is not None and any(
+        direct_ind.get(qn(f"w:{name}")) is not None for name in controlled
+    ):
+        return
+
+    style = paragraph.style
+    while style is not None:
+        style_p_pr = style.element.pPr
+        style_ind = None if style_p_pr is None else style_p_pr.find(qn("w:ind"))
+        if style_ind is not None and any(
+            style_ind.get(qn(f"w:{name}")) is not None for name in controlled
+        ):
+            paragraph.style = _table_no_indent_style(paragraph, paragraph.style)
+            return
+        style = style.base_style
+
+
 def _format_table_text(
-    table: Any, properties: dict[str, Any], header_rows: list[int]
+    table: Any,
+    properties: dict[str, Any],
+    header_rows: list[int],
+    caption_row: int | None = None,
 ) -> None:
     vertical = {
         "top": WD_CELL_VERTICAL_ALIGNMENT.TOP,
@@ -1104,18 +1302,31 @@ def _format_table_text(
         "narrative": "left",
     }
     role_alignments.update(properties.get("column_alignments", {}))
+    all_cell_alignment = properties.get("all_cell_alignment")
+    if all_cell_alignment is not None and all_cell_alignment not in ALIGNMENTS:
+        raise FormatMonographError(
+            f"Unsupported table cell alignment: {all_cell_alignment}"
+        )
     for row_index, row in enumerate(table.rows):
+        if caption_row is not None and row_index == caption_row:
+            continue
         for column_index, cell in enumerate(row.cells):
             cell.vertical_alignment = vertical[vertical_name]
             if row_index in header_rows:
                 _set_cell_shading(cell, properties.get("header_shading_hex"))
-            alignment = "center" if row_index in header_rows else role_alignments.get(
-                roles[column_index] if roles else "narrative", "left"
-            )
-            if alignment not in ALIGNMENTS:
-                raise FormatMonographError(f"Unsupported table cell alignment: {alignment}")
+            alignment = all_cell_alignment
+            if row_index in header_rows:
+                alignment = "center"
+            elif roles:
+                alignment = role_alignments.get(roles[column_index], "left")
+            if alignment is not None and alignment not in ALIGNMENTS:
+                raise FormatMonographError(
+                    f"Unsupported table cell alignment: {alignment}"
+                )
             for paragraph in cell.paragraphs:
-                paragraph.alignment = ALIGNMENTS[alignment]
+                _neutralize_inherited_table_first_line_indent(paragraph)
+                if alignment is not None:
+                    paragraph.alignment = ALIGNMENTS[alignment]
                 if "line_spacing_pt" in properties:
                     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                     paragraph.paragraph_format.line_spacing = Pt(
@@ -1175,6 +1386,15 @@ def apply_table_properties(
             )
         if "allow_autofit" in effective:
             table.autofit = bool(effective["allow_autofit"])
+        if "text_wrapping" in effective:
+            value = str(effective["text_wrapping"])
+            if value != "none":
+                raise FormatMonographError(
+                    "Only text_wrapping=none is supported for deterministic tables."
+                )
+            floating = table._tbl.tblPr.find(qn("w:tblpPr"))
+            if floating is not None:
+                table._tbl.tblPr.remove(floating)
         if "cell_margins_mm" in effective:
             _set_table_cell_margins(table, effective["cell_margins_mm"])
         if "repeat_header_row" in effective and table.rows:
@@ -1191,10 +1411,21 @@ def apply_table_properties(
                     continue
                 _set_prevent_row_split(row, bool(effective["prevent_row_split"]))
         header_rows = [int(value) for value in entry.get("header_rows", [0])]
+        caption_row = entry.get("caption_row")
+        caption_row_index = None if caption_row is None else int(caption_row)
         _set_table_borders(
-            table, str(effective.get("border_preset", "preserve")), header_rows
+            table,
+            str(effective.get("border_preset", "preserve")),
+            header_rows,
+            caption_row_index,
+            effective,
         )
-        _format_table_text(table, effective, header_rows)
+        _format_table_text(
+            table,
+            effective,
+            header_rows,
+            caption_row_index,
+        )
     return len(selected)
 
 
@@ -1428,6 +1659,131 @@ def _next_numbering_id(root: Any, tag: str, attribute: str) -> int:
     return max(values, default=0) + 1
 
 
+def _style_scalar(style: Any, attribute: str) -> Any:
+    current = style
+    while current is not None:
+        value = getattr(current.font, attribute)
+        if value is not None:
+            return value
+        current = current.base_style
+    return None
+
+
+def _heading_numbering_run_properties(document: Any, style: Any) -> Any:
+    r_pr = OxmlElement("w:rPr")
+    r_fonts = OxmlElement("w:rFonts")
+    for attribute in ("ascii", "hAnsi", "eastAsia", "cs"):
+        effective_attribute = "ascii" if attribute == "hAnsi" else attribute
+        value = style_effective_font(document, style, effective_attribute)[0]
+        if value:
+            r_fonts.set(qn(f"w:{attribute}"), value)
+    if r_fonts.attrib:
+        r_pr.append(r_fonts)
+
+    size = _style_scalar(style, "size")
+    if size is not None:
+        half_points = str(int(round(size.pt * 2)))
+        for tag in ("sz", "szCs"):
+            element = OxmlElement(f"w:{tag}")
+            element.set(qn("w:val"), half_points)
+            r_pr.append(element)
+
+    bold = _style_scalar(style, "bold")
+    if bold is not None:
+        for tag in ("b", "bCs"):
+            element = OxmlElement(f"w:{tag}")
+            element.set(qn("w:val"), "1" if bold else "0")
+            r_pr.append(element)
+    return r_pr
+
+
+def _zero_heading_first_line_indent(document: Any, levels: int) -> None:
+    controlled = ("firstLine", "firstLineChars", "hanging", "hangingChars")
+    for level in range(levels):
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        ind = style.element.get_or_add_pPr().get_or_add_ind()
+        ind.set(qn("w:firstLine"), "0")
+        ind.set(qn("w:firstLineChars"), "0")
+        for attribute in ("hanging", "hangingChars"):
+            ind.attrib.pop(qn(f"w:{attribute}"), None)
+        for paragraph in iter_document_paragraphs(document):
+            if paragraph.style is None or paragraph.style.name != style.name:
+                continue
+            p_pr = paragraph._p.pPr
+            direct_ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+            if direct_ind is None:
+                continue
+            for attribute in controlled:
+                direct_ind.attrib.pop(qn(f"w:{attribute}"), None)
+            if not direct_ind.attrib and len(direct_ind) == 0:
+                p_pr.remove(direct_ind)
+
+
+def _numbering_level_for_style(document: Any, level: int) -> Any | None:
+    style = ensure_paragraph_style(document, f"Heading {level + 1}")
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    num = next(
+        (item for item in root.findall(qn("w:num")) if item.get(qn("w:numId")) == num_id),
+        None,
+    )
+    abstract_ref = None if num is None else num.find(qn("w:abstractNumId"))
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(qn("w:val"))
+    abstract = next(
+        (
+            item
+            for item in root.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        ),
+        None,
+    )
+    if abstract is None:
+        return None
+    return next(
+        (
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == str(level)
+        ),
+        None,
+    )
+
+
+def synchronize_heading_numbering_format(document: Any, levels: int) -> int:
+    _zero_heading_first_line_indent(document, levels)
+    changed = 0
+    for level in range(levels):
+        lvl = _numbering_level_for_style(document, level)
+        if lvl is None:
+            continue
+        p_pr = lvl.find(qn("w:pPr"))
+        if p_pr is None:
+            p_pr = OxmlElement("w:pPr")
+            lvl.append(p_pr)
+        ind = p_pr.find(qn("w:ind"))
+        if ind is None:
+            ind = OxmlElement("w:ind")
+            p_pr.append(ind)
+        ind.set(qn("w:firstLine"), "0")
+        ind.set(qn("w:firstLineChars"), "0")
+        for attribute in ("hanging", "hangingChars"):
+            ind.attrib.pop(qn(f"w:{attribute}"), None)
+        previous = lvl.find(qn("w:rPr"))
+        if previous is not None:
+            lvl.remove(previous)
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        lvl.append(_heading_numbering_run_properties(document, style))
+        changed += 1
+    return changed
+
+
 def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1) -> int:
     if not 1 <= levels <= 4:
         raise FormatMonographError("heading_levels must be between 1 and 4.")
@@ -1443,6 +1799,7 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
     multi.set(qn("w:val"), "multilevel")
     abstract.append(multi)
 
+    _zero_heading_first_line_indent(document, levels)
     for level in range(levels):
         lvl = OxmlElement("w:lvl")
         lvl.set(qn("w:ilvl"), str(level))
@@ -1463,6 +1820,14 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
         suff = OxmlElement("w:suff")
         suff.set(qn("w:val"), "space")
         lvl.extend([start, num_fmt, p_style, lvl_text, suff])
+        lvl_p_pr = OxmlElement("w:pPr")
+        lvl_ind = OxmlElement("w:ind")
+        lvl_ind.set(qn("w:firstLine"), "0")
+        lvl_ind.set(qn("w:firstLineChars"), "0")
+        lvl_p_pr.append(lvl_ind)
+        lvl.append(lvl_p_pr)
+        style = ensure_paragraph_style(document, f"Heading {level + 1}")
+        lvl.append(_heading_numbering_run_properties(document, style))
         abstract.append(lvl)
     root.insert(0, abstract)
 
@@ -1496,6 +1861,7 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
         number = OxmlElement("w:numId")
         number.set(qn("w:val"), str(num_id))
         num_pr.extend([ilvl, number])
+    synchronize_heading_numbering_format(document, levels)
     return levels
 
 

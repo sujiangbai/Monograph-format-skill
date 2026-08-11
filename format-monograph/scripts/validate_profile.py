@@ -96,8 +96,41 @@ def semantic_errors(profile: dict) -> list[str]:
                 "preserve",
                 "three_line",
                 "full_grid",
+                "technical_textbook",
+                "borderless",
             }:
                 errors.append(f"Table rule {rule['id']} has invalid border_preset.")
+            for key in ("major_border_pt", "minor_border_pt"):
+                if key in properties and not 0.25 <= float(properties[key]) <= 4:
+                    errors.append(f"Table rule {rule['id']} {key} must be 0.25-4 pt.")
+            if "inside_vertical_borders" in properties and not isinstance(
+                properties["inside_vertical_borders"], bool
+            ):
+                errors.append(
+                    f"Table rule {rule['id']} inside_vertical_borders must be boolean."
+                )
+            if "horizontal_rule_rows" in properties and (
+                not isinstance(properties["horizontal_rule_rows"], list)
+                or any(
+                    not isinstance(value, int) or value < 1
+                    for value in properties["horizontal_rule_rows"]
+                )
+            ):
+                errors.append(
+                    f"Table rule {rule['id']} horizontal_rule_rows must contain positive integers."
+                )
+            if properties.get("all_cell_alignment") not in {
+                None,
+                "left",
+                "center",
+                "right",
+                "justify",
+            }:
+                errors.append(
+                    f"Table rule {rule['id']} has invalid all_cell_alignment."
+                )
+            if properties.get("text_wrapping") not in {None, "none"}:
+                errors.append(f"Table rule {rule['id']} has invalid text_wrapping.")
             width = properties.get("available_width_percent")
             if width is not None and not 1 <= float(width) <= 100:
                 errors.append(

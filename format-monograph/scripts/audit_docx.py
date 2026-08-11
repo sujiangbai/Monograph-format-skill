@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from _common import (
     _table_effective_properties,
     content_fingerprint,
     equation_inventory,
+    field_cache_inventory,
     font_alias_keys,
     load_document,
     protected_object_manifest,
@@ -35,6 +37,8 @@ from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    audit_structure_image_operations,
+    audit_structure_table_operations,
     has_semantic_structure_map,
     load_structure_map,
     resolve_paragraph_locator,
@@ -59,9 +63,20 @@ def style_value(document: Any, style: Any, key: str) -> Any:
     if key == "font_name_complex_script":
         return style_effective_font(document, style, "cs")[0]
     if key == "font_size_pt":
-        return None if font.size is None else font.size.pt
+        current = style
+        while current is not None:
+            if current.font.size is not None:
+                return current.font.size.pt
+            current = current.base_style
+        return None
     if key in {"bold", "italic"}:
-        return getattr(font, key)
+        current = style
+        while current is not None:
+            value = getattr(current.font, key)
+            if value is not None:
+                return value
+            current = current.base_style
+        return False
     if key == "color_hex":
         return None if font.color.rgb is None else str(font.color.rgb)
     if key == "alignment":
@@ -74,13 +89,34 @@ def style_value(document: Any, style: Any, key: str) -> Any:
         "right_indent_pt": pf.right_indent,
     }
     if key in point_values:
-        value = point_values[key]
-        return None if value is None else value.pt
+        attribute = {
+            "space_before_pt": "space_before",
+            "space_after_pt": "space_after",
+            "first_line_indent_pt": "first_line_indent",
+            "left_indent_pt": "left_indent",
+            "right_indent_pt": "right_indent",
+        }[key]
+        current = style
+        while current is not None:
+            value = getattr(current.paragraph_format, attribute)
+            if value is not None:
+                return value.pt
+            current = current.base_style
+        return 0.0 if key in {"space_before_pt", "space_after_pt"} else None
     if key == "first_line_indent_chars":
-        p_pr = style.element.pPr
-        ind = None if p_pr is None else p_pr.find(qn("w:ind"))
-        value = None if ind is None else ind.get(qn("w:firstLineChars"))
-        return None if value is None else int(value) / 100
+        current = style
+        while current is not None:
+            p_pr = current.element.pPr
+            ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+            if ind is not None:
+                value = ind.get(qn("w:firstLineChars"))
+                if value is not None:
+                    return int(value) / 100
+                point_value = ind.get(qn("w:firstLine"))
+                if point_value == "0":
+                    return 0
+            current = current.base_style
+        return None
     if key == "line_spacing":
         value = pf.line_spacing
         return float(value) if isinstance(value, (int, float)) else None
@@ -103,7 +139,15 @@ def style_value(document: Any, style: Any, key: str) -> Any:
             return "single"
         return value
     if key in {"keep_with_next", "keep_together", "page_break_before", "widow_control"}:
-        return getattr(pf, key)
+        current = style
+        while current is not None:
+            value = getattr(current.paragraph_format, key)
+            if value is not None:
+                return value
+            current = current.base_style
+        if key == "widow_control":
+            return True
+        return False
     return "<unsupported>"
 
 
@@ -216,6 +260,21 @@ def paragraph_effective_value(document: Any, paragraph: Any, key: str) -> Any:
         ind = None if p_pr is None else p_pr.find(qn("w:ind"))
         value = None if ind is None else ind.get(qn("w:firstLineChars"))
         direct = None if value is None else int(value) / 100
+        if direct is None and ind is not None and ind.get(qn("w:firstLine")) == "0":
+            direct = 0
+        if direct is None and paragraph.style is not None:
+            match = re.fullmatch(r"Heading ([1-4])", paragraph.style.name)
+            if match:
+                lvl = heading_numbering_level(document, int(match.group(1)) - 1)
+                lvl_ind = None if lvl is None else lvl.find(
+                    qn("w:pPr") + "/" + qn("w:ind")
+                )
+                if lvl_ind is not None:
+                    chars = lvl_ind.get(qn("w:firstLineChars"))
+                    if chars is not None:
+                        direct = int(chars) / 100
+                    elif lvl_ind.get(qn("w:firstLine")) == "0":
+                        direct = 0
     elif key == "line_spacing":
         value = pf.line_spacing
         direct = float(value) if isinstance(value, (int, float)) else None
@@ -249,12 +308,19 @@ def paragraph_effective_value(document: Any, paragraph: Any, key: str) -> Any:
 def audit_paragraph_rule(
     document: Any, rule: dict[str, Any], paragraphs: list[Any]
 ) -> list[dict[str, Any]]:
-    failures = audit_style_rule(document, rule)
+    failures = []
     for target_index, paragraph in enumerate(paragraphs):
         for key, expected in rule["properties"].items():
             if key not in STYLE_PROPERTIES:
                 continue
             actual = paragraph_effective_value(document, paragraph, key)
+            if (
+                key == "page_break_before"
+                and expected is True
+                and actual is False
+                and _paragraph_starts_new_page_section(paragraph)
+            ):
+                continue
             if not compare_value(key, actual, expected):
                 failures.append(
                     {
@@ -266,6 +332,21 @@ def audit_paragraph_rule(
                     }
                 )
     return failures
+
+
+def _paragraph_starts_new_page_section(paragraph: Any) -> bool:
+    previous = paragraph._p.getprevious()
+    if previous is None or previous.tag != qn("w:p"):
+        return False
+    p_pr = previous.find(qn("w:pPr"))
+    sect_pr = None if p_pr is None else p_pr.find(qn("w:sectPr"))
+    if sect_pr is None:
+        return False
+    section_type = sect_pr.find(qn("w:type"))
+    section_value = (
+        section_type.get(qn("w:val")) if section_type is not None else "nextPage"
+    )
+    return section_value != "continuous"
 
 
 def audit_style_rule(document: Any, rule: dict) -> list[dict]:
@@ -290,7 +371,9 @@ def document_toggle(document: Any, name: str) -> bool:
     return document.settings.element.find(qn(f"w:{name}")) is not None
 
 
-def audit_section_rule(document: Any, rule: dict) -> list[dict]:
+def audit_section_rule(
+    document: Any, rule: dict, structure_map: dict[str, Any] | None = None
+) -> list[dict]:
     failures = []
     for index, section in enumerate(document.sections):
         width = float(section.page_width.mm)
@@ -318,6 +401,12 @@ def audit_section_rule(document: Any, rule: dict) -> list[dict]:
             "orientation": "landscape" if section.page_width > section.page_height else "portrait",
         }
         for key, expected in rule["properties"].items():
+            if (
+                key == "different_first_page_header_footer"
+                and index == 0
+                and (structure_map or {}).get("front_matter", {}).get("approved")
+            ):
+                continue
             actual = values.get(key, "<unsupported>")
             if not compare_value(key, actual, expected):
                 failures.append(
@@ -336,7 +425,70 @@ def row_property(row: Any, name: str) -> bool:
     return tr_pr is not None and tr_pr.find(qn(f"w:{name}")) is not None
 
 
-def _table_visual_value(table: Any, entry: dict, key: str) -> Any:
+def _border_value(container: Any, name: str) -> tuple[str | None, int | None]:
+    border = None if container is None else container.find(qn(f"w:{name}"))
+    return (
+        None if border is None else border.get(qn("w:val")),
+        None if border is None else int(border.get(qn("w:sz"), "0")),
+    )
+
+
+def _technical_textbook_table_matches(
+    table: Any, entry: dict, properties: dict | None = None
+) -> bool:
+    properties = properties or {}
+    major_size = round(float(properties.get("major_border_pt", 1)) * 8)
+    minor_size = round(float(properties.get("minor_border_pt", 0.5)) * 8)
+    inside_vertical = bool(properties.get("inside_vertical_borders", True))
+    borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+    caption_row = entry.get("caption_row")
+    has_caption = caption_row is not None and 0 <= int(caption_row) < len(table.rows)
+    expected = {
+        "top": (("nil", 0) if has_caption else ("single", major_size)),
+        "bottom": ("single", major_size),
+        "left": ("nil", 0),
+        "right": ("nil", 0),
+        "insideH": ("nil", 0),
+        "insideV": (
+            ("single", minor_size) if inside_vertical else ("nil", 0)
+        ),
+    }
+    if any(_border_value(borders, name) != value for name, value in expected.items()):
+        return False
+    for row in table.rows:
+        seen: set[Any] = set()
+        for cell in row.cells:
+            if cell._tc in seen:
+                continue
+            seen.add(cell._tc)
+            shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
+            if shading is not None and shading.get(qn("w:fill")) not in {None, "auto"}:
+                return False
+            cell_borders = cell._tc.get_or_add_tcPr().find(qn("w:tcBorders"))
+            if cell_borders is not None and any(
+                _border_value(cell_borders, name)[0] not in {None, "nil"}
+                for name in ("left", "right", "insideH", "insideV")
+            ):
+                return False
+    for row_index in properties.get("horizontal_rule_rows", []):
+        if not 0 < int(row_index) < len(table.rows):
+            return False
+        for cell in table.rows[int(row_index)].cells:
+            if _border_value(_cell_border_container(cell), "top") != (
+                "single",
+                minor_size,
+            ):
+                return False
+    return True
+
+
+def _cell_border_container(cell: Any) -> Any:
+    return cell._tc.get_or_add_tcPr().find(qn("w:tcBorders"))
+
+
+def _table_visual_value(
+    table: Any, entry: dict, key: str, properties: dict | None = None
+) -> Any:
     tbl_pr = table._tbl.tblPr
     if key == "available_width_percent":
         width = tbl_pr.find(qn("w:tblW"))
@@ -398,6 +550,10 @@ def _table_visual_value(table: Any, entry: dict, key: str) -> Any:
             values[name] == "nil" for name in ("left", "right", "insideH", "insideV")
         ):
             return "three_line"
+        if _technical_textbook_table_matches(table, entry, properties):
+            return "technical_textbook"
+        if all(value == "nil" for value in values.values()):
+            return "borderless"
         return "custom"
     return "<verified_by_content_and_visual_qa>"
 
@@ -436,9 +592,31 @@ def audit_table_rule(
                 "allow_autofit",
                 "cell_margins_mm",
                 "vertical_alignment",
+                "all_cell_alignment",
+                "text_wrapping",
                 "border_preset",
             }:
-                actual = _table_visual_value(table, entry, key)
+                if key == "all_cell_alignment":
+                    values = {
+                        normalized_alignment(str(paragraph.alignment))
+                        for row in table.rows
+                        for cell in row.cells
+                        for paragraph in cell.paragraphs
+                        if paragraph.text.strip()
+                    }
+                    actual = values.pop() if len(values) == 1 else sorted(values)
+                elif key == "text_wrapping":
+                    actual = (
+                        "around"
+                        if table._tbl.tblPr.find(qn("w:tblpPr")) is not None
+                        else "none"
+                    )
+                else:
+                    actual = (
+                        "preserve"
+                        if key == "border_preset" and expected == "preserve"
+                        else _table_visual_value(table, entry, key, effective)
+                    )
             elif key in {
                 "column_roles",
                 "column_alignments",
@@ -446,6 +624,10 @@ def audit_table_rule(
                 "header_shading_hex",
                 "font_size_pt",
                 "line_spacing_pt",
+                "major_border_pt",
+                "minor_border_pt",
+                "inside_vertical_borders",
+                "horizontal_rule_rows",
             }:
                 actual = expected
             elif key in {
@@ -455,7 +637,9 @@ def audit_table_rule(
             }:
                 actual = [
                     run_font_value(document, paragraph, run, key)
-                    for row in table.rows
+                    for row_index, row in enumerate(table.rows)
+                    if entry.get("caption_row") is None
+                    or row_index != int(entry["caption_row"])
                     for cell in row.cells
                     for paragraph in cell.paragraphs
                     for run in paragraph.runs
@@ -506,13 +690,123 @@ def heading_numbering_start(document: Any) -> int | None:
     return None
 
 
+def heading_numbering_level(document: Any, level: int) -> Any | None:
+    style = document.styles[f"Heading {level + 1}"]
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    num = next(
+        (item for item in root.findall(qn("w:num")) if item.get(qn("w:numId")) == num_id),
+        None,
+    )
+    abstract_ref = None if num is None else num.find(qn("w:abstractNumId"))
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(qn("w:val"))
+    abstract = next(
+        (
+            item
+            for item in root.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        ),
+        None,
+    )
+    if abstract is None:
+        return None
+    return next(
+        (
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == str(level)
+        ),
+        None,
+    )
+
+
+def heading_numbering_format_failures(document: Any, levels: int) -> list[dict]:
+    failures = []
+    for level in range(levels):
+        style = document.styles[f"Heading {level + 1}"]
+        lvl = heading_numbering_level(document, level)
+        if lvl is None:
+            continue
+        ind = lvl.find(qn("w:pPr") + "/" + qn("w:ind"))
+        has_zero_indent = ind is not None and (
+            ind.get(qn("w:firstLineChars")) == "0"
+            or ind.get(qn("w:firstLine")) == "0"
+        )
+        if not has_zero_indent:
+            failures.append(
+                {
+                    "property": "heading_first_line_indent",
+                    "heading_level": level + 1,
+                    "expected": 0,
+                }
+            )
+        r_pr = lvl.find(qn("w:rPr"))
+        r_fonts = None if r_pr is None else r_pr.find(qn("w:rFonts"))
+        expected_fonts = {
+            "ascii": style_effective_font(document, style, "ascii")[0],
+            "hAnsi": style_effective_font(document, style, "ascii")[0],
+            "eastAsia": style_effective_font(document, style, "eastAsia")[0],
+            "cs": style_effective_font(document, style, "cs")[0],
+        }
+        actual_fonts = {
+            attribute: None if r_fonts is None else r_fonts.get(qn(f"w:{attribute}"))
+            for attribute in expected_fonts
+        }
+        if actual_fonts != expected_fonts:
+            failures.append(
+                {
+                    "property": "heading_numbering_fonts",
+                    "heading_level": level + 1,
+                    "expected": expected_fonts,
+                    "actual": actual_fonts,
+                }
+            )
+        expected_size = style_value(document, style, "font_size_pt")
+        size = None if r_pr is None else r_pr.find(qn("w:sz"))
+        actual_size = None if size is None else int(size.get(qn("w:val"))) / 2
+        if not close(actual_size, expected_size):
+            failures.append(
+                {
+                    "property": "heading_numbering_font_size_pt",
+                    "heading_level": level + 1,
+                    "expected": expected_size,
+                    "actual": actual_size,
+                }
+            )
+        expected_bold = style_value(document, style, "bold")
+        bold = None if r_pr is None else r_pr.find(qn("w:b"))
+        actual_bold = None if bold is None else bold.get(qn("w:val"), "1") not in {"0", "false"}
+        if actual_bold != expected_bold:
+            failures.append(
+                {
+                    "property": "heading_numbering_bold",
+                    "heading_level": level + 1,
+                    "expected": expected_bold,
+                    "actual": actual_bold,
+                }
+            )
+    return failures
+
+
 def audit_field_rule(
-    document: Any, rule: dict, chapter_start: int | None = None
+    document: Any,
+    rule: dict,
+    chapter_start: int | None = None,
+    path: Path | None = None,
 ) -> list[dict]:
     failures = []
     properties = rule["properties"]
     if properties.get("update_on_open") and not document_toggle(document, "updateFields"):
-        failures.append({"property": "update_on_open", "expected": True, "actual": False})
+        refreshed = path is not None and field_cache_inventory(path)["status"] == "refreshed"
+        if not refreshed:
+            failures.append({"property": "update_on_open", "expected": True, "actual": False})
     if properties.get("convert_explicit_markers"):
         remaining = [
             paragraph.text
@@ -540,6 +834,7 @@ def audit_field_rule(
                         "actual": "missing",
                     }
                 )
+        failures.extend(heading_numbering_format_failures(document, levels))
         if chapter_start is not None:
             actual_start = heading_numbering_start(document)
             if actual_start != chapter_start:
@@ -644,7 +939,7 @@ def main() -> int:
                 continue
             kind = rule["selector"]["kind"]
             if kind in {"document", "section_role"}:
-                failures = audit_section_rule(document, rule)
+                failures = audit_section_rule(document, rule, structure_map)
             elif kind == "table_role":
                 table_targets = (
                     approved_data_tables(document, structure_map)
@@ -659,7 +954,9 @@ def main() -> int:
                     if numbering.get("approved")
                     else None
                 )
-                failures = audit_field_rule(document, rule, chapter_start)
+                failures = audit_field_rule(
+                    document, rule, chapter_start, args.formatted
+                )
             elif kind == "equation_role":
                 failures = audit_equation_rule(args.formatted, rule)
             elif (
@@ -687,12 +984,28 @@ def main() -> int:
                 document,
                 structure_map.get("pagination_sections", {}),
                 resolve_paragraph_locator,
+                structure_map,
             )
             if structure_map
             else ([], {})
         )
         content_ok = original_fp == formatted_fp
-        rules_ok = all(item["status"] != "fail" for item in rule_results) and not pagination_failures
+        structure_table_failures = (
+            audit_structure_table_operations(document, structure_map)
+            if structure_map
+            else []
+        )
+        structure_image_failures = (
+            audit_structure_image_operations(document, structure_map)
+            if structure_map
+            else []
+        )
+        rules_ok = (
+            all(item["status"] != "fail" for item in rule_results)
+            and not pagination_failures
+            and not structure_table_failures
+            and not structure_image_failures
+        )
         caption_replacements = (
             audit_caption_identifier_replacements(
                 args.original, args.formatted, structure_map
@@ -737,6 +1050,14 @@ def main() -> int:
                 "passed": not pagination_failures,
                 "failures": pagination_failures,
                 "inventory": pagination,
+            },
+            "structure_table_operations": {
+                "passed": not structure_table_failures,
+                "failures": structure_table_failures,
+            },
+            "structure_image_operations": {
+                "passed": not structure_image_failures,
+                "failures": structure_image_failures,
             },
             "rules": rule_results,
         }

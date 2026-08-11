@@ -158,7 +158,7 @@ def inventory(path: Path) -> dict:
                     if row_has_property(row, "cantSplit")
                 ],
                 "complex_merge": len(
-                    {id(cell._tc) for row in table.rows for cell in row.cells}
+                    {cell._tc for row in table.rows for cell in row.cells}
                 )
                 < sum(len(row.cells) for row in table.rows),
                 "floating_object_count": len(

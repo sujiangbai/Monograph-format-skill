@@ -33,7 +33,11 @@ from _common import (
     write_json,
 )
 from render_docx import locate_soffice
-from structure_map import approved_data_tables, has_semantic_structure_map
+from structure_map import (
+    approved_data_tables,
+    approved_role_paragraphs,
+    has_semantic_structure_map,
+)
 from structure_map import (
     load_structure_map,
     structure_content_fingerprint,
@@ -220,18 +224,34 @@ def effective_font_failures(
     for rule in profile.get("rules", []):
         if rule.get("status") != "approved" or rule.get("application") != "automatic":
             continue
-        if rule.get("selector", {}).get("kind") == "table_role":
-            targets = (
-                approved_data_tables(document, structure_map)
-                if structure_map and has_semantic_structure_map(structure_map)
-                else [(table, {}) for table in document.tables]
-            )
-            for table_index, (table, _entry) in enumerate(targets):
+        selector = rule.get("selector", {})
+        selector_kind = selector.get("kind")
+        if selector_kind == "table_role":
+            try:
+                targets = (
+                    approved_data_tables(document, structure_map)
+                    if structure_map and has_semantic_structure_map(structure_map)
+                    else [(table, {}) for table in document.tables]
+                )
+            except FormatMonographError:
+                result.append(
+                    {
+                        "rule": rule.get("id"),
+                        "selector": selector_kind,
+                        "reason": "semantic_target_unresolvable",
+                    }
+                )
+                continue
+            for table_index, (table, entry) in enumerate(targets):
                 for property_name, attribute in property_attributes.items():
                     expected = rule.get("properties", {}).get(property_name)
                     if not expected:
                         continue
                     for row_index, row in enumerate(table.rows):
+                        if entry.get("caption_row") is not None and row_index == int(
+                            entry["caption_row"]
+                        ):
+                            continue
                         for cell_index, cell in enumerate(row.cells):
                             for paragraph in cell.paragraphs:
                                 for run in paragraph.runs:
@@ -257,6 +277,51 @@ def effective_font_failures(
                                             }
                                         )
             continue
+        if (
+            structure_map
+            and has_semantic_structure_map(structure_map)
+            and selector_kind
+            in {"paragraph_role", "caption_role", "bibliography_role"}
+        ):
+            try:
+                targets = approved_role_paragraphs(document, structure_map, selector)
+            except FormatMonographError:
+                result.append(
+                    {
+                        "rule": rule.get("id"),
+                        "selector": selector_kind,
+                        "reason": "semantic_target_unresolvable",
+                    }
+                )
+                continue
+            if targets:
+                for property_name, attribute in property_attributes.items():
+                    expected = rule.get("properties", {}).get(property_name)
+                    if not expected:
+                        continue
+                    for paragraph_index, paragraph in enumerate(targets):
+                        for run_index, run in enumerate(paragraph.runs):
+                            if not run.text:
+                                continue
+                            actual, source = run_effective_font(
+                                document, paragraph, run, attribute
+                            )
+                            if not actual or not (
+                                font_alias_keys(str(actual))
+                                & font_alias_keys(str(expected))
+                            ):
+                                result.append(
+                                    {
+                                        "rule": rule.get("id"),
+                                        "paragraph": paragraph_index,
+                                        "run": run_index,
+                                        "property": property_name,
+                                        "expected": str(expected),
+                                        "actual": actual,
+                                        "source": source,
+                                    }
+                                )
+                continue
         style_name = style_name_for_selector(rule.get("selector", {}))
         if not style_name:
             continue
