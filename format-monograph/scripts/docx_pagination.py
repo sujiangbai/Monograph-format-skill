@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from lxml import etree
@@ -136,6 +136,16 @@ def _set_section_type(sect_pr: Any, value: str) -> None:
         section_type = OxmlElement("w:type")
         sect_pr.insert(0, section_type)
     section_type.set(qn("w:val"), value)
+
+
+def _set_vertical_alignment(sect_pr: Any, value: str) -> None:
+    if value not in {"top", "center", "both", "bottom"}:
+        raise FormatMonographError(f"Unsupported section vertical alignment: {value}")
+    alignment = sect_pr.find(qn("w:vAlign"))
+    if alignment is None:
+        alignment = OxmlElement("w:vAlign")
+        sect_pr.append(alignment)
+    alignment.set(qn("w:val"), value)
 
 
 def _field_instructions(root: Any) -> list[str]:
@@ -409,6 +419,10 @@ def apply_pagination_sections(
             document, toc_section_start
         )
         _set_section_type(title_boundary, "nextPage")
+        _set_vertical_alignment(
+            title_boundary,
+            str(front_matter.get("title_page_vertical_alignment", "top")),
+        )
         toc_section_start.paragraph_format.page_break_before = False
         _hide_single_title_page_running_elements(title_boundary)
         title_paragraph = getattr(document, "_format_monograph_book_title", None)
@@ -562,6 +576,7 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                     footer_page_field_counts[kind] = 0
                     footer_non_page_payload[kind] = False
             pg_num = sect_pr.find(qn("w:pgNumType"))
+            vertical_alignment = sect_pr.find(qn("w:vAlign"))
             sections.append(
                 {
                     "index": index,
@@ -572,6 +587,11 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                         None if pg_num is None else pg_num.get(qn("w:fmt"))
                     ),
                     "different_first_page": sect_pr.find(qn("w:titlePg")) is not None,
+                    "vertical_alignment": (
+                        None
+                        if vertical_alignment is None
+                        else vertical_alignment.get(qn("w:val"), "top")
+                    ),
                     "footer_references": explicit,
                     "effective_footer_references": effective,
                     "footer_fields": footer_fields,
@@ -764,6 +784,45 @@ def audit_pagination_sections(
         ):
             failures.append({"property": "book_title_bold", "expected": True})
         title_inventory = inventory["sections"][title_section]
+        expected_vertical = front_matter.get("title_page_vertical_alignment")
+        if expected_vertical and title_inventory.get("vertical_alignment") != expected_vertical:
+            failures.append(
+                {
+                    "section": title_section,
+                    "property": "title_page_vertical_alignment",
+                    "expected": expected_vertical,
+                    "actual": title_inventory.get("vertical_alignment"),
+                }
+            )
+        expected_spacing = expected_title_format.get("line_spacing_pt")
+        if expected_spacing is not None and title_style is not None:
+            actual_spacing = title_style.paragraph_format.line_spacing
+            actual_spacing_pt = getattr(actual_spacing, "pt", None)
+            if actual_spacing_pt != float(expected_spacing):
+                failures.append(
+                    {
+                        "property": "book_title_line_spacing_pt",
+                        "expected": float(expected_spacing),
+                        "actual": actual_spacing_pt,
+                    }
+                )
+            expected_rule = expected_title_format.get("line_spacing_rule")
+            rule_names = {
+                WD_LINE_SPACING.AT_LEAST: "at_least",
+                WD_LINE_SPACING.EXACTLY: "exact",
+                WD_LINE_SPACING.SINGLE: "single",
+                WD_LINE_SPACING.ONE_POINT_FIVE: "one_point_five",
+                WD_LINE_SPACING.DOUBLE: "double",
+            }
+            actual_rule = rule_names.get(title_style.paragraph_format.line_spacing_rule)
+            if expected_rule and actual_rule != expected_rule:
+                failures.append(
+                    {
+                        "property": "book_title_line_spacing_rule",
+                        "expected": expected_rule,
+                        "actual": actual_rule,
+                    }
+                )
         if not title_inventory["different_first_page"]:
             failures.append(
                 {"section": title_section, "property": "title_page_number_visible"}

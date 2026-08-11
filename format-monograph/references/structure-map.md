@@ -14,7 +14,7 @@ New maps use schema `1.4`; readers continue to accept `1.0` through `1.3`. Versi
 
 ## Schema 1.4
 
-Schema 1.4 adds approved page-number sections, stable trailing-section evidence, and per-table visual decisions.
+Schema 1.4 adds approved page-number sections, stable trailing-section evidence, per-table visual decisions, and source-bound in-place image resizing.
 
 ### Pagination sections
 
@@ -85,9 +85,13 @@ An in-cell table caption remains in its first row by default. Move it only with 
 
 Each table has `kind`: `data`, `layout`, `callout`, or `unknown`. Only approved `data` tables receive general table rules. Use `caption_row`, `header_rows`, `repeat_header_rows`, `horizontal_rule_rows`, and `prevent_normal_row_split` to authorize exact rows. A layout table normally remains unchanged; the sole visual exception is an explicitly approved `layout_purpose=figure_panel`, with mapped image and label rows, `borderless`, centered cells, inline/no-wrap placement, and caption-styled labels.
 
+Every table and image records `position_policy=preserve_anchor`. Application must not move either object to another paragraph, cell, table, section, or position among body children. Approved in-place image resizing changes only the existing inline drawing extents and paragraph alignment; it preserves the relationship, media payload, crop state, aspect ratio, drawing ordinal, container, table position, and surrounding authored objects.
+
+Each `images` entry records a stable paragraph locator, drawing ordinal, placement class, media hash, source extent, crop/object state, raster metadata, and resize policy. Placement classes are `standalone`, `table_figure_panel`, and `table_embedded_unknown`. Only an uncropped inline standalone image or an image in an approved stationary figure-panel row may be approved automatically. Standalone bounds are 90% text width, 100% for aspect ratio at least 1.6, and 65% usable page height. Figure-panel bounds are 95% of the existing cell width, with a common displayed height within one row. Raster enlargement is capped at 125% and must retain at least 220 effective DPI; unknown or insufficient DPI prevents enlargement. Vector images may fit the approved bounds. Cropped, floating, missing-relationship, or otherwise ambiguous images remain unchanged and report-only.
+
 A short centered paragraph directly following a standalone image may be proposed as `figure_caption_unnumbered`. A short text row directly beneath mapped image cells may be proposed as `figure_panel_label`. Both remain unapproved candidates until the caller confirms the role; approval changes style only and never inserts a number or edits wording.
 
-For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered title page, an optional `book_title_format`, and insertion of the derived `目    录` heading (four ASCII spaces) before the main TOC. Legacy approved maps using `目录` remain readable. The `TOC` field does not create its own heading; the skill inserts and maintains the separate derived paragraph. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
+For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered and vertically centered title-page section, an optional `book_title_format`, and insertion of the derived `目    录` heading (four ASCII spaces) before the main TOC. The technical-textbook fallback title uses 22 pt bold text with at least 33 pt line spacing and zero paragraph spacing so wrapped glyphs are not clipped. Legacy approved maps using `目录` remain readable. The `TOC` field does not create its own heading; the skill inserts and maintains the separate derived paragraph. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
 
 ### Trailing sections
 
@@ -99,6 +103,7 @@ Candidates report visible payload, header/footer references and payload, page-nu
 - `headings`: assign approved body paragraphs to Heading 1-4 and remove only verified prefixes.
 - `captions`: preserve or style manual identifiers by default; perform only explicitly approved identifier replacement, relocation, or field conversion.
 - `tables`: apply exact approved header, row-split, visual, and landscape controls to data tables.
+- `images`: resize only individually approved inline images inside their original anchors and containers.
 - `pagination_groups`: apply only approved `keepNext`/`cantSplit` relationships to figures, captions, and tables.
 - `pagination_sections`: create and audit approved TOC/body numbering sections and odd/even PAGE footers.
 - `front_matter`: separate the whole-book title page from the TOC and insert the approved TOC heading.

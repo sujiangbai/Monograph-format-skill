@@ -182,11 +182,14 @@ function Remove-PageBoundaryBlockSpacers($doc, [string]$styleName) {
     return $removed
 }
 
-function Normalize-FrontMatterPagination($doc) {
+function Normalize-FrontMatterPagination($doc, $verticalAlignment) {
     if ($doc.Sections.Count -lt 3) {
         throw "Approved title/TOC/body pagination requires at least three sections."
     }
     $doc.Sections.Item(1).PageSetup.DifferentFirstPageHeaderFooter = -1
+    if ($verticalAlignment -eq "center") {
+        $doc.Sections.Item(1).PageSetup.VerticalAlignment = 1
+    }
     $changed = 1
     $displayOffsets = @{}
     foreach ($index in 2..3) {
@@ -258,7 +261,8 @@ try {
             $null -ne $structureMap.pagination_sections -and
             $structureMap.pagination_sections.approved -eq $true
         ) {
-            $paginationResult = Normalize-FrontMatterPagination $document
+            $paginationResult = Normalize-FrontMatterPagination `
+                $document $structureMap.front_matter.title_page_vertical_alignment
             $paginationSectionsNormalized = [int]$paginationResult.changed
             $displayOffsets = $paginationResult.display_offsets
         }

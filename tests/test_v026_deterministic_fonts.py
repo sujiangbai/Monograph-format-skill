@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import struct
 import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 from lxml import etree
 
 REPO = Path(__file__).resolve().parents[1]
@@ -45,6 +47,7 @@ from structure_map import (  # noqa: E402
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    audit_structure_image_operations,
     audit_structure_table_operations,
     candidate_structure_map,
     prime_structure_map_locators,
@@ -65,6 +68,24 @@ def set_theme_fonts(element, ascii_theme: str, east_asia_theme: str) -> None:
     r_fonts.set(qn("w:asciiTheme"), ascii_theme)
     r_fonts.set(qn("w:hAnsiTheme"), ascii_theme)
     r_fonts.set(qn("w:eastAsiaTheme"), east_asia_theme)
+
+
+def synthetic_png(width: int, height: int) -> bytes:
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
+
+    scanline = b"\x00" + b"\x66\x99\xcc" * width
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(scanline * height, 9))
+        + chunk(b"IEND", b"")
+    )
 
 
 def replace_theme_fonts(path: Path) -> None:
@@ -806,6 +827,17 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertTrue(title_style.font.bold)
         self.assertEqual(22, title_style.font.size.pt)
         self.assertEqual(
+            WD_LINE_SPACING.AT_LEAST,
+            title_style.paragraph_format.line_spacing_rule,
+        )
+        self.assertEqual(33, title_style.paragraph_format.line_spacing.pt)
+        self.assertEqual(
+            "center",
+            reloaded.sections[0]
+            ._sectPr.find(qn("w:vAlign"))
+            .get(qn("w:val")),
+        )
+        self.assertEqual(
             "Times New Roman",
             style_effective_font(reloaded, title_style, "ascii")[0],
         )
@@ -1015,6 +1047,124 @@ class V026DeterministicFontTests(unittest.TestCase):
         }
         self.assertIn("figure_caption_unnumbered", roles)
         self.assertIn("figure_panel_label", roles)
+
+    def test_image_resizing_preserves_media_anchors_order_and_table_position(self) -> None:
+        source = self.root / "image-anchor-source.docx"
+        image_path = self.root / "synthetic-image.png"
+        image_path.write_bytes(synthetic_png(600, 400))
+
+        document = Document()
+        document.add_paragraph("Synthetic chapter", style="Heading 1")
+        standalone = document.add_paragraph()
+        standalone.add_run().add_picture(str(image_path), width=Inches(1))
+        document.add_paragraph("Synthetic following paragraph")
+        panel = document.add_table(rows=2, cols=2)
+        panel.cell(0, 0).paragraphs[0].add_run().add_picture(
+            str(image_path), width=Inches(1)
+        )
+        panel.cell(0, 1).paragraphs[0].add_run().add_picture(
+            str(image_path), width=Inches(1.2)
+        )
+        panel.cell(1, 0).text = "Panel A"
+        panel.cell(1, 1).text = "Panel B"
+        document.add_paragraph("Synthetic tail")
+        document.save(source)
+
+        structure = candidate_structure_map(source)
+        structure["status"] = "approved"
+        panel_entry = structure["tables"][0]
+        self.assertEqual("figure_panel", panel_entry["layout_purpose"])
+        panel_entry["approved"] = True
+        panel_entry["position_policy"] = "preserve_anchor"
+        panel_entry["visual"]["approved"] = True
+        for image in structure["images"]:
+            self.assertEqual("preserve_anchor", image["position_policy"])
+            if image["placement"] in {"standalone", "table_figure_panel"}:
+                self.assertTrue(image["supported"])
+                image["approved"] = True
+                image["resize"]["approved"] = True
+
+        formatted = Document(source)
+        # A derived empty paragraph may share the image paragraph's text hash and
+        # shift its numeric index. Media plus unchanged authored neighbors must
+        # still resolve the original image without moving it.
+        formatted.paragraphs[1]._p.addprevious(OxmlElement("w:p"))
+        body_children_before = list(formatted.element.body)
+        standalone_paragraph = formatted.paragraphs[2]
+        panel_table = formatted.tables[0]
+        panel_paragraphs = [
+            panel_table.cell(0, 0).paragraphs[0],
+            panel_table.cell(0, 1).paragraphs[0],
+        ]
+        standalone_parent = standalone_paragraph._p.getparent()
+        standalone_index = standalone_parent.index(standalone_paragraph._p)
+        panel_parent = panel_table._tbl.getparent()
+        panel_index = panel_parent.index(panel_table._tbl)
+        panel_locations = [
+            (paragraph._p.getparent(), paragraph._p.getparent().index(paragraph._p))
+            for paragraph in panel_paragraphs
+        ]
+        original_extents = {
+            image["image"]: dict(image["source_extent_emu"])
+            for image in structure["images"]
+            if image["approved"]
+        }
+        shifted_source = self.root / "image-anchor-shifted-source.docx"
+        formatted.save(shifted_source)
+
+        prime_structure_map_locators(formatted, structure)
+        result = apply_structure_map(formatted, structure)
+        self.assertEqual(3, next(change["targets"] for change in result if change["kind"] == "structure_image_resize"))
+        self.assertEqual(body_children_before, list(formatted.element.body))
+        self.assertIs(standalone_parent, standalone_paragraph._p.getparent())
+        self.assertEqual(standalone_index, standalone_parent.index(standalone_paragraph._p))
+        self.assertIs(panel_parent, panel_table._tbl.getparent())
+        self.assertEqual(panel_index, panel_parent.index(panel_table._tbl))
+        for paragraph, (parent, index) in zip(panel_paragraphs, panel_locations):
+            self.assertIs(parent, paragraph._p.getparent())
+            self.assertEqual(index, parent.index(paragraph._p))
+
+        output = self.root / "image-anchor-formatted.docx"
+        formatted.save(output)
+        reloaded = Document(output)
+        self.assertFalse(audit_structure_image_operations(reloaded, structure))
+        resized_extents = {
+            image["image"]: reloaded.part.document.element.xpath(
+                ".//w:drawing"
+            )[index]
+            .xpath("./wp:inline/wp:extent")[0]
+            for index, image in enumerate(
+                [item for item in structure["images"] if item["approved"]]
+            )
+        }
+        self.assertTrue(
+            all(
+                (
+                    int(extent.get("cx")),
+                    int(extent.get("cy")),
+                )
+                != (
+                    int(original_extents[image_id]["cx"]),
+                    int(original_extents[image_id]["cy"]),
+                )
+                for image_id, extent in resized_extents.items()
+            )
+        )
+        panel_heights = [
+            int(extent.get("cy"))
+            for image_id, extent in resized_extents.items()
+            if next(
+                image
+                for image in structure["images"]
+                if image["image"] == image_id
+            )["placement"]
+            == "table_figure_panel"
+        ]
+        self.assertEqual(1, len(set(panel_heights)))
+        self.assertEqual(
+            structure_content_fingerprint(shifted_source, structure),
+            structure_content_fingerprint(output, structure),
+        )
 
     def test_heading_numbering_inherits_mixed_fonts_size_weight_and_zero_indent(self) -> None:
         document = Document()

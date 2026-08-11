@@ -13,6 +13,8 @@ from typing import Any
 
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.image.image import Image as DocxImage
+from docx.image.exceptions import UnrecognizedImageError
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.shared import Pt
@@ -33,7 +35,7 @@ from _common import (
     content_fingerprint,
     ensure_paragraph_style,
 )
-from docx_pagination import apply_pagination_sections
+from docx_pagination import apply_pagination_sections, section_index_for_paragraph
 
 
 HEADING_PATTERNS = (
@@ -64,7 +66,13 @@ DEFAULT_BOOK_TITLE_FORMAT = {
     "bold": True,
     "alignment": "center",
     "first_line_indent_chars": 0,
+    "line_spacing_rule": "at_least",
+    "line_spacing_pt": 33,
+    "space_before_pt": 0,
+    "space_after_pt": 0,
 }
+EMU_PER_INCH = 914400
+EMU_PER_MM = 36000
 ARCHITECTURE_TERMS = ("建筑", "平面图", "立面图", "剖面图", "详图", "大样")
 CIVIL_ENGINEERING_TERMS = (
     "土木",
@@ -410,6 +418,16 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
                 key = _locator_key(locator)
                 cache[key] = paragraph
                 verified.add(key)
+        for image in structure_map.get("images", []):
+            if not image.get("approved"):
+                continue
+            locator = image.get("locator")
+            if not isinstance(locator, dict):
+                continue
+            paragraph = resolve_paragraph_locator(document, locator)
+            key = _locator_key(locator)
+            cache[key] = paragraph
+            verified.add(key)
         pagination = structure_map.get("pagination_sections", {})
         if pagination.get("approved"):
             for name in ("toc_start", "body_start"):
@@ -748,6 +766,7 @@ def _candidate_front_matter(
         ),
         "separate_title_page": True,
         "title_page_numbering": "none",
+        "title_page_vertical_alignment": "center",
         "book_title_format": dict(DEFAULT_BOOK_TITLE_FORMAT),
         "toc_heading_text": "目    录",
         "insert_toc_heading_if_missing": True,
@@ -956,6 +975,471 @@ def _figure_panel_rows(table: Any) -> tuple[list[int], list[int]]:
     return image_rows, sorted(set(label_rows))
 
 
+def _drawing_state(paragraph: Any, drawing: Any) -> dict[str, Any]:
+    inline = drawing.xpath("./wp:inline")
+    anchored = drawing.xpath("./wp:anchor")
+    container = inline[0] if inline else (anchored[0] if anchored else None)
+    extent = None if container is None else container.find(qn("wp:extent"))
+    rel_ids = drawing.xpath(".//a:blip/@r:embed")
+    rel_id = rel_ids[0] if len(rel_ids) == 1 else None
+    part = paragraph.part.related_parts.get(rel_id) if rel_id else None
+    blob = None if part is None else part.blob
+    content_type = None if part is None else part.content_type
+    extension = ""
+    if part is not None:
+        extension = str(part.partname).rsplit(".", 1)[-1].lower()
+    vector = extension in {"emf", "wmf", "svg"} or content_type in {
+        "image/x-emf",
+        "image/x-wmf",
+        "image/svg+xml",
+    }
+    pixels = None
+    dpi = None
+    if blob is not None and not vector:
+        try:
+            image = DocxImage.from_blob(blob)
+            pixels = {"width": int(image.px_width), "height": int(image.px_height)}
+            dpi = {
+                "horizontal": int(image.horz_dpi),
+                "vertical": int(image.vert_dpi),
+            }
+        except (ValueError, TypeError, AttributeError, UnrecognizedImageError):
+            pass
+    cx = None if extent is None else int(extent.get("cx", "0"))
+    cy = None if extent is None else int(extent.get("cy", "0"))
+    effective_dpi = None
+    if pixels and cx and cy:
+        effective_dpi = min(
+            pixels["width"] * EMU_PER_INCH / cx,
+            pixels["height"] * EMU_PER_INCH / cy,
+        )
+    crop = bool(
+        drawing.xpath(
+            ".//*[local-name()='srcRect' and (@l or @t or @r or @b)]"
+        )
+    )
+    return {
+        "object_type": "inline" if inline else ("floating" if anchored else "unknown"),
+        "relationship_id": rel_id,
+        "media_sha256": None if blob is None else hashlib.sha256(blob).hexdigest(),
+        "media_kind": "vector" if vector else "raster",
+        "content_type": content_type,
+        "source_extent_emu": {"cx": cx, "cy": cy},
+        "source_pixels": pixels,
+        "source_dpi": dpi,
+        "source_effective_dpi": effective_dpi,
+        "has_crop": crop,
+        "supported": bool(inline and rel_id and blob is not None and cx and cy and not crop),
+    }
+
+
+def _candidate_image_entry(
+    paragraph: Any,
+    locator: dict[str, Any],
+    drawing: Any,
+    drawing_index: int,
+    image_index: int,
+    placement: str,
+) -> dict[str, Any]:
+    state = _drawing_state(paragraph, drawing)
+    source_extent = state["source_extent_emu"]
+    ratio = (
+        None
+        if not source_extent["cx"] or not source_extent["cy"]
+        else source_extent["cx"] / source_extent["cy"]
+    )
+    figure_panel = placement == "table_figure_panel"
+    standalone = placement == "standalone"
+    max_width = 95 if figure_panel else (100 if ratio and ratio >= 1.6 else 90)
+    reason = None
+    if state["object_type"] != "inline":
+        reason = "floating_or_unknown_drawing"
+    elif not state["relationship_id"] or not state["media_sha256"]:
+        reason = "missing_or_ambiguous_media_relationship"
+    elif not source_extent["cx"] or not source_extent["cy"]:
+        reason = "missing_display_extent"
+    elif state["has_crop"]:
+        reason = "existing_crop_requires_qa"
+    elif not (figure_panel or standalone):
+        reason = "table_embedded_image_requires_separate_qa"
+    return {
+        "image": f"IMG-{image_index:04d}",
+        "locator": locator,
+        "drawing_index": drawing_index,
+        "placement": placement,
+        "position_policy": "preserve_anchor",
+        **state,
+        "source_aspect_ratio": ratio,
+        "resize": {
+            "approved": False,
+            "fit_mode": "fit_within_bounds",
+            "aspect_ratio_locked": True,
+            "alignment": "center",
+            "max_width_percent": max_width,
+            "max_height_percent": None if figure_panel else 65,
+            "same_row_equal_height": figure_panel,
+            "raster_upscale_max_percent": 125,
+            "minimum_effective_dpi": 220,
+        },
+        "approval_blocked_reason": reason,
+        "approved": False,
+    }
+
+
+def _candidate_images(
+    document: Any,
+    body_values: list[str],
+    tables: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    image_index = 1
+    for paragraph_index, paragraph in enumerate(document.paragraphs):
+        for drawing_index, drawing in enumerate(paragraph._p.xpath(".//w:drawing")):
+            result.append(
+                _candidate_image_entry(
+                    paragraph,
+                    _body_locator(paragraph_index, body_values),
+                    drawing,
+                    drawing_index,
+                    image_index,
+                    "standalone",
+                )
+            )
+            image_index += 1
+    for table_index, table in enumerate(document.tables):
+        table_entry = tables[table_index]
+        image_rows = {int(value) for value in table_entry.get("image_rows", [])}
+        seen_cells: set[Any] = set()
+        for row_index, row in enumerate(table.rows):
+            for cell_index, cell in enumerate(row.cells):
+                if cell._tc in seen_cells:
+                    continue
+                seen_cells.add(cell._tc)
+                for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                    placement = (
+                        "table_figure_panel"
+                        if table_entry.get("layout_purpose") == "figure_panel"
+                        and row_index in image_rows
+                        else "table_embedded_unknown"
+                    )
+                    for drawing_index, drawing in enumerate(
+                        paragraph._p.xpath(".//w:drawing")
+                    ):
+                        result.append(
+                            _candidate_image_entry(
+                                paragraph,
+                                _cell_locator(
+                                    table_index,
+                                    row_index,
+                                    cell_index,
+                                    paragraph_index,
+                                ),
+                                drawing,
+                                drawing_index,
+                                image_index,
+                                placement,
+                            )
+                        )
+                        image_index += 1
+    return result
+
+
+def _approved_context_hashes(
+    document: Any, structure_map: dict[str, Any], source_hash: str | None
+) -> set[str | None]:
+    accepted: set[str | None] = {source_hash}
+    if source_hash is None:
+        return accepted
+    for caption in structure_map.get("captions", []):
+        locator = caption.get("locator", {})
+        if (
+            caption.get("approved")
+            and caption.get("action") == "replace_identifier"
+            and locator.get("text_sha256") == source_hash
+        ):
+            try:
+                accepted.add(text_sha256(resolve_paragraph_locator(document, locator).text))
+            except FormatMonographError:
+                continue
+    return accepted
+
+
+def _resolve_image_drawing(
+    document: Any,
+    entry: dict[str, Any],
+    structure_map: dict[str, Any] | None = None,
+) -> tuple[Any, Any]:
+    locator = entry["locator"]
+    drawing_index = int(entry["drawing_index"])
+    try:
+        paragraph = resolve_paragraph_locator(document, locator)
+        drawings = paragraph._p.xpath(".//w:drawing")
+        if 0 <= drawing_index < len(drawings):
+            drawing = drawings[drawing_index]
+            if _drawing_state(paragraph, drawing)["media_sha256"] == entry.get(
+                "media_sha256"
+            ):
+                return paragraph, drawing
+    except FormatMonographError:
+        pass
+    if locator.get("kind") == "body_paragraph":
+        values = [candidate.text for candidate in document.paragraphs]
+        expected_text = locator.get("text_sha256")
+        before = locator.get("previous_nonempty_sha256")
+        after = locator.get("next_nonempty_sha256")
+        accepted_before = _approved_context_hashes(
+            document, structure_map or {}, before
+        )
+        accepted_after = _approved_context_hashes(
+            document, structure_map or {}, after
+        )
+        candidates: list[tuple[Any, Any]] = []
+        for index, candidate in enumerate(document.paragraphs):
+            if expected_text and text_sha256(candidate.text) != expected_text:
+                continue
+            if (
+                before is not None
+                and _nearest_nonempty_hash(values, index, -1) not in accepted_before
+            ):
+                continue
+            if (
+                after is not None
+                and _nearest_nonempty_hash(values, index, 1) not in accepted_after
+            ):
+                continue
+            drawings = candidate._p.xpath(".//w:drawing")
+            if not 0 <= drawing_index < len(drawings):
+                continue
+            drawing = drawings[drawing_index]
+            if _drawing_state(candidate, drawing)["media_sha256"] != entry.get(
+                "media_sha256"
+            ):
+                continue
+            candidates.append((candidate, drawing))
+        if len(candidates) != 1:
+            raise FormatMonographError(
+                f"Approved image anchor is ambiguous or missing: {entry.get('image')}."
+            )
+        return candidates[0]
+    raise FormatMonographError(
+        f"Approved image drawing is missing or changed at {entry.get('image')}."
+    )
+
+
+def _section_index_for_table(document: Any, table: Any) -> int:
+    children = list(document.element.body)
+    try:
+        position = children.index(table._tbl)
+    except ValueError as exc:
+        raise FormatMonographError("Approved image table is not a top-level body table.") from exc
+    return sum(
+        1
+        for child in children[:position]
+        if child.tag == qn("w:p")
+        and child.find("./w:pPr/w:sectPr", namespaces=NS) is not None
+    )
+
+
+def _usable_section_extent(section: Any) -> tuple[int, int]:
+    width = int(section.page_width) - int(section.left_margin) - int(section.right_margin)
+    height = int(section.page_height) - int(section.top_margin) - int(section.bottom_margin)
+    if width <= 0 or height <= 0:
+        raise FormatMonographError("Section has no positive usable image area.")
+    return width, height
+
+
+def _image_available_extent(
+    document: Any, structure_map: dict[str, Any], entry: dict[str, Any], paragraph: Any
+) -> tuple[int, int | None]:
+    resize = entry["resize"]
+    locator = entry["locator"]
+    if entry.get("placement") == "standalone":
+        section = document.sections[section_index_for_paragraph(document, paragraph)]
+        usable_width, usable_height = _usable_section_extent(section)
+        return (
+            round(usable_width * float(resize["max_width_percent"]) / 100),
+            round(usable_height * float(resize["max_height_percent"]) / 100),
+        )
+
+    table_index = int(locator["table"])
+    row_index = int(locator["row"])
+    cell_index = int(locator["cell"])
+    table = document.tables[table_index]
+    cell = table.rows[row_index].cells[cell_index]
+    section = document.sections[_section_index_for_table(document, table)]
+    usable_width, _ = _usable_section_extent(section)
+    cell_width = int(cell.width) if cell.width is not None else 0
+    if cell_width <= 0:
+        unique_cells = max(1, len({item._tc for item in table.rows[row_index].cells}))
+        cell_width = usable_width // unique_cells
+    table_entry = next(
+        item
+        for item in structure_map.get("tables", [])
+        if int(item["table"]) == table_index
+    )
+    margins = table_entry.get("visual", {}).get("cell_margins_mm", {})
+    horizontal_margin = float(margins.get("left", 0)) + float(margins.get("right", 0))
+    cell_width = max(1, cell_width - round(horizontal_margin * EMU_PER_MM))
+    return round(cell_width * float(resize["max_width_percent"]) / 100), None
+
+
+def _image_upscale_limit(entry: dict[str, Any]) -> float:
+    if entry.get("media_kind") == "vector":
+        return float("inf")
+    resize = entry["resize"]
+    policy_cap = float(resize["raster_upscale_max_percent"]) / 100
+    effective_dpi = entry.get("source_effective_dpi")
+    if effective_dpi is None:
+        return 1.0
+    dpi_cap = float(effective_dpi) / float(resize["minimum_effective_dpi"])
+    return max(1.0, min(policy_cap, dpi_cap))
+
+
+def _planned_image_extents(
+    document: Any, structure_map: dict[str, Any]
+) -> dict[str, tuple[int, int]]:
+    approved = [
+        entry
+        for entry in structure_map.get("images", [])
+        if entry.get("approved") and entry.get("resize", {}).get("approved")
+    ]
+    result: dict[str, tuple[int, int]] = {}
+    groups: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for entry in approved:
+        paragraph, _ = _resolve_image_drawing(document, entry, structure_map)
+        source = entry["source_extent_emu"]
+        source_cx, source_cy = int(source["cx"]), int(source["cy"])
+        max_width, max_height = _image_available_extent(
+            document, structure_map, entry, paragraph
+        )
+        desired_scale = max_width / source_cx
+        if max_height is not None:
+            desired_scale = min(desired_scale, max_height / source_cy)
+        scale = min(desired_scale, _image_upscale_limit(entry))
+        target = (max(1, round(source_cx * scale)), max(1, round(source_cy * scale)))
+        result[str(entry["image"])] = target
+        locator = entry["locator"]
+        if (
+            entry.get("placement") == "table_figure_panel"
+            and entry["resize"].get("same_row_equal_height")
+        ):
+            groups.setdefault(
+                (int(locator["table"]), int(locator["row"])), []
+            ).append(entry)
+    for entries in groups.values():
+        if len(entries) < 2:
+            continue
+        common_height = min(result[str(entry["image"])][1] for entry in entries)
+        for entry in entries:
+            ratio = float(entry["source_aspect_ratio"])
+            result[str(entry["image"])] = (
+                max(1, round(common_height * ratio)),
+                common_height,
+            )
+    return result
+
+
+def _set_drawing_extent(drawing: Any, cx: int, cy: int) -> None:
+    inline = drawing.xpath("./wp:inline")
+    if len(inline) != 1:
+        raise FormatMonographError("Approved image is no longer an inline drawing.")
+    extent = inline[0].find(qn("wp:extent"))
+    if extent is None:
+        raise FormatMonographError("Approved inline image has no display extent.")
+    extent.set("cx", str(cx))
+    extent.set("cy", str(cy))
+    shape_extents = drawing.xpath(
+        ".//*[local-name()='xfrm']/*[local-name()='ext']"
+    )
+    for shape_extent in shape_extents:
+        shape_extent.set("cx", str(cx))
+        shape_extent.set("cy", str(cy))
+
+
+def _effective_paragraph_alignment(paragraph: Any) -> Any:
+    alignment = paragraph.alignment
+    style = paragraph.style
+    while alignment is None and style is not None:
+        alignment = style.paragraph_format.alignment
+        style = style.base_style
+    return alignment
+
+
+def _apply_images(document: Any, structure_map: dict[str, Any]) -> int:
+    planned = _planned_image_extents(document, structure_map)
+    changed = 0
+    for entry in structure_map.get("images", []):
+        if not entry.get("approved") or not entry.get("resize", {}).get("approved"):
+            continue
+        paragraph, drawing = _resolve_image_drawing(document, entry, structure_map)
+        state = _drawing_state(paragraph, drawing)
+        if state["media_sha256"] != entry.get("media_sha256"):
+            raise FormatMonographError(
+                f"Approved image media changed before resize: {entry.get('image')}."
+            )
+        if state["object_type"] != "inline" or state["has_crop"]:
+            raise FormatMonographError(
+                f"Approved image anchor or crop state changed: {entry.get('image')}."
+            )
+        cx, cy = planned[str(entry["image"])]
+        _set_drawing_extent(drawing, cx, cy)
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        changed += 1
+    return changed
+
+
+def audit_structure_image_operations(
+    document: Any, structure_map: dict[str, Any]
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    try:
+        planned = _planned_image_extents(document, structure_map)
+    except FormatMonographError as exc:
+        return [{"reason": "image_plan_unresolvable", "detail": str(exc)}]
+    for entry in structure_map.get("images", []):
+        if not entry.get("approved") or not entry.get("resize", {}).get("approved"):
+            continue
+        image_id = str(entry["image"])
+        try:
+            paragraph, drawing = _resolve_image_drawing(document, entry, structure_map)
+            state = _drawing_state(paragraph, drawing)
+        except FormatMonographError as exc:
+            failures.append(
+                {"image": image_id, "reason": "anchor_not_preserved", "detail": str(exc)}
+            )
+            continue
+        expected_cx, expected_cy = planned[image_id]
+        actual = state["source_extent_emu"]
+        actual_cx, actual_cy = int(actual["cx"] or 0), int(actual["cy"] or 0)
+        source_ratio = float(entry["source_aspect_ratio"])
+        actual_ratio = actual_cx / actual_cy if actual_cy else 0
+        checks = {
+            "anchor_and_order_preserved": True,
+            "position_policy_preserved": entry.get("position_policy")
+            == "preserve_anchor",
+            "inline_not_floating": state["object_type"] == "inline",
+            "media_unchanged": state["media_sha256"] == entry.get("media_sha256"),
+            "not_cropped": not state["has_crop"],
+            "extent_matches_plan": (actual_cx, actual_cy)
+            == (expected_cx, expected_cy),
+            "aspect_ratio_locked": bool(actual_cy)
+            and abs(actual_ratio - source_ratio) <= 0.00001,
+            "centered_in_original_container": _effective_paragraph_alignment(paragraph)
+            == WD_ALIGN_PARAGRAPH.CENTER,
+        }
+        if not all(checks.values()):
+            failures.append(
+                {
+                    "image": image_id,
+                    "reason": "approved_image_resize_mismatch",
+                    "checks": checks,
+                    "expected_extent_emu": {"cx": expected_cx, "cy": expected_cy},
+                    "actual_extent_emu": {"cx": actual_cx, "cy": actual_cy},
+                }
+            )
+    return failures
+
+
 def _candidate_pagination_groups(
     document: Any, captions: list[dict[str, Any]], body_values: list[str]
 ) -> list[dict[str, Any]]:
@@ -1160,6 +1644,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                 "complex_merge": len(unique_cells)
                 < sum(len(row.cells) for row in table.rows),
                 "has_floating_objects": has_floating_objects,
+                "position_policy": "preserve_anchor",
                 "visible_control_mark_candidates": visible_controls,
                 "visual": {
                     "approved": False,
@@ -1193,6 +1678,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         )
 
     pagination_sections = _candidate_pagination_sections(document, headings)
+    images = _candidate_images(document, body_values, tables)
     return {
         "schema_version": "1.4",
         "status": "candidate",
@@ -1210,6 +1696,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         "headings": headings,
         "captions": captions,
         "tables": tables,
+        "images": images,
         "pagination_groups": _candidate_pagination_groups(document, captions, body_values),
         "table_cell_cleanups": [],
         "front_matter": _candidate_front_matter(
@@ -1438,11 +1925,22 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     "bold",
                     "alignment",
                     "first_line_indent_chars",
+                    "line_spacing_rule",
+                    "line_spacing_pt",
+                    "space_before_pt",
+                    "space_after_pt",
                 }
                 if unsupported_title_properties:
                     raise FormatMonographError(
                         "Unsupported book title format properties: "
                         + ", ".join(sorted(unsupported_title_properties))
+                    )
+                if front_matter.get("title_page_vertical_alignment") not in {
+                    None,
+                    "center",
+                }:
+                    raise FormatMonographError(
+                        "Approved technical-textbook title pages must be vertically centered."
                     )
                 if front_matter.get("insert_toc_heading_if_missing") is not True:
                     raise FormatMonographError(
@@ -1504,6 +2002,10 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                         )
             for table in value.get("tables", []):
                 visual = table.get("visual", {})
+                if table.get("position_policy") not in {None, "preserve_anchor"}:
+                    raise FormatMonographError(
+                        "Tables cannot be relocated; position_policy must be preserve_anchor."
+                    )
                 if not table.get("approved") or not visual.get("approved"):
                     continue
                 if table.get("kind") == "layout":
@@ -1605,6 +2107,93 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Table-cell cleanup requires source and result cell hashes."
                     )
+            table_entries = {
+                int(entry["table"]): entry for entry in value.get("tables", [])
+            }
+            image_ids: set[str] = set()
+            for image in value.get("images", []):
+                image_id = str(image.get("image", ""))
+                if not image_id or image_id in image_ids:
+                    raise FormatMonographError(
+                        "Structure-map image IDs must be unique and non-empty."
+                    )
+                image_ids.add(image_id)
+                if image.get("position_policy") != "preserve_anchor":
+                    raise FormatMonographError(
+                        "Images cannot be relocated; position_policy must be preserve_anchor."
+                    )
+                if not image.get("approved"):
+                    continue
+                resize = image.get("resize", {})
+                if resize.get("approved") is not True:
+                    raise FormatMonographError(
+                        "Approved image resizing requires resize.approved=true."
+                    )
+                if image.get("supported") is not True or image.get(
+                    "approval_blocked_reason"
+                ):
+                    raise FormatMonographError(
+                        "Unsupported, cropped, floating, or ambiguous images cannot be resized."
+                    )
+                if image.get("object_type") != "inline":
+                    raise FormatMonographError(
+                        "Approved image resizing supports inline drawings only."
+                    )
+                if resize.get("fit_mode") != "fit_within_bounds":
+                    raise FormatMonographError("Unsupported image fit mode.")
+                if resize.get("aspect_ratio_locked") is not True:
+                    raise FormatMonographError(
+                        "Approved images must keep their source aspect ratio."
+                    )
+                if resize.get("alignment") != "center":
+                    raise FormatMonographError(
+                        "Approved technical-textbook images must be centered in place."
+                    )
+                width = float(resize.get("max_width_percent", 0))
+                height = resize.get("max_height_percent")
+                if not 1 <= width <= 100 or (
+                    height is not None and not 1 <= float(height) <= 100
+                ):
+                    raise FormatMonographError(
+                        "Approved image width and height percentages must be between 1 and 100."
+                    )
+                if not 100 <= float(resize.get("raster_upscale_max_percent", 0)) <= 125:
+                    raise FormatMonographError(
+                        "Raster image enlargement must stay between 100% and 125%."
+                    )
+                if float(resize.get("minimum_effective_dpi", 0)) < 220:
+                    raise FormatMonographError(
+                        "Approved raster enlargement requires at least 220 effective DPI."
+                    )
+                extent = image.get("source_extent_emu", {})
+                if int(extent.get("cx") or 0) <= 0 or int(extent.get("cy") or 0) <= 0:
+                    raise FormatMonographError(
+                        "Approved image resizing requires a positive source extent."
+                    )
+                if not image.get("media_sha256") or not isinstance(
+                    image.get("locator"), dict
+                ):
+                    raise FormatMonographError(
+                        "Approved image resizing requires a media hash and paragraph locator."
+                    )
+                placement = image.get("placement")
+                if placement == "table_figure_panel":
+                    locator = image["locator"]
+                    table = table_entries.get(int(locator.get("table", -1)))
+                    if not (
+                        table
+                        and table.get("approved")
+                        and table.get("layout_purpose") == "figure_panel"
+                        and table.get("position_policy", "preserve_anchor")
+                        == "preserve_anchor"
+                    ):
+                        raise FormatMonographError(
+                            "Figure-panel image resizing requires an approved stationary figure-panel table."
+                        )
+                elif placement != "standalone":
+                    raise FormatMonographError(
+                        "Data-table and unknown embedded images require separate QA and cannot be approved here."
+                    )
     return value
 
 
@@ -1636,6 +2225,23 @@ def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> 
             raise FormatMonographError(f"Structure-map table is out of range: {index}")
         if entry.get("table_text_sha256") and _table_text_hash(document.tables[index]) != entry["table_text_sha256"]:
             raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
+    for entry in structure_map.get("images", []):
+        if not entry.get("approved"):
+            continue
+        paragraph, drawing = _resolve_image_drawing(document, entry)
+        state = _drawing_state(paragraph, drawing)
+        if state["media_sha256"] != entry.get("media_sha256"):
+            raise FormatMonographError(
+                f"Structure-map image media hash mismatch: {entry.get('image')}."
+            )
+        if state["relationship_id"] != entry.get("relationship_id"):
+            raise FormatMonographError(
+                f"Structure-map image relationship mismatch: {entry.get('image')}."
+            )
+        if state["source_extent_emu"] != entry.get("source_extent_emu"):
+            raise FormatMonographError(
+                f"Structure-map image source extent mismatch: {entry.get('image')}."
+            )
     pagination = structure_map.get("pagination_sections", {})
     front_matter = structure_map.get("front_matter", {})
     if front_matter.get("approved"):
@@ -2512,6 +3118,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
             for entry in structure_map.get("trailing_empty_sections", [])
         ),
     )
+    image_targets = _apply_images(document, structure_map)
     caption_actions: dict[str, int] = {}
     if has_caption_actions_map(structure_map):
         for entry in structure_map.get("captions", []):
@@ -2539,6 +3146,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
             "actions": caption_actions,
         },
         {"kind": "structure_pagination", "targets": pagination_targets},
+        {"kind": "structure_image_resize", "targets": image_targets},
         {"kind": "structure_block_spacing", "targets": spacing_targets},
         {
             "kind": "structure_trailing_sections",
