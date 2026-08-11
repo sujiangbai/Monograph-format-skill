@@ -1081,6 +1081,44 @@ def _set_cell_shading(cell: Any, color: str | None) -> None:
     shading.set(qn("w:fill"), value)
 
 
+def _table_no_indent_style(paragraph: Any, base_style: Any) -> Any:
+    document = paragraph.part.document
+    suffix = "" if base_style.name == "Normal" else f" ({base_style.style_id})"
+    style_name = f"Monograph Table Text{suffix}"
+    try:
+        style = document.styles[style_name]
+    except KeyError:
+        style = document.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+    style.base_style = base_style
+    ind = style.element.get_or_add_pPr().get_or_add_ind()
+    ind.set(qn("w:firstLine"), "0")
+    ind.set(qn("w:firstLineChars"), "0")
+    ind.attrib.pop(qn("w:hanging"), None)
+    ind.attrib.pop(qn("w:hangingChars"), None)
+    return style
+
+
+def _neutralize_inherited_table_first_line_indent(paragraph: Any) -> None:
+    p_pr = paragraph._p.pPr
+    direct_ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+    controlled = ("firstLine", "firstLineChars", "hanging", "hangingChars")
+    if direct_ind is not None and any(
+        direct_ind.get(qn(f"w:{name}")) is not None for name in controlled
+    ):
+        return
+
+    style = paragraph.style
+    while style is not None:
+        style_p_pr = style.element.pPr
+        style_ind = None if style_p_pr is None else style_p_pr.find(qn("w:ind"))
+        if style_ind is not None and any(
+            style_ind.get(qn(f"w:{name}")) is not None for name in controlled
+        ):
+            paragraph.style = _table_no_indent_style(paragraph, paragraph.style)
+            return
+        style = style.base_style
+
+
 def _format_table_text(
     table: Any,
     properties: dict[str, Any],
@@ -1114,13 +1152,19 @@ def _format_table_text(
             cell.vertical_alignment = vertical[vertical_name]
             if row_index in header_rows:
                 _set_cell_shading(cell, properties.get("header_shading_hex"))
-            alignment = "center" if row_index in header_rows else role_alignments.get(
-                roles[column_index] if roles else "narrative", "left"
-            )
-            if alignment not in ALIGNMENTS:
-                raise FormatMonographError(f"Unsupported table cell alignment: {alignment}")
+            alignment = None
+            if row_index in header_rows:
+                alignment = "center"
+            elif roles:
+                alignment = role_alignments.get(roles[column_index], "left")
+            if alignment is not None and alignment not in ALIGNMENTS:
+                raise FormatMonographError(
+                    f"Unsupported table cell alignment: {alignment}"
+                )
             for paragraph in cell.paragraphs:
-                paragraph.alignment = ALIGNMENTS[alignment]
+                _neutralize_inherited_table_first_line_indent(paragraph)
+                if alignment is not None:
+                    paragraph.alignment = ALIGNMENTS[alignment]
                 if "line_spacing_pt" in properties:
                     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                     paragraph.paragraph_format.line_spacing = Pt(

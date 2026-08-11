@@ -47,6 +47,7 @@ V1.1 可自动执行：
 - `cell_margins_mm`、`vertical_alignment`
 - `border_preset`：`preserve`、`three_line` 或 `full_grid`
 - `column_roles`、`column_alignments`
+- 未批准列角色时保留原单元格段落对齐；不得把正文首行缩进泄漏到表格。仅由正文样式继承的首行缩进应归零，原单元格直接设置的有意缩进保持不变。
 - `header_bold`、`header_shading_hex`
 - `font_name_east_asia`、`font_name_ascii`、`font_size_pt`、`line_spacing_pt`
 

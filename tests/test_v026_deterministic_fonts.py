@@ -10,6 +10,7 @@ from pathlib import Path
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Pt
 from lxml import etree
 
 REPO = Path(__file__).resolve().parents[1]
@@ -364,6 +365,41 @@ class V026DeterministicFontTests(unittest.TestCase):
             [(caption_table, caption_entry)],
         )
         self.assertEqual(1, caption.alignment)
+
+        inherited_document = Document()
+        normal_ind = (
+            inherited_document.styles["Normal"]
+            .element.get_or_add_pPr()
+            .get_or_add_ind()
+        )
+        normal_ind.set(qn("w:firstLineChars"), "200")
+        inherited_table = inherited_document.add_table(rows=1, cols=2)
+        preserved = inherited_table.cell(0, 0).paragraphs[0]
+        preserved.text = "Synthetic short label 3"
+        preserved.alignment = 1
+        intentional = inherited_table.cell(0, 1).paragraphs[0]
+        intentional.text = "Synthetic intentional indent"
+        intentional.paragraph_format.first_line_indent = Pt(6)
+        apply_table_properties(
+            inherited_document,
+            {"font_size_pt": 9, "line_spacing_pt": 15},
+            [(inherited_table, {"header_rows": []})],
+        )
+        self.assertEqual(1, preserved.alignment)
+        self.assertEqual("Monograph Table Text", preserved.style.name)
+        preserved_style_ind = preserved.style.element.pPr.find(qn("w:ind"))
+        self.assertEqual("0", preserved_style_ind.get(qn("w:firstLine")))
+        self.assertEqual("0", preserved_style_ind.get(qn("w:firstLineChars")))
+        self.assertEqual(6, intentional.paragraph_format.first_line_indent.pt)
+
+        inherited_output = self.root / "table-no-indent-style.docx"
+        inherited_document.save(inherited_output)
+        reloaded = Document(inherited_output)
+        reloaded_preserved = reloaded.tables[0].cell(0, 0).paragraphs[0]
+        self.assertEqual("Monograph Table Text", reloaded_preserved.style.name)
+        reloaded_ind = reloaded_preserved.style.element.pPr.find(qn("w:ind"))
+        self.assertEqual("0", reloaded_ind.get(qn("w:firstLine")))
+        self.assertEqual("0", reloaded_ind.get(qn("w:firstLineChars")))
 
     def test_approved_derived_footers_are_path_and_cache_independent(self) -> None:
         source = self.root / "source.docx"
