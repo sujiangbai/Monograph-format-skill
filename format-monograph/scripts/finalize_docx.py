@@ -7,8 +7,9 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
+import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from lxml import etree
+from docx.oxml.ns import qn
 
 from _common import (
     NS,
@@ -52,6 +54,170 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+FIELD_RESULT_PART = re.compile(
+    r"^word/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$"
+)
+
+
+def _normalize_complex_toc_results(root: etree._Element) -> None:
+    """Replace each complete TOC field span with one comparison-only marker."""
+    stack: list[dict[str, Any]] = []
+    toc_fields: list[dict[str, Any]] = []
+    for element in root.iter():
+        if element.tag == qn("w:fldChar"):
+            kind = element.get(qn("w:fldCharType"))
+            if kind == "begin":
+                stack.append({"begin": element, "parts": [], "separate": None})
+            elif kind == "separate" and stack:
+                stack[-1]["separate"] = element
+            elif kind == "end" and stack:
+                field = stack.pop()
+                instruction = " ".join("".join(field["parts"]).split()).upper()
+                if instruction.startswith("TOC ") and field["separate"] is not None:
+                    field.update({"end": element, "instruction": instruction})
+                    toc_fields.append(field)
+        elif element.tag == qn("w:instrText") and stack:
+            if stack[-1]["separate"] is None:
+                stack[-1]["parts"].append(element.text or "")
+
+    bodies = root.xpath("/w:document/w:body", namespaces=NS)
+    if not bodies:
+        return
+    body = bodies[0]
+
+    def body_child(element: etree._Element) -> etree._Element | None:
+        current = element
+        while current.getparent() is not None and current.getparent() is not body:
+            current = current.getparent()
+        return current if current.getparent() is body else None
+
+    spans: list[tuple[int, int, str, dict[str, Any]]] = []
+    for field in toc_fields:
+        start_block = body_child(field["begin"])
+        end_block = body_child(field["end"])
+        if start_block is None or end_block is None:
+            raise FormatMonographError(
+                "TOC field results outside the main document body are unsupported."
+            )
+        start = body.index(start_block)
+        end = body.index(end_block)
+        if start > end:
+            raise FormatMonographError("TOC field boundaries are out of order.")
+
+        inside = False
+        outside_payload = False
+        for block in list(body)[start : end + 1]:
+            for element in block.iter():
+                if element is field["begin"]:
+                    inside = True
+                    continue
+                if element is field["end"]:
+                    inside = False
+                    continue
+                if not inside and element.tag in {
+                    qn("w:t"),
+                    qn("w:delText"),
+                    qn("w:drawing"),
+                    qn("w:object"),
+                    qn("w:pict"),
+                }:
+                    if element.tag not in {qn("w:t"), qn("w:delText")} or (
+                        element.text or ""
+                    ):
+                        outside_payload = True
+                        break
+            if outside_payload:
+                break
+        if outside_payload:
+            raise FormatMonographError(
+                "A TOC field shares its boundary block with authored content."
+            )
+        spans.append((start, end, field["instruction"], field))
+
+    for start, end, instruction, _ in sorted(
+        spans, key=lambda item: item[0], reverse=True
+    ):
+        for index in range(end, start - 1, -1):
+            body.remove(body[index])
+        marker = etree.Element("{urn:format-monograph:audit}field-result")
+        marker.set("instruction", instruction)
+        body.insert(start, marker)
+
+
+def _neutralized_field_result_sha256(data: bytes) -> str:
+    """Hash OOXML while ignoring only cached field-result text."""
+    root = etree.fromstring(data)
+    _normalize_complex_toc_results(root)
+    for field in root.xpath(".//w:fldSimple", namespaces=NS):
+        for element in field.xpath(".//w:t | .//w:delText", namespaces=NS):
+            element.text = ""
+
+    stack: list[bool] = []
+    for element in root.iter():
+        if element.tag == qn("w:fldChar"):
+            kind = element.get(qn("w:fldCharType"))
+            if kind == "begin":
+                stack.append(False)
+            elif kind == "separate" and stack:
+                stack[-1] = True
+            elif kind == "end" and stack:
+                stack.pop()
+                continue
+        if any(stack) and element.tag in {
+            qn("w:t"),
+            qn("w:delText"),
+        }:
+            element.text = ""
+    canonical = etree.tostring(root, method="c14n", exclusive=True)
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def controlled_field_result_writeback(
+    baseline_path: Path, refreshed_path: Path, output_path: Path
+) -> list[str]:
+    """Copy verified field caches into the safe package, never refreshed payloads."""
+    replaced: list[str] = []
+    temp_output = output_path.with_name(
+        f".{output_path.stem}.field-writeback.tmp.docx"
+    )
+    temp_output.unlink(missing_ok=True)
+    try:
+        with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(
+            refreshed_path
+        ) as refreshed, zipfile.ZipFile(
+            temp_output, "w", compression=zipfile.ZIP_DEFLATED
+        ) as output:
+            refreshed_names = set(refreshed.namelist())
+            for info in baseline.infolist():
+                data = baseline.read(info.filename)
+                if (
+                    FIELD_RESULT_PART.match(info.filename)
+                    and info.filename in refreshed_names
+                ):
+                    candidate = refreshed.read(info.filename)
+                    if candidate != data:
+                        if _neutralized_field_result_sha256(
+                            data
+                        ) != _neutralized_field_result_sha256(candidate):
+                            raise FormatMonographError(
+                                "Target application changed OOXML outside approved field results: "
+                                + info.filename
+                            )
+                        data = candidate
+                        replaced.append(info.filename)
+                output.writestr(info, data)
+        if protected_payload_manifest(temp_output) != protected_payload_manifest(
+            baseline_path
+        ):
+            raise FormatMonographError(
+                "Controlled field writeback changed a protected payload."
+            )
+        temp_output.replace(output_path)
+    finally:
+        temp_output.unlink(missing_ok=True)
+    return replaced
 
 
 def rewrite_field_flags(path: Path, *, deferred: bool) -> None:
@@ -527,15 +693,24 @@ def main() -> int:
                     "External field update requires --field-updater-command."
                 )
             try:
-                backend = external_refresh(
-                    args.input,
-                    args.output,
-                    args.field_updater_command,
-                    args.profile,
-                    args.structure_map,
-                    args.pdf_output,
-                    args.target_software or profile["target_applications"][0],
-                )
+                with tempfile.TemporaryDirectory(
+                    prefix="format-monograph-external-fields-"
+                ) as refresh_name:
+                    refreshed = Path(refresh_name) / "refreshed.docx"
+                    backend = external_refresh(
+                        args.input,
+                        refreshed,
+                        args.field_updater_command,
+                        args.profile,
+                        args.structure_map,
+                        args.pdf_output,
+                        args.target_software or profile["target_applications"][0],
+                    )
+                    backend["controlled_writeback_parts"] = (
+                        controlled_field_result_writeback(
+                            args.input, refreshed, args.output
+                        )
+                    )
                 delivery_status = (
                     "refreshed_target_word"
                     if "microsoft word" in str(backend.get("software", "")).casefold()
@@ -561,7 +736,18 @@ def main() -> int:
             delivery_status = "deferred"
         else:
             try:
-                backend = libreoffice_refresh(args.input, args.output, args.renderer)
+                with tempfile.TemporaryDirectory(
+                    prefix="format-monograph-libreoffice-fields-"
+                ) as refresh_name:
+                    refreshed = Path(refresh_name) / "refreshed.docx"
+                    backend = libreoffice_refresh(
+                        args.input, refreshed, args.renderer
+                    )
+                    backend["controlled_writeback_parts"] = (
+                        controlled_field_result_writeback(
+                            args.input, refreshed, args.output
+                        )
+                    )
             except FormatMonographError:
                 if args.field_updater != "auto" or not args.approve_deferred:
                     raise

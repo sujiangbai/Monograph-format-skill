@@ -55,7 +55,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
 
     def approved_map(self) -> dict:
         structure = candidate_structure_map(self.source)
-        self.assertEqual("1.4", structure["schema_version"])
+        self.assertEqual("1.5", structure["schema_version"])
         structure["status"] = "approved"
         pagination = structure["pagination_sections"]
         self.assertIsNotNone(pagination["toc_start"])

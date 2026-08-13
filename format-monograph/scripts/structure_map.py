@@ -88,7 +88,8 @@ CIVIL_ENGINEERING_TERMS = (
     "断面",
 )
 STRUCTURE_MAP_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4"}
-SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2", "1.3", "1.4"}
+STRUCTURE_MAP_VERSIONS.add("1.5")
+SEMANTIC_STRUCTURE_MAP_VERSIONS = {"1.1", "1.2", "1.3", "1.4", "1.5"}
 CAPTION_ACTIONS = {
     "preserve",
     "style_only",
@@ -99,14 +100,15 @@ CAPTION_ACTIONS = {
 
 ROLE_ALIASES = {
     "body_text": "body",
-    "chapter_title": "heading_1",
-    "level_2_section": "heading_2",
-    "level_3_section": "heading_3",
-    "level_4_section": "heading_4",
-    "heading1": "heading_1",
-    "heading2": "heading_2",
-    "heading3": "heading_3",
-    "heading4": "heading_4",
+    "heading_1": "chapter_title",
+    "heading1": "chapter_title",
+    "heading_2": "level_2_section",
+    "heading2": "level_2_section",
+    "heading_3": "level_3_section",
+    "heading3": "level_3_section",
+    "heading_4": "level_4_section",
+    "heading4": "level_4_section",
+    "appendix_heading": "chapter_title",
     "caption": "all_captions",
     "all": "all_captions",
     "table_of_contents_level_1": "toc_level_1",
@@ -121,6 +123,11 @@ ROLE_STYLE_NAMES = {
     "heading_2": "Heading 2",
     "heading_3": "Heading 3",
     "heading_4": "Heading 4",
+    "chapter_title": "Heading 1",
+    "level_2_section": "Heading 2",
+    "level_3_section": "Heading 3",
+    "level_4_section": "Heading 4",
+    "appendix_heading": "Heading 1",
     "figure_caption": "Caption",
     "figure_caption_unnumbered": "Caption",
     "figure_panel_label": "Caption",
@@ -134,6 +141,11 @@ ROLE_STYLE_NAMES = {
     "toc_level_2": "TOC 2",
     "toc_level_3": "TOC 3",
 }
+
+APPENDIX_PATTERN = re.compile(
+    r"^\s*(?:附\s*录|APPENDIX)\s*[A-Z0-9一二三四五六七八九十百]*",
+    re.IGNORECASE,
+)
 
 
 def text_sha256(value: str) -> str:
@@ -150,7 +162,7 @@ def has_semantic_structure_map(structure_map: dict[str, Any]) -> bool:
 
 
 def has_caption_actions_map(structure_map: dict[str, Any]) -> bool:
-    return structure_map.get("schema_version") in {"1.2", "1.3", "1.4"}
+    return structure_map.get("schema_version") in {"1.2", "1.3", "1.4", "1.5"}
 
 
 def _caption_domain(value: str, context: str = "") -> tuple[str, str]:
@@ -335,9 +347,30 @@ def _verified_locator_paragraph(document: Any, entry: dict[str, Any]) -> Any:
     verified = getattr(document, "_format_monograph_verified_locators", set())
     if key in verified:
         return resolve_paragraph_locator(document, locator)
-    paragraph = resolve_paragraph_locator(document, locator)
+    try:
+        paragraph = resolve_paragraph_locator(document, locator)
+    except FormatMonographError:
+        normalized = entry.get("normalized_text_sha256")
+        candidates = (
+            [
+                candidate
+                for candidate in document.paragraphs
+                if text_sha256(candidate.text) == normalized
+            ]
+            if normalized and locator.get("kind") == "body_paragraph"
+            else []
+        )
+        if len(candidates) != 1:
+            raise
+        paragraph = candidates[0]
+        cache = getattr(document, "_format_monograph_locator_cache", {})
+        cache[key] = paragraph
+        setattr(document, "_format_monograph_locator_cache", cache)
     expected = entry.get("text_sha256")
-    if expected and text_sha256(paragraph.text) != expected:
+    actual = text_sha256(paragraph.text)
+    if expected and actual != expected and actual != entry.get(
+        "normalized_text_sha256"
+    ):
         raise FormatMonographError(
             f"Structure-map paragraph hash mismatch at {key}."
         )
@@ -387,7 +420,7 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
         key = _locator_key(entry["locator"])
         cache[key] = paragraph
         verified.add(key)
-    if structure_map.get("schema_version") in {"1.3", "1.4"}:
+    if structure_map.get("schema_version") in {"1.3", "1.4", "1.5"}:
         for group in structure_map.get("pagination_groups", []):
             if not group.get("approved"):
                 continue
@@ -404,7 +437,7 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
                 key = _locator_key(locator)
                 cache[key] = paragraph
                 verified.add(key)
-    if structure_map.get("schema_version") == "1.4":
+    if structure_map.get("schema_version") in {"1.4", "1.5"}:
         front_matter = structure_map.get("front_matter", {})
         if front_matter.get("approved"):
             locator = front_matter.get("book_title")
@@ -488,7 +521,12 @@ def approved_role_paragraphs(
             for toc in structure_map.get("toc_ranges", [])
         ):
             continue
-        role = normalized_role(str(entry.get("role", "unknown")))
+        role_value = (
+            entry.get("canonical_role")
+            if structure_map.get("schema_version") == "1.5"
+            else entry.get("role")
+        )
+        role = normalized_role(str(role_value or entry.get("role", "unknown")))
         matches = role == wanted or (wanted == "all_captions" and role in caption_roles)
         if not matches:
             continue
@@ -932,6 +970,29 @@ def _table_text_hash(table: Any) -> str:
     return text_sha256(value)
 
 
+def _table_classification(table: Any, *, figure_panel: bool) -> str:
+    if figure_panel:
+        return "figure_panel"
+    if len(table.rows) == 1 and len(table.columns) == 1:
+        return "callout"
+    borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+    if borders is None:
+        return "unknown"
+
+    def visible(name: str) -> bool:
+        element = borders.find(qn(f"w:{name}"))
+        return bool(
+            element is not None
+            and element.get(qn("w:val"), "nil") not in {"nil", "none"}
+        )
+
+    if any(visible(name) for name in ("left", "right", "insideV")):
+        return "grid"
+    if visible("top") and visible("bottom"):
+        return "three_line"
+    return "unknown"
+
+
 def _unnumbered_figure_caption_indexes(document: Any) -> set[int]:
     result: set[int] = set()
     for index, paragraph in enumerate(document.paragraphs):
@@ -1078,7 +1139,8 @@ def _candidate_image_entry(
             "max_width_percent": max_width,
             "max_height_percent": None if figure_panel else 65,
             "same_row_equal_height": figure_panel,
-            "raster_upscale_max_percent": 125,
+            "allow_upscale": False,
+            "raster_upscale_max_percent": 100,
             "minimum_effective_dpi": 220,
         },
         "approval_blocked_reason": reason,
@@ -1284,6 +1346,8 @@ def _image_available_extent(
 
 
 def _image_upscale_limit(entry: dict[str, Any]) -> float:
+    if entry.get("resize", {}).get("allow_upscale") is False:
+        return 1.0
     if entry.get("media_kind") == "vector":
         return float("inf")
     resize = entry["resize"]
@@ -1482,6 +1546,185 @@ def _candidate_pagination_groups(
     return groups
 
 
+def _candidate_qa_groups(
+    headings: list[dict[str, Any]],
+    appendices: list[dict[str, Any]],
+    numbering_anomalies: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+    images: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Group repeated decisions without storing manuscript text."""
+    groups: list[dict[str, Any]] = []
+    frozen: list[dict[str, Any]] = []
+    if headings:
+        groups.append(
+            {
+                "id": "qa:heading-hierarchy",
+                "kind": "heading_hierarchy",
+                "item_count": len(headings),
+                "decision_scope": "group_with_exceptions",
+                "status": "open",
+            }
+        )
+    if appendices:
+        groups.append(
+            {
+                "id": "qa:appendix-recognition",
+                "kind": "appendix_recognition",
+                "item_count": len(appendices),
+                "decision_scope": "group_with_exceptions",
+                "status": "open",
+            }
+        )
+        frozen.extend(
+            {
+                "id": f"freeze:appendix:{index}",
+                "kind": "appendix",
+                "locator": item["locator"],
+                "status": "open",
+            }
+            for index, item in enumerate(appendices)
+        )
+    if numbering_anomalies:
+        groups.append(
+            {
+                "id": "qa:heading-numbering",
+                "kind": "heading_numbering",
+                "item_count": len(numbering_anomalies),
+                "decision_scope": "group_with_exceptions",
+                "status": "open",
+            }
+        )
+        frozen.extend(
+            {
+                "id": f"freeze:heading:{index}",
+                "kind": "heading_numbering_and_toc",
+                "locator": item.get("locator"),
+                "status": "open",
+            }
+            for index, item in enumerate(numbering_anomalies)
+        )
+    for classification in (
+        "three_line",
+        "grid",
+        "figure_panel",
+        "callout",
+        "unknown",
+    ):
+        matching_tables = [
+            item for item in tables if item.get("classification") == classification
+        ]
+        if not matching_tables:
+            continue
+        groups.append(
+            {
+                "id": f"qa:table-kind:{classification}",
+                "kind": "table_classification",
+                "classification": classification,
+                "item_count": len(matching_tables),
+                "decision_scope": "group_with_exceptions",
+                "status": "open",
+            }
+        )
+        frozen.extend(
+            {
+                "id": f"freeze:table:{item['table']}",
+                "kind": "table",
+                "table": int(item["table"]),
+                "status": "open",
+            }
+            for item in matching_tables
+        )
+    supported_images = [item for item in images if item.get("supported")]
+    if supported_images:
+        groups.append(
+            {
+                "id": "qa:image-resize-candidates",
+                "kind": "image_handling",
+                "item_count": len(supported_images),
+                "decision_scope": "group_with_exceptions",
+                "status": "open",
+            }
+        )
+    ambiguous_images = [
+        item
+        for item in images
+        if not item.get("supported") or item.get("approval_blocked_reason")
+    ]
+    if ambiguous_images:
+        groups.append(
+            {
+                "id": "qa:ambiguous-images",
+                "kind": "image_handling",
+                "item_count": len(ambiguous_images),
+                "decision_scope": "group_with_exceptions",
+                "status": "open",
+            }
+        )
+        frozen.extend(
+            {
+                "id": f"freeze:image:{item['image']}",
+                "kind": "image",
+                "image": item["image"],
+                "status": "open",
+            }
+            for item in ambiguous_images
+        )
+    return groups, frozen
+
+
+def _candidate_trial_selection(
+    headings: list[dict[str, Any]],
+    appendices: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+    images: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_headings: list[dict[str, Any]] = []
+    for level in (1, 2, 3, 4):
+        selected_headings.extend(
+            {"locator": item["locator"], "level": level}
+            for item in [
+                candidate
+                for candidate in headings
+                if int(candidate["level"]) == level
+            ][:2]
+        )
+    table_ids: list[int] = []
+    for kind in ("three_line", "grid", "figure_panel", "callout", "unknown"):
+        table_ids.extend(
+            int(item["table"])
+            for item in [
+                candidate
+                for candidate in tables
+                if candidate.get("classification") == kind
+            ][:2]
+            if int(item["table"]) not in table_ids
+        )
+    image_ids: list[str] = []
+    for placement in ("standalone", "table_figure_panel", "table_embedded_unknown"):
+        image_ids.extend(
+            str(item["image"])
+            for item in [
+                candidate
+                for candidate in images
+                if candidate.get("placement") == placement
+            ][:2]
+            if str(item["image"]) not in image_ids
+        )
+    return {
+        "mode": "representative_continuous_fragments",
+        "whole_book_candidate": False,
+        "max_rendered_pages_per_candidate": 30,
+        "max_instances_per_object_kind": 2,
+        "include_front_matter": True,
+        "heading_samples": selected_headings,
+        "appendix_samples": [item["locator"] for item in appendices[:2]],
+        "table_samples": table_ids,
+        "image_samples": image_ids,
+        "status": "candidate",
+    }
+
+
 def candidate_structure_map(path: Path) -> dict[str, Any]:
     from _common import load_document
 
@@ -1489,13 +1732,29 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
     headings = []
     captions = []
     paragraph_roles = []
+    appendices = []
     chapter_starts = []
     body_values = [paragraph.text for paragraph in document.paragraphs]
     unnumbered_figure_captions = _unnumbered_figure_caption_indexes(document)
     for index, paragraph in enumerate(document.paragraphs):
         value = paragraph.text
         detected_level = None
-        for level, pattern in HEADING_PATTERNS:
+        appendix_match = APPENDIX_PATTERN.match(value)
+        if appendix_match and value.strip():
+            appendix_number = value[appendix_match.start() : appendix_match.end()]
+            appendices.append(
+                {
+                    "locator": _body_locator(index, body_values),
+                    "text_sha256": text_sha256(value),
+                    "existing_number_sha256": text_sha256(appendix_number),
+                    "numbering_mode": "preserve_existing",
+                    "numbering_anomalies": [],
+                    "include_in_toc": None,
+                    "toc_policy": "preserve_if_present",
+                    "approved": False,
+                }
+            )
+        for level, pattern in (() if appendix_match else HEADING_PATTERNS):
             if pattern.match(value):
                 detected_level = level
                 entry = {
@@ -1523,6 +1782,8 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
             caption["paragraph"] = index
             captions.append(caption)
             role = "figure_caption" if caption["label"] == "图" else "table_caption"
+        elif appendix_match and value.strip():
+            role = "appendix_heading"
         elif index in unnumbered_figure_captions:
             role = "figure_caption_unnumbered"
         else:
@@ -1532,6 +1793,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                     "locator": _body_locator(index, body_values),
                     "text_sha256": text_sha256(value),
                     "role": role,
+                    "canonical_role": normalized_role(role),
                     "source_style": paragraph.style.name if paragraph.style else None,
                     "direct_format_sha256": _paragraph_style_signature(paragraph),
                     "approved": False,
@@ -1625,6 +1887,10 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         has_floating_objects = bool(
             table._tbl.xpath(".//wp:anchor | .//w:object | .//w:pict")
         )
+        table_is_floating = table._tbl.tblPr.find(qn("w:tblpPr")) is not None
+        classification = _table_classification(
+            table, figure_panel=bool(image_rows and label_rows)
+        )
         tables.append(
             {
                 "table": table_index,
@@ -1632,6 +1898,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                 "table_text_sha256": _table_text_hash(table),
                 "first_row_sha256": text_sha256(first_row),
                 "kind": "layout" if image_rows and label_rows else "unknown",
+                "classification": classification,
                 "layout_purpose": (
                     "figure_panel" if image_rows and label_rows else None
                 ),
@@ -1644,11 +1911,12 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                 "complex_merge": len(unique_cells)
                 < sum(len(row.cells) for row in table.rows),
                 "has_floating_objects": has_floating_objects,
+                "table_is_floating": table_is_floating,
                 "position_policy": "preserve_anchor",
                 "visible_control_mark_candidates": visible_controls,
                 "visual": {
                     "approved": False,
-                    "alignment": "center" if image_rows and label_rows else None,
+                    "alignment": "center" if not table_is_floating else None,
                     "available_width_percent": 100,
                     "allow_autofit": True,
                     "cell_margins_mm": {
@@ -1664,7 +1932,7 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
                     "all_cell_alignment": (
                         "center" if image_rows and label_rows else None
                     ),
-                    "text_wrapping": "none" if image_rows and label_rows else None,
+                    "text_wrapping": "none" if not table_is_floating else None,
                     "column_roles": (
                         []
                         if image_rows and label_rows
@@ -1679,8 +1947,22 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
 
     pagination_sections = _candidate_pagination_sections(document, headings)
     images = _candidate_images(document, body_values, tables)
+    numbering_anomalies = _numbering_anomalies(headings)
+    qa_groups, frozen_scopes = _candidate_qa_groups(
+        headings, appendices, numbering_anomalies, tables, images
+    )
+    first_chapter = min(
+        (int(item["paragraph"]) for item in headings if int(item["level"]) == 1),
+        default=len(document.paragraphs),
+    )
+    original_toc_contains_appendix = any(
+        int(item["locator"].get("paragraph", len(document.paragraphs))) < first_chapter
+        for item in appendices
+    )
+    for appendix in appendices:
+        appendix["original_toc_contains_appendix"] = original_toc_contains_appendix
     return {
-        "schema_version": "1.4",
+        "schema_version": "1.5",
         "status": "candidate",
         "source_content_fingerprint_sha256": content_fingerprint(path),
         "paragraph_roles": paragraph_roles,
@@ -1690,13 +1972,19 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
             "heading_levels": 4,
             "expected_progression": "strict",
             "approved": False,
-            "anomalies": _numbering_anomalies(headings),
+            "anomalies": numbering_anomalies,
         },
         "toc_ranges": [],
         "headings": headings,
         "captions": captions,
         "tables": tables,
         "images": images,
+        "appendices": appendices,
+        "qa_groups": qa_groups,
+        "frozen_scopes": frozen_scopes,
+        "trial_selection": _candidate_trial_selection(
+            headings, appendices, tables, images
+        ),
         "pagination_groups": _candidate_pagination_groups(document, captions, body_values),
         "table_cell_cleanups": [],
         "front_matter": _candidate_front_matter(
@@ -1716,7 +2004,7 @@ def load_structure_map(path: Path) -> dict[str, Any]:
         raise FormatMonographError(f"Invalid structure map: {path}: {exc}") from exc
     if value.get("schema_version") not in STRUCTURE_MAP_VERSIONS:
         raise FormatMonographError(
-            "Structure map schema_version must be 1.0, 1.1, 1.2, 1.3, or 1.4."
+            "Structure map schema_version must be 1.0, 1.1, 1.2, 1.3, 1.4, or 1.5."
         )
     if value.get("status") != "approved":
         raise FormatMonographError("Structure map status must be approved.")
@@ -1842,7 +2130,7 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                 raise FormatMonographError(
                     "Approved numbering contains unresolved progression anomalies."
                 )
-        if value.get("schema_version") in {"1.3", "1.4"}:
+        if value.get("schema_version") in {"1.3", "1.4", "1.5"}:
             for entry in value.get("paragraph_roles", []):
                 if not entry.get("approved"):
                     continue
@@ -1893,7 +2181,7 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Approved pagination group requires an anchor locator."
                     )
-        if value.get("schema_version") == "1.4":
+        if value.get("schema_version") in {"1.4", "1.5"}:
             front_matter = value.get("front_matter", {})
             if front_matter.get("approved"):
                 if not isinstance(front_matter.get("book_title"), dict):
@@ -2008,6 +2296,14 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     )
                 if not table.get("approved") or not visual.get("approved"):
                     continue
+                if (
+                    value.get("schema_version") == "1.5"
+                    and table.get("table_is_floating")
+                    and visual.get("text_wrapping") == "none"
+                ):
+                    raise FormatMonographError(
+                        "A floating table cannot be changed to no-wrap without a separate position-preserving approval."
+                    )
                 if table.get("kind") == "layout":
                     if table.get("layout_purpose") != "figure_panel":
                         raise FormatMonographError(
@@ -2033,6 +2329,13 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                 if table.get("kind") != "data":
                     raise FormatMonographError(
                         "Only approved data or figure-panel layout tables may receive visual formatting."
+                    )
+                if value.get("schema_version") == "1.5" and (
+                    visual.get("alignment") != "center"
+                    or visual.get("text_wrapping") != "none"
+                ):
+                    raise FormatMonographError(
+                        "Approved schema 1.5 data tables must be centered and use no text wrapping."
                     )
                 roles = visual.get("column_roles", [])
                 if not roles or any(
@@ -2194,6 +2497,66 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Data-table and unknown embedded images require separate QA and cannot be approved here."
                     )
+        if value.get("schema_version") == "1.5":
+            qa_ids: set[str] = set()
+            for item in value.get("qa_groups", []):
+                item_id = str(item.get("id", ""))
+                if not item_id or item_id in qa_ids:
+                    raise FormatMonographError(
+                        "Structure-map 1.5 QA group IDs must be unique."
+                    )
+                qa_ids.add(item_id)
+                if item.get("decision_scope") not in {
+                    "group_with_exceptions",
+                    "individual",
+                }:
+                    raise FormatMonographError(
+                        "Structure-map 1.5 QA groups require a decision scope."
+                    )
+            freeze_ids: set[str] = set()
+            for item in value.get("frozen_scopes", []):
+                item_id = str(item.get("id", ""))
+                if not item_id or item_id in freeze_ids:
+                    raise FormatMonographError(
+                        "Structure-map 1.5 frozen-scope IDs must be unique."
+                    )
+                freeze_ids.add(item_id)
+            for appendix in value.get("appendices", []):
+                if appendix.get("numbering_mode") != "preserve_existing":
+                    raise FormatMonographError(
+                        "Appendix numbering must preserve the manuscript value."
+                    )
+                if appendix.get("approved") and appendix.get("include_in_toc") not in {
+                    True,
+                    False,
+                }:
+                    raise FormatMonographError(
+                        "Approved appendices require an explicit TOC inclusion decision."
+                    )
+                if appendix.get("approved") and not isinstance(
+                    appendix.get("locator"), dict
+                ):
+                    raise FormatMonographError(
+                        "Approved appendices require a stable locator."
+                    )
+            trial = value.get("trial_selection", {})
+            if trial:
+                if trial.get("whole_book_candidate") is not False:
+                    raise FormatMonographError(
+                        "Trial output cannot default to a whole-book candidate."
+                    )
+                pages = int(trial.get("max_rendered_pages_per_candidate", 0))
+                if not 1 <= pages <= 30:
+                    raise FormatMonographError(
+                        "Trial candidates must be limited to at most 30 rendered pages."
+                    )
+            for image in value.get("images", []):
+                if image.get("approved") and image.get("resize", {}).get(
+                    "allow_upscale"
+                ) is not False:
+                    raise FormatMonographError(
+                        "Structure-map 1.5 images cannot be enlarged automatically."
+                    )
     return value
 
 
@@ -2209,7 +2572,7 @@ def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> 
     document = load_document(path)
     if has_semantic_structure_map(structure_map):
         prime_structure_map_locators(document, structure_map)
-    for key in ("headings", "captions"):
+    for key in ("headings", "captions", "appendices"):
         for entry in structure_map.get(key, []):
             if not entry.get("approved"):
                 continue
@@ -2374,11 +2737,11 @@ def _apply_toc_ranges(document: Any, structure_map: dict[str, Any]) -> int:
             if element is not None:
                 p_pr.remove(element)
         levels = int(entry.get("levels", 4))
+        instruction = f'TOC \\o "1-{levels}" \\h \\z'
+        if structure_map.get("schema_version") != "1.5":
+            instruction += " \\u"
         anchor._p.extend(
-            _complex_field_runs(
-                f'TOC \\o "1-{levels}" \\h \\z \\u',
-                "Update table of contents",
-            )
+            _complex_field_runs(instruction, "Update table of contents")
         )
         for index in range(end, start, -1):
             paragraph = document.paragraphs[index]
@@ -2407,6 +2770,20 @@ def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
         )
         paragraph.style = ensure_paragraph_style(document, f"Heading {level}")
         changed += 1
+    return changed
+
+
+def _apply_appendices(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    for entry in structure_map.get("appendices", []):
+        if not entry.get("approved"):
+            continue
+        paragraph = _verified_locator_paragraph(document, entry)
+        if entry.get("numbering_mode") != "preserve_existing":
+            raise FormatMonographError("Appendix numbering cannot be rebuilt automatically.")
+        if entry.get("include_in_toc") is True:
+            paragraph.style = ensure_paragraph_style(document, "Heading 1")
+            changed += 1
     return changed
 
 
@@ -2537,7 +2914,7 @@ def _apply_captions(document: Any, structure_map: dict[str, Any]) -> int:
             if entry.get("locator")
             else _verified_paragraph(document, entry)
         )
-        if version in {"1.2", "1.3", "1.4"}:
+        if version in {"1.2", "1.3", "1.4", "1.5"}:
             action = entry["action"]
             if action in {"preserve", "style_only"}:
                 continue
@@ -2590,7 +2967,7 @@ def _set_paragraph_property(paragraph: Any, name: str, enabled: bool) -> bool:
 
 
 def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
-    if structure_map.get("schema_version") not in {"1.3", "1.4"}:
+    if structure_map.get("schema_version") not in {"1.3", "1.4", "1.5"}:
         return 0
     changed = 0
     for entry in structure_map.get("paragraph_roles", []):
@@ -2620,7 +2997,7 @@ def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
 
 
 def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> int:
-    if structure_map.get("schema_version") not in {"1.3", "1.4"}:
+    if structure_map.get("schema_version") not in {"1.3", "1.4", "1.5"}:
         return 0
     changed = 0
     for group in structure_map.get("pagination_groups", []):
@@ -2877,7 +3254,7 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
             has_semantic_structure_map(structure_map)
             and entry.get("kind") != "data"
             and not (
-                structure_map.get("schema_version") in {"1.3", "1.4"}
+                structure_map.get("schema_version") in {"1.3", "1.4", "1.5"}
                 and entry.get("kind") == "layout"
                 and (entry.get("pagination_only") or figure_panel)
             )
@@ -2920,8 +3297,9 @@ def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
                     continue
                 _set_row_property(row, "cantSplit", True)
         visual = entry.get("visual", {})
-        if figure_panel:
+        if visual.get("approved") and (figure_panel or entry.get("kind") == "data"):
             apply_table_properties(document, visual, [(table, entry)])
+        if figure_panel:
             for row_index in entry.get("label_rows", []):
                 row_index = int(row_index)
                 if not 0 <= row_index < len(table.rows):
@@ -3101,6 +3479,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
     toc_targets = _apply_toc_ranges(document, structure_map)
     front_matter_targets = _apply_front_matter(document, structure_map)
     heading_targets = _apply_headings(document, structure_map)
+    appendix_targets = _apply_appendices(document, structure_map)
     outline_targets = _apply_outline_cleanup(document, structure_map)
     table_targets = _apply_tables(document, structure_map)
     table_cell_cleanup_targets = _apply_table_cell_cleanups(document, structure_map)
@@ -3134,6 +3513,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         {"kind": "structure_toc", "targets": toc_targets},
         {"kind": "structure_front_matter", "targets": front_matter_targets},
         {"kind": "structure_headings", "targets": heading_targets},
+        {"kind": "structure_appendices", "targets": appendix_targets},
         {"kind": "structure_outline_cleanup", "targets": outline_targets},
         {"kind": "structure_tables", "targets": table_targets},
         {
@@ -3377,7 +3757,7 @@ def _legacy_toc_empty_anchors(
     structure_map: dict[str, Any],
 ) -> set[Any]:
     """Recognize empty anchors left by pre-1.3 static-TOC migration."""
-    if structure_map.get("schema_version") in {"1.3", "1.4"}:
+    if structure_map.get("schema_version") in {"1.3", "1.4", "1.5"}:
         return set()
     if not toc_field_paragraphs:
         return set()
@@ -3416,7 +3796,7 @@ def _pagination_boundary_paragraphs(
     root: etree._Element, structure_map: dict[str, Any]
 ) -> set[Any]:
     pagination = structure_map.get("pagination_sections", {})
-    if structure_map.get("schema_version") != "1.4":
+    if structure_map.get("schema_version") not in {"1.4", "1.5"}:
         return set()
     result = set()
     has_landscape_table = any(

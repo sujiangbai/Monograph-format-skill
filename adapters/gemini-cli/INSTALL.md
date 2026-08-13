@@ -23,3 +23,6 @@ Gemini CLI 支持：
 4. 执行环境检测和结构测试。
 
 官方说明：https://geminicli.com/docs/cli/tutorials/skills-getting-started/
+
+整书运行必须遵循 `references/portable-run-checklist.md`，并使用
+`scripts/run_monograph.py` 的统一阶段和状态。

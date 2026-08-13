@@ -45,6 +45,7 @@ ROLE_STYLE_MAP = {
     "bibliography": "Bibliography",
     "body_text": "Normal",
     "chapter_title": "Heading 1",
+    "appendix_heading": "Heading 1",
     "level_2_section": "Heading 2",
     "level_3_section": "Heading 3",
     "level_4_section": "Heading 4",

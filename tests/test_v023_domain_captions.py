@@ -83,7 +83,7 @@ class V023DomainCaptionTests(unittest.TestCase):
         document.save(source)
 
         structure = candidate_structure_map(source)
-        self.assertEqual("1.4", structure["schema_version"])
+        self.assertEqual("1.5", structure["schema_version"])
         self.assertEqual(2, len(structure["captions"]))
         figure, table = structure["captions"]
         self.assertEqual("preserve", figure["action"])

@@ -11,9 +11,10 @@ Apply only approved formatting rules. Preserve the source DOCX and all authored 
 
 1. Locate this skill directory and resolve every referenced path relative to it.
 2. Read [capability-levels.md](references/capability-levels.md).
-3. Run `<python> scripts/check_environment.py --json`. When auto-discovery fails, use `--renderer <path>` or set `FORMAT_MONOGRAPH_RENDERER`.
-4. Select the reported capability mode. Never claim a higher mode.
-5. Keep source materials and generated documents outside this skill directory.
+3. For a whole book or a resumed run, read [portable-run-checklist.md](references/portable-run-checklist.md) and [whole-book-runtime.md](references/whole-book-runtime.md).
+4. Run `<python> scripts/check_environment.py --json`. When auto-discovery fails, use `--renderer <path>` or set `FORMAT_MONOGRAPH_RENDERER`.
+5. Select the reported capability mode. Never claim a higher mode.
+6. Keep source materials and generated documents outside this skill directory.
 
 ## Resolve authority
 
@@ -40,12 +41,23 @@ Read [monograph-elements.md](references/monograph-elements.md) while building se
 
 ## Apply approved rules
 
+For a whole book, use the portable staged interface and `--resume` after an interruption:
+
+```text
+<python> scripts/run_monograph.py prepare <input.docx> --profile <profile.json> --work-dir <directory>
+<python> scripts/run_monograph.py apply --work-dir <directory> --structure-map <approved.json>
+<python> scripts/run_monograph.py finalize --work-dir <directory>
+<python> scripts/run_monograph.py verify --work-dir <directory> --visual-qa-manifest <visual-qa.json>
+```
+
+The detailed commands below remain the individual building blocks for analysis, focused diagnosis, and adapter integration.
+
 1. Read [structure-map.md](references/structure-map.md).
 2. Run:
    `<python> scripts/inspect_docx.py <input.docx> --output <inventory.json> --structure-map-output <candidate-structure-map.json>`
 3. Review unsupported elements, missing fonts, damaged relationships, ambiguous paragraph roles, formula-image candidates, legacy equation objects, static TOC ranges, chapter start and heading progression, numbered and unnumbered figure captions, image placement classes and resize safety, table kinds, figure-panel layout tables, exact header and semantic-separator rows, column roles, complex merges, visible control marks, wide tables, TOC/body page-number boundaries, odd/even footers, and trailing-section evidence.
 4. Ask the caller to approve each proposed structural operation. Keep uncertain entries unapproved and report them; never infer approval from profile approval.
-   For schema 1.4, mark body/title/front-matter roles explicitly, approve `pagination_sections` only after identifying the TOC and body starts, and classify each table as data, figure-panel layout, pagination-only layout, callout, or unknown. Approve data-table visuals only with a known role for every column. Approve figure-panel formatting only when image rows and their short label rows are explicitly mapped. Caption identifiers remain editable manual text by default. Do not infer a missing number, sequence error, or `SEQ` conversion from punctuation alone.
+   For schema 1.5, mark body/title/front-matter roles explicitly, approve `pagination_sections` only after identifying the TOC and body starts, and classify each table as data, three-line, grid, figure-panel layout, pagination-only layout, callout, or unknown. Group repeated decisions and list object-level exceptions. Keep unresolved objects in `frozen_scopes`; approved independent scopes may continue, but finalization remains blocked. Approve data-table visuals only with a known role for every column. Approve figure-panel formatting only when image rows and their short label rows are explicitly mapped. Caption identifiers and all appendix identifiers remain editable manual text by default. Do not infer a missing number, sequence error, or `SEQ` conversion from punctuation alone.
    In architecture, civil-engineering, structural-engineering, or drafting content, analyze whether hyphenated numbers identify a section, elevation, node, detail, or drawing callout. Preserve uncertain identifiers and ask the caller before changing them.
 5. Set the map status to `approved`, then bind it to the unchanged source:
    `<python> scripts/validate_structure_map.py <approved-structure-map.json> --source <input.docx>`

@@ -114,6 +114,7 @@ def main() -> int:
     soffice, renderer_source = resolve_renderer(args.renderer)
     pymupdf_ok = bool(packages["PyMuPDF"]["available"])
     word = word_automation_status(args.word_adapter)
+    fonts = font_directories()
 
     if editing_ok and validation_ok and pymupdf_ok and (soffice or word["available"]):
         mode = "full"
@@ -146,6 +147,47 @@ def main() -> int:
             "word_pdf_export": bool(word["available"]),
             "rendering": bool(pymupdf_ok and (soffice or word["available"])),
         },
+        "portable_capabilities": {
+            "file_read": {"available": True, "source": "python_runtime"},
+            "python_execution": {
+                "available": python_ok,
+                "source": "python_runtime",
+            },
+            "docx_inspection": {
+                "available": inspection_ok,
+                "source": "python_dependencies",
+            },
+            "profile_validation": {
+                "available": validation_ok,
+                "source": "python_dependencies",
+            },
+            "docx_editing": {
+                "available": editing_ok,
+                "source": "python_dependencies",
+            },
+            "font_discovery": {
+                "available": bool(fonts),
+                "source": "operating_system",
+            },
+            "rendering": {
+                "available": bool(pymupdf_ok and (soffice or word["available"])),
+                "source": "renderer_or_target_application",
+            },
+            "target_word": {
+                "available": bool(word["available"]),
+                "source": "target_application_adapter",
+                "authorization_required": True,
+            },
+            "field_update": {
+                "available": bool(editing_ok and (soffice or word["available"])),
+                "source": "renderer_or_target_application",
+            },
+            "multimodal_source_reading": {
+                "available": None,
+                "source": "agent_declared",
+                "confirmation_required": True,
+            },
+        },
         "rendering": {
             "soffice": soffice,
             "renderer": soffice,
@@ -155,7 +197,7 @@ def main() -> int:
             "field_refresh_candidate": bool(soffice),
         },
         "microsoft_word": word,
-        "font_directories": font_directories(),
+        "font_directories": fonts,
         "limitations": [],
     }
     if not python_ok:

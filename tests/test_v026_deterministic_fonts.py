@@ -1139,14 +1139,10 @@ class V026DeterministicFontTests(unittest.TestCase):
         }
         self.assertTrue(
             all(
-                (
-                    int(extent.get("cx")),
-                    int(extent.get("cy")),
-                )
-                != (
-                    int(original_extents[image_id]["cx"]),
-                    int(original_extents[image_id]["cy"]),
-                )
+                int(extent.get("cx"))
+                <= int(original_extents[image_id]["cx"])
+                and int(extent.get("cy"))
+                <= int(original_extents[image_id]["cy"])
                 for image_id, extent in resized_extents.items()
             )
         )

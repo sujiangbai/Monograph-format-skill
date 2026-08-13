@@ -48,3 +48,15 @@ If a field updater removes field instructions, changes authored content, or chan
 Before accepting a finalized copy, resolve approved fonts through direct formatting, styles, base styles, document defaults, and the theme font scheme. Reject a backend result that reintroduces a theme-font mismatch even when its field-cache checks pass.
 
 `target_pdf_ready_for_visual_qa` means the target application exported a PDF, not that layout passed. Mark `target_layout_verified` only after every exported page is inspected for page-number sequences, TOC entries, clipping, overlap, tables, captions, headers, footers, and equations.
+
+## Portable capability snapshot
+
+V0.3.0 also emits `portable_capabilities` for file reading, Python execution,
+DOCX inspection, profile validation, DOCX editing, font discovery, rendering,
+target Word, field update, and multimodal source reading. The legacy
+`capabilities` keys remain available for schema compatibility. An Agent must
+declare multimodal source-reading support separately; the core cannot infer it.
+
+Use the same snapshot in `run-state.json` for every staged command. An adapter
+may add an authorized target-application backend, but it cannot turn an
+unverified capability into a completed field refresh or target-layout check.

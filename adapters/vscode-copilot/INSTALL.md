@@ -24,3 +24,6 @@ VS Code 官方支持以下项目位置：
 4. 确认终端工具在用户授权后可以运行 Python 脚本。
 
 官方说明：https://code.visualstudio.com/docs/agent-customization/agent-skills
+
+整书运行必须遵循 `references/portable-run-checklist.md`，并使用
+`scripts/run_monograph.py` 的统一阶段和状态。
