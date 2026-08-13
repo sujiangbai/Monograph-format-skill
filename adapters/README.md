@@ -9,3 +9,6 @@
 平台适配不得改变规则优先级、批准闸门、内容保护或逐页视觉验收要求。
 
 `microsoft-word/windows/` 是可选目标软件适配器。它不影响其他平台发现 Skill；只有 Windows、Microsoft Word 和调用者授权均满足时才可使用。
+
+所有 Agent 适配器必须执行 `format-monograph/references/portable-run-checklist.md`
+中的统一阶段。适配器只能改变发现和调用方式，不得改变运行状态、QA 或交付闸门。

@@ -10,7 +10,39 @@ Use a source-bound structure map for operations that reinterpret document struct
 4. Pass the same map to `apply_profile.py` and `audit_docx.py`.
 5. Regenerate the map and repeat QA whenever the source fingerprint changes.
 
-New maps use schema `1.4`; readers continue to accept `1.0` through `1.3`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. Version 1.2 adds domain-aware manual caption actions and semantic paragraph roles. Version 1.3 adds stable locators and pagination-only groups.
+New maps use schema `1.5`; readers continue to accept `1.0` through `1.4`. Version 1.0 can authorize its original TOC, heading, caption, first-row table, and trailing-section operations. Version 1.1 retains its explicit legacy `SEQ` conversion behavior. Version 1.2 adds domain-aware manual caption actions and semantic paragraph roles. Version 1.3 adds stable locators and pagination-only groups. Version 1.4 adds page-number sections, table visuals, and source-bound image resizing.
+
+## Schema 1.5
+
+Schema 1.5 adds canonical semantic roles, appendix preservation, grouped QA,
+local frozen scopes, table classification, and bounded representative trial
+selection. Legacy `heading_1` through `heading_4` role names normalize to
+`chapter_title`, `level_2_section`, `level_3_section`, and `level_4_section` so
+existing profiles continue to match real targets.
+
+Appendix candidates contain stable locators and hashes, not text. Their
+`numbering_mode` is always `preserve_existing`; an approved entry requires an
+explicit `include_in_toc` decision. Preserve the original TOC policy: include an
+appendix in a rebuilt TOC only when the original TOC included appendices.
+Missing, duplicate, or suspicious appendix, figure, table, and equation numbers
+remain report-only until the caller approves an exact change.
+
+`qa_groups` collect repeated decisions with `decision_scope` set to
+`group_with_exceptions` or `individual`. `frozen_scopes` identify only the
+objects whose uncertain structure must remain unchanged. Independent approved
+objects may still be applied, but the run remains `blocked_qa` while an open
+critical group or frozen scope exists.
+
+Tables add `classification`: `three_line`, `grid`, `figure_panel`, `callout`, or
+`unknown`. The first row is not a header unless approved. Nonfloating table
+candidates propose center alignment and no wrapping; a floating table is frozen
+because removing wrapping could change its position. Table and image
+`position_policy` remains `preserve_anchor`.
+
+`trial_selection` is a text-free manifest. It selects the front matter,
+appendices, heading levels, and at most two examples of each figure/table class.
+It sets `whole_book_candidate=false` and limits one candidate to 30 rendered
+pages. A trial never replaces full-book target rendering and visual QA.
 
 ## Schema 1.4
 

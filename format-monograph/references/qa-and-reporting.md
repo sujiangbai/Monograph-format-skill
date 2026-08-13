@@ -73,3 +73,16 @@ Finalization evidence must also record effective-font integrity before and after
 `deferred` is a limitation, not a refresh success. State who approved it and require the target application to update fields before final visual QA. If the renderer and target software differ, report both and set target layout to unverified until that application is checked.
 
 `refreshed_target_word` requires a successful Microsoft Word backend plus core integrity audits. `target_pdf_ready_for_visual_qa` only means Word exported a PDF. Promote to `target_layout_verified` only after every PDF page has been inspected; never infer the physical page count from PAGE-field count.
+
+## V0.3.0 whole-book run evidence
+
+For an orchestrated whole-book run, also report the `run-state.json` status,
+cache hits, duration of each stage, grouped QA decisions, object-level
+exceptions, frozen scopes, field-result writeback parts, rendered page count,
+target-layout evidence, and visual-QA manifest status. Do not copy local paths,
+manuscript text, inventories, or rendered pages into a public report or CI log.
+
+`prepared` means only that inventory is complete. `blocked_qa` may include a
+valid partial candidate while uncertain objects remain unchanged.
+`candidate_ready` must list the remaining field, target-layout, or visual gate.
+Only `final_ready` is an unrestricted whole-book completion claim.

@@ -4,7 +4,7 @@
 
 它面向需要在 Codex、Claude Code、Gemini CLI、VS Code / GitHub Copilot 等支持 `SKILL.md` 的 Agent 中复用排版能力的人。这个 skill 的目标不是替作者改写内容，而是在用户确认规则后，依据出版社规范、样书、模板或明确要求，对 Word 文档进行受控格式化、审计和交付。
 
-当前状态：**V0.2.6 候选实现**。
+当前状态：**V0.3.0 候选实现**。
 
 ## 适合谁使用
 
@@ -22,6 +22,10 @@
 - 支持真实 Word 字段、多级标题编号、镜像页边距、中西文字体分离和固定磅值行距。
 - 解析 DOCX 样式、主题和继承链后的实际字体，避免主题字体造成审计误判。
 - 通过结构映射处理目录、正文页码分区、奇偶页脚、表格、题注、图片和章节结构。
+- 通过统一的分阶段命令、运行状态和指纹缓存支持整书断点续跑。
+- 按组提出重复 QA，只冻结未决章节或对象，并保留书稿已有附录编号。
+- 将代表性试排限制为不超过约 30 个渲染页，不把试排误作整书验收。
+- 在临时目标软件副本中更新字段，只回写通过审计的字段结果。
 - 输出格式稿、审阅标注稿、格式报告、审计结果和渲染检查依据。
 
 ## 安全边界
@@ -47,6 +51,17 @@
 8. 应用已批准规则，生成格式稿和审阅稿。
 9. 运行审计、字段终稿化和渲染检查。
 10. 交付前确认内容一致性、公式对象、媒体对象、字段缓存、页码和视觉 QA。
+
+V0.3.0 整书运行使用统一入口：
+
+```text
+<python> format-monograph/scripts/run_monograph.py prepare <input.docx> --profile <profile.json> --work-dir <directory>
+<python> format-monograph/scripts/run_monograph.py apply --work-dir <directory> --structure-map <approved.json>
+<python> format-monograph/scripts/run_monograph.py finalize --work-dir <directory>
+<python> format-monograph/scripts/run_monograph.py verify --work-dir <directory> --visual-qa-manifest <visual-qa.json>
+```
+
+中断后在原命令上添加 `--resume`。`run-state.json` 和所有书稿产物只保存在用户指定的本地任务目录。
 
 详细执行规则见 [`format-monograph/SKILL.md`](format-monograph/SKILL.md)。
 
