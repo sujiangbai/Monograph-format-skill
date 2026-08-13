@@ -735,26 +735,37 @@ def main() -> int:
             backend = {"backend": "deferred_on_open"}
             delivery_status = "deferred"
         else:
-            try:
-                with tempfile.TemporaryDirectory(
-                    prefix="format-monograph-libreoffice-fields-"
-                ) as refresh_name:
-                    refreshed = Path(refresh_name) / "refreshed.docx"
+            with tempfile.TemporaryDirectory(
+                prefix="format-monograph-libreoffice-fields-"
+            ) as refresh_name:
+                refreshed = Path(refresh_name) / "refreshed.docx"
+                try:
                     backend = libreoffice_refresh(
                         args.input, refreshed, args.renderer
                     )
-                    backend["controlled_writeback_parts"] = (
-                        controlled_field_result_writeback(
-                            args.input, refreshed, args.output
-                        )
+                except FormatMonographError:
+                    if args.field_updater != "auto" or not args.approve_deferred:
+                        raise
+                    backend = use_deferred_output(
+                        args.input, args.output, "libreoffice_error"
                     )
-            except FormatMonographError:
-                if args.field_updater != "auto" or not args.approve_deferred:
-                    raise
-                backend = use_deferred_output(
-                    args.input, args.output, "libreoffice_error"
-                )
-                delivery_status = "deferred"
+                    delivery_status = "deferred"
+                else:
+                    try:
+                        backend["controlled_writeback_parts"] = (
+                            controlled_field_result_writeback(
+                                args.input, refreshed, args.output
+                            )
+                        )
+                    except FormatMonographError:
+                        if args.field_updater != "auto" or not args.approve_deferred:
+                            raise
+                        backend = use_deferred_output(
+                            args.input,
+                            args.output,
+                            "libreoffice_contract_or_integrity",
+                        )
+                        delivery_status = "deferred"
 
         output_fields = field_cache_inventory(args.output)
         strict_backend = backend.get("backend") not in {
