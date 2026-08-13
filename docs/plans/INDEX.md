@@ -9,7 +9,8 @@
 | 0.2.3 | 历史 | [v0.2.3-domain-aware-caption-identifiers.md](v0.2.3-domain-aware-caption-identifiers.md) | 建筑与土木领域图纸标识、人工图表编号默认规则及确认式改号审计 |
 | 0.2.4 | 历史 | [v0.2.4-finalization-stable-audit.md](v0.2.4-finalization-stable-audit.md) | 字段终稿化、字段展开后稳定审计、目录清理、图表分页绑定及渲染器差异报告 |
 | 0.2.5 | 历史 | [v0.2.5-word-pagination-table-finalization.md](v0.2.5-word-pagination-table-finalization.md) | Word 自动字段终稿、目录与正文独立页码、奇偶页脚、稳定性修复及表格视觉格式 |
-| 0.2.6 | 当前 | [v0.2.6-deterministic-fonts-and-audit-hardening.md](v0.2.6-deterministic-fonts-and-audit-hardening.md) | 确定性中西文字体、页脚字段幂等、Word 适配兼容及终稿审计加固 |
+| 0.2.6 | 历史 | [v0.2.6-deterministic-fonts-and-audit-hardening.md](v0.2.6-deterministic-fonts-and-audit-hardening.md) | 确定性中西文字体、页脚字段幂等、Word 适配兼容及终稿审计加固 |
+| 0.3.0 | 当前 | [v0.3.0-whole-book-reliability-and-portability.md](v0.3.0-whole-book-reliability-and-portability.md) | 整书断点续跑、结构可靠性、限定试排、字段安全回写及跨 Agent 运行清单 |
 
 ## 版本规则
 
