@@ -8,9 +8,13 @@ $verification = $null
 function Get-FieldName([int]$type) {
     switch ($type) {
         3 { "REF" }
+        12 { "SEQ" }
         13 { "TOC" }
+        26 { "NUMPAGES" }
         33 { "PAGE" }
+        34 { "=" }
         37 { "PAGEREF" }
+        66 { "SECTIONPAGES" }
         default { $null }
     }
 }
@@ -23,7 +27,10 @@ function Update-ApprovedFields($doc, [System.Collections.Generic.HashSet[string]
             foreach ($field in @($range.Fields)) {
                 $name = Get-FieldName ([int]$field.Type)
                 if ($null -ne $name -and $allowed.Contains($name)) {
-                    [void]$field.Update()
+                    $updateSucceeded = [bool]$field.Update()
+                    if (-not $updateSucceeded) {
+                        throw "Microsoft Word failed to update an approved $name field."
+                    }
                     if (-not $counts.ContainsKey($name)) { $counts[$name] = 0 }
                     $counts[$name]++
                 }
@@ -52,6 +59,21 @@ function Count-ApprovedFields($doc, [System.Collections.Generic.HashSet[string]]
     return $count
 }
 
+function Unlock-ApprovedFields($doc, [System.Collections.Generic.HashSet[string]]$allowed) {
+    foreach ($storyType in 1..17) {
+        try { $range = $doc.StoryRanges.Item($storyType) } catch { $range = $null }
+        while ($null -ne $range) {
+            foreach ($field in @($range.Fields)) {
+                $name = Get-FieldName ([int]$field.Type)
+                if ($null -ne $name -and $allowed.Contains($name)) {
+                    $field.Locked = $false
+                }
+            }
+            try { $range = $range.NextStoryRange } catch { $range = $null }
+        }
+    }
+}
+
 function Get-LastContentPage($section) {
     $paragraphs = @($section.Range.Paragraphs)
     for ($index = $paragraphs.Count - 1; $index -ge 0; $index--) {
@@ -69,175 +91,82 @@ function Get-LastContentPage($section) {
     return [int]$start.Information(3)
 }
 
-function Set-DisplayedPageField(
-    $footer,
-    [int]$offset,
-    [int]$alignment
-) {
-    $footer.LinkToPrevious = $false
-    $paragraph = $footer.Range.Paragraphs.First
-    $paragraph.Alignment = $alignment
-    $target = $paragraph.Range.Duplicate
-    if ($target.End -gt $target.Start) { $target.End-- }
-    $target.Text = ""
-    if ($offset -eq 0) {
-        $field = $footer.Range.Document.Fields.Add($target, 33, "", $false)
-        [void]$field.Update()
-        return
-    }
-    $outer = $footer.Range.Document.Fields.Add(
-        $target,
-        -1,
-        "=  - $offset",
-        $false
-    )
-    $code = $outer.Code.Duplicate
-    $placeholder = ([string]$code.Text).IndexOf("-")
-    if ($placeholder -lt 0) { throw "Unable to create a calculated PAGE field." }
-    $inner = $footer.Range.Duplicate
-    $inner.Start = $code.Start + $placeholder
-    $inner.End = $inner.Start
-    $page = $footer.Range.Document.Fields.Add($inner, 33, "", $false)
-    [void]$page.Update()
-    [void]$outer.Update()
-}
-
-function Unlock-ApprovedFields($doc, [System.Collections.Generic.HashSet[string]]$allowed) {
-    foreach ($storyType in 1..17) {
-        try { $range = $doc.StoryRanges.Item($storyType) } catch { $range = $null }
-        while ($null -ne $range) {
-            foreach ($field in @($range.Fields)) {
-                $name = Get-FieldName ([int]$field.Type)
-                if ($null -ne $name -and $allowed.Contains($name)) {
-                    $field.Locked = $false
-                }
-            }
-            try { $range = $range.NextStoryRange } catch { $range = $null }
+function Measure-Layout($doc, [string]$spacerStyleName) {
+    [void]$doc.Repaginate()
+    $sections = @()
+    for ($index = 1; $index -le $doc.Sections.Count; $index++) {
+        $section = $doc.Sections.Item($index)
+        $start = $section.Range.Duplicate
+        $start.Collapse(1)
+        $finish = $section.Range.Duplicate
+        if ($finish.End -gt $finish.Start) { $finish.End-- }
+        $finish.Collapse(0)
+        $sections += [ordered]@{
+            section_index = $index - 1
+            first_physical_page = [int]$start.Information(3)
+            last_physical_page = [int]$finish.Information(3)
+            last_content_page = Get-LastContentPage $section
         }
     }
-}
-
-function Normalize-DisplayedPageReferences($doc, $displayOffsets) {
-    $corrected = 0
-    foreach ($field in @($doc.StoryRanges.Item(1).Fields)) {
-        if ([int]$field.Type -ne 37) { continue }
-        $instruction = ([string]$field.Code.Text).Trim()
-        if ($instruction -notmatch '^PAGEREF\s+([^\s\\]+)') { continue }
-        $bookmarkName = $Matches[1]
-        if (-not $doc.Bookmarks.Exists($bookmarkName)) { continue }
-        $sectionNumber = [int]$doc.Bookmarks.Item($bookmarkName).Range.Information(2)
-        $offset = 0
-        if ($displayOffsets.ContainsKey([string]$sectionNumber)) {
-            $offset = [int]$displayOffsets[[string]$sectionNumber]
-        }
-        if ($offset -le 0) { continue }
-        [void]$field.Update()
-        $visible = ([string]$field.Result.Text).Trim()
-        $number = 0
-        if (-not [int]::TryParse($visible, [ref]$number)) { continue }
-        $field.Result.Text = [string]($number - $offset)
-        $field.Locked = $true
-        $corrected++
-    }
-    $tocLocked = 0
-    if ($corrected -gt 0) {
-        foreach ($toc in @($doc.TablesOfContents)) {
-            foreach ($field in @($toc.Range.Fields)) {
-                if ([int]$field.Type -eq 13) {
-                    $field.Locked = $true
-                    $tocLocked++
-                }
-            }
-        }
-    }
-    return [ordered]@{ corrected = $corrected; toc_locked = $tocLocked }
-}
-
-function Remove-PageBoundaryBlockSpacers($doc, [string]$styleName) {
-    $removed = 0
-    for ($pass = 0; $pass -lt 10; $pass++) {
-        [void]$doc.Repaginate()
-        $targets = @()
+    $spacerOrdinals = @()
+    if (-not [string]::IsNullOrWhiteSpace($spacerStyleName)) {
+        $ordinal = 0
         foreach ($paragraph in @($doc.Paragraphs)) {
             $name = ""
             try { $name = [string]$paragraph.Style.NameLocal } catch {}
-            $visible = ([string]$paragraph.Range.Text).Replace("`r", "").Replace("`a", "").Trim()
-            if ($name -eq $styleName -and $visible -eq "") { $targets += $paragraph }
-        }
-        $remove = @()
-        foreach ($paragraph in $targets) {
+            if ($name -ne $spacerStyleName) { continue }
             $range = $paragraph.Range.Duplicate
-            if ($range.Start -le 0) { continue }
-            $before = $doc.Range($range.Start - 1, $range.Start)
-            $spacerPage = [int]$range.Information(3)
-            $previousPage = [int]$before.Information(3)
-            if ($spacerPage -ne $previousPage) { $remove += $paragraph }
-        }
-        if ($remove.Count -eq 0) { break }
-        for ($index = $remove.Count - 1; $index -ge 0; $index--) {
-            [void]$remove[$index].Range.Delete()
-            $removed++
+            if ($range.Start -gt 0) {
+                $before = $doc.Range($range.Start - 1, $range.Start)
+                if ([int]$range.Information(3) -ne [int]$before.Information(3)) {
+                    $spacerOrdinals += $ordinal
+                }
+            }
+            $ordinal++
         }
     }
-    return $removed
+    return [ordered]@{
+        sections = $sections
+        page_boundary_spacer_ordinals = $spacerOrdinals
+        page_count = [int]$doc.ComputeStatistics(2)
+    }
 }
 
-function Normalize-FrontMatterPagination($doc, $verticalAlignment) {
-    if ($doc.Sections.Count -lt 3) {
-        throw "Approved title/TOC/body pagination requires at least three sections."
+function Export-RequestedPdf($doc, $request) {
+    if ($null -eq $request.pdf_output_path -or [string]$request.pdf_output_path -eq "") {
+        return $false
     }
-    $doc.Sections.Item(1).PageSetup.DifferentFirstPageHeaderFooter = -1
-    if ($verticalAlignment -eq "center") {
-        $doc.Sections.Item(1).PageSetup.VerticalAlignment = 1
+    $pdfPath = [IO.Path]::GetFullPath([string]$request.pdf_output_path)
+    $parent = [IO.Path]::GetDirectoryName($pdfPath)
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        [IO.Directory]::CreateDirectory($parent) | Out-Null
     }
-    $changed = 1
-    $displayOffsets = @{}
-    foreach ($index in 2..3) {
-        [void]$doc.Repaginate()
-        $lastContentPage = Get-LastContentPage $doc.Sections.Item($index - 1)
-        $desiredPhysicalPage = $lastContentPage + 1
-        $startsEven = ($desiredPhysicalPage % 2 -eq 0)
-        $doc.Sections.Item($index).PageSetup.SectionStart = if ($startsEven) { 3 } else { 4 }
-        $offset = if ($startsEven) { 1 } else { 0 }
-        $displayOffsets[[string]$index] = $offset
-        try {
-            [void]($doc.Sections.Item($index).Range.Paragraphs.First.Format.PageBreakBefore = 0)
-        } catch {}
-        Set-DisplayedPageField $doc.Sections.Item($index).Footers.Item(1) $offset 2
-        Set-DisplayedPageField $doc.Sections.Item($index).Footers.Item(3) $offset 0
-        $changed++
-    }
-    $bodyOffset = [int]$displayOffsets["3"]
-    if ($doc.Sections.Count -ge 4) {
-        foreach ($index in 4..$doc.Sections.Count) {
-            $displayOffsets[[string]$index] = $bodyOffset
-        }
-    }
-    [void]$doc.Repaginate()
-    return [ordered]@{ changed = $changed; display_offsets = $displayOffsets }
+    $doc.ExportAsFixedFormat($pdfPath, 17)
+    return (Test-Path -LiteralPath $pdfPath -PathType Leaf)
 }
 
 try {
     $requestText = [Console]::In.ReadToEnd()
     $request = $requestText | ConvertFrom-Json
-    if ($request.protocol_version -ne "1.0") {
+    if ($request.protocol_version -notin @("1.0", "1.1")) {
         throw "Unsupported external field protocol version."
     }
     if ([string]$request.target_software -notmatch "Microsoft (Word|365)") {
         throw "This adapter only supports Microsoft Word target software."
     }
+    $operation = [string]$request.operation
+    if ([string]::IsNullOrWhiteSpace($operation)) { $operation = "refresh_fields" }
+    if ($operation -notin @("measure_layout", "refresh_fields", "verify_only")) {
+        throw "Unsupported external field operation."
+    }
     $inputPath = [IO.Path]::GetFullPath([string]$request.input_path)
-    $outputPath = [IO.Path]::GetFullPath([string]$request.output_path)
-    if ($inputPath -eq $outputPath) { throw "The Word adapter cannot overwrite its input." }
     if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) {
         throw "Input DOCX does not exist."
     }
-
     $allowed = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]$request.allowed_field_types,
         [StringComparer]::OrdinalIgnoreCase
     )
-    Copy-Item -LiteralPath $inputPath -Destination $outputPath -Force
 
     $word = New-Object -ComObject Word.Application
     $word.Visible = $false
@@ -246,50 +175,88 @@ try {
     try { $word.Options.UpdateLinksAtOpen = $false } catch {}
     try { $word.Options.SaveNormalPrompt = $false } catch {}
 
+    if ($operation -eq "measure_layout") {
+        $document = $word.Documents.Open($inputPath, $false, $true)
+        $openedReadOnly = [bool]$document.ReadOnly
+        if (-not $openedReadOnly) { throw "Measurement input was not opened read-only." }
+        $measurement = Measure-Layout $document ([string]$request.block_spacer_style_name)
+        $document.Close($false)
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($document) | Out-Null
+        $document = $null
+        $wordVersion = [string]$word.Version
+        $word.Quit()
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($word) | Out-Null
+        $word = $null
+        $result = [ordered]@{
+            protocol_version = "1.1"
+            operation = "measure_layout"
+            status = "success"
+            backend = "microsoft_word_com"
+            software = "Microsoft Word"
+            software_version = $wordVersion
+            repaginated = $true
+            saved = $false
+            read_only_verified = $openedReadOnly
+            structural_changes_applied = 0
+            page_count = $measurement.page_count
+            sections = $measurement.sections
+            page_boundary_spacer_ordinals = $measurement.page_boundary_spacer_ordinals
+        }
+        [Console]::Out.WriteLine(($result | ConvertTo-Json -Depth 6 -Compress))
+        exit 0
+    }
+
+    if ($operation -eq "verify_only") {
+        $document = $word.Documents.Open($inputPath, $false, $true)
+        $openedReadOnly = [bool]$document.ReadOnly
+        if (-not $openedReadOnly) { throw "Verification input was not opened read-only." }
+        [void]$document.Repaginate()
+        $verifiedFields = Count-ApprovedFields $document $allowed
+        $pageCount = $document.ComputeStatistics(2)
+        $tocCount = $document.TablesOfContents.Count
+        $pdfExported = Export-RequestedPdf $document $request
+        $document.Close($false)
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($document) | Out-Null
+        $document = $null
+        $wordVersion = [string]$word.Version
+        $word.Quit()
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($word) | Out-Null
+        $word = $null
+        $result = [ordered]@{
+            protocol_version = "1.1"
+            operation = "verify_only"
+            status = "success"
+            backend = "microsoft_word_com"
+            software = "Microsoft Word"
+            software_version = $wordVersion
+            verified_field_count = $verifiedFields
+            toc_count = $tocCount
+            page_count = $pageCount
+            repaginated = $true
+            saved = $false
+            read_only_verified = $openedReadOnly
+            pdf_exported = $pdfExported
+            structural_changes_applied = 0
+        }
+        [Console]::Out.WriteLine(($result | ConvertTo-Json -Depth 5 -Compress))
+        exit 0
+    }
+
+    $outputPath = [IO.Path]::GetFullPath([string]$request.output_path)
+    if ($inputPath -eq $outputPath) { throw "The Word adapter cannot overwrite its input." }
+    Copy-Item -LiteralPath $inputPath -Destination $outputPath -Force
     $document = $word.Documents.Open($outputPath)
     [void]$document.Repaginate()
     Unlock-ApprovedFields $document $allowed
-    $spacersRemoved = 0
-    $paginationSectionsNormalized = 0
-    $displayOffsets = @{}
-    $structureMapPath = [IO.Path]::GetFullPath([string]$request.structure_map_path)
-    if (Test-Path -LiteralPath $structureMapPath -PathType Leaf) {
-        $structureMap = Get-Content -LiteralPath $structureMapPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        if (
-            $null -ne $structureMap.front_matter -and
-            $structureMap.front_matter.approved -eq $true -and
-            $null -ne $structureMap.pagination_sections -and
-            $structureMap.pagination_sections.approved -eq $true
-        ) {
-            $paginationResult = Normalize-FrontMatterPagination `
-                $document $structureMap.front_matter.title_page_vertical_alignment
-            $paginationSectionsNormalized = [int]$paginationResult.changed
-            $displayOffsets = $paginationResult.display_offsets
-        }
-        if (
-            $null -ne $structureMap.block_spacing -and
-            $structureMap.block_spacing.approved -eq $true -and
-            $structureMap.block_spacing.same_page_only -eq $true
-        ) {
-            $spacersRemoved = Remove-PageBoundaryBlockSpacers $document "Monograph Figure Table Spacer"
-        }
-    }
     $updated = Update-ApprovedFields $document $allowed
-    $displayReferenceResult = Normalize-DisplayedPageReferences $document $displayOffsets
     [void]$document.Repaginate()
-
-    $pdfExported = $false
-    if ($null -ne $request.pdf_output_path -and [string]$request.pdf_output_path -ne "") {
-        $pdfPath = [IO.Path]::GetFullPath([string]$request.pdf_output_path)
-        $document.ExportAsFixedFormat($pdfPath, 17)
-        $pdfExported = Test-Path -LiteralPath $pdfPath -PathType Leaf
-    }
+    $pdfExported = Export-RequestedPdf $document $request
     $document.SaveAs2($outputPath, 12)
     $document.Close($false)
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($document) | Out-Null
     $document = $null
 
-    $verification = $word.Documents.Open($outputPath)
+    $verification = $word.Documents.Open($outputPath, $false, $true)
     [void]$verification.Repaginate()
     $verifiedFields = Count-ApprovedFields $verification $allowed
     $updatedTotal = 0
@@ -304,9 +271,9 @@ try {
     $word.Quit()
     [Runtime.InteropServices.Marshal]::FinalReleaseComObject($word) | Out-Null
     $word = $null
-
     $result = [ordered]@{
-        protocol_version = "1.0"
+        protocol_version = "1.1"
+        operation = "refresh_fields"
         status = "success"
         backend = "microsoft_word_com"
         software = "Microsoft Word"
@@ -320,11 +287,7 @@ try {
         saved = $true
         field_cache_verified = ($verifiedFields -ge $updatedTotal)
         pdf_exported = $pdfExported
-        page_boundary_spacers_removed = $spacersRemoved
-        pagination_sections_normalized = $paginationSectionsNormalized
-        page_number_display_offsets = $displayOffsets
-        displayed_pageref_corrected = [int]$displayReferenceResult.corrected
-        toc_locked_for_display_offsets = ([int]$displayReferenceResult.toc_locked -gt 0)
+        structural_changes_applied = 0
     }
     [Console]::Out.WriteLine(($result | ConvertTo-Json -Depth 5 -Compress))
     exit 0

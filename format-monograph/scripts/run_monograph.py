@@ -33,6 +33,7 @@ REFRESHED_FIELD_STATES = {
     "refreshed",
     "refreshed_external",
     "refreshed_target_word",
+    "selective_verified",
 }
 
 
@@ -534,6 +535,21 @@ def finalize(args: argparse.Namespace) -> int:
         raise RunError("finalize_docx.py failed with exit code 1.")
     evidence = read_json(final_status)
     field_status = str(evidence.get("delivery_field_status", "stale"))
+    state["field_writeback"] = {
+        "status": evidence.get("field_writeback_status", "not_verified"),
+        "backend": evidence.get("field_backend", {}).get("backend"),
+        "matched_fields": evidence.get("field_backend", {})
+        .get("selective_writeback", {})
+        .get("matched_fields", 0),
+        "updated_fields": evidence.get("field_backend", {})
+        .get("selective_writeback", {})
+        .get("updated_fields", 0),
+        "read_only_verified": bool(
+            evidence.get("field_backend", {})
+            .get("read_only_verification", {})
+            .get("read_only_verified")
+        ),
+    }
     state["artifacts"].update(
         {
             "finalized": relative_artifact(work_dir, final_docx),

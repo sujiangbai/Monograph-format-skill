@@ -2014,7 +2014,7 @@ def field_inventory(path: Path) -> dict[str, Any]:
     references = []
     sequences = []
     for instruction in instructions:
-        match = re.match(r"\s*([A-Za-z]+)(?:\s+([^\\\s]+))?", instruction)
+        match = re.match(r"\s*([A-Za-z]+|=)(?:\s+([^\\\s]+))?", instruction)
         kind = match.group(1).upper() if match else "UNKNOWN"
         argument = match.group(2) if match else None
         counts[kind] = counts.get(kind, 0) + 1

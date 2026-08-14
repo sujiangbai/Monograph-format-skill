@@ -550,17 +550,15 @@ class V026DeterministicFontTests(unittest.TestCase):
             / "word_field_updater.ps1"
         ).read_text(encoding="utf-8")
         self.assertIn("Documents.Open($outputPath)", adapter)
-        self.assertNotIn("$outputPath, $false, $false", adapter)
+        self.assertIn("Documents.Open($inputPath, $false, $true)", adapter)
+        self.assertIn("Documents.Open($outputPath, $false, $true)", adapter)
         self.assertIn("try { $word.Options.UpdateLinksAtOpen", adapter)
-        self.assertIn("Normalize-FrontMatterPagination", adapter)
-        self.assertIn("Normalize-DisplayedPageReferences", adapter)
-        self.assertIn("page_number_display_offsets", adapter)
-        self.assertIn("$footer.Range.Duplicate", adapter)
-        self.assertNotIn("$doc.Range($code.Start", adapter)
-        self.assertIn(
-            "[void]($doc.Sections.Item($index).Range.Paragraphs.First.Format.PageBreakBefore = 0)",
-            adapter,
-        )
+        self.assertIn('"verify_only"', adapter)
+        self.assertIn("read_only_verified = $openedReadOnly", adapter)
+        self.assertIn("structural_changes_applied = 0", adapter)
+        self.assertNotIn("Normalize-FrontMatterPagination", adapter)
+        self.assertNotIn("Normalize-DisplayedPageReferences", adapter)
+        self.assertNotIn("Set-DisplayedPageField", adapter)
 
     def test_localized_caption_style_keeps_semantic_audit_contract(self) -> None:
         source = self.root / "caption-source.docx"

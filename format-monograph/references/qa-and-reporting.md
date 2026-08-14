@@ -66,13 +66,13 @@
 
 ## Finalization evidence
 
-Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; updated field types and counts; repagination, save, reopen, and cache-verification status; optional target PDF; and content/protected-object audit outcomes. Do not include manuscript text in the status file.
+Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; approved, matched, updated, and rejected field counts; discarded backend-difference categories; each read-only layout measurement; core section-start, page-display-offset, and page-top-spacer adjustments; calculation and no-save verification page counts; target PDF; and content/protected-object audit outcomes. Do not include manuscript or field-result text in the status file.
 
 Finalization evidence must also record effective-font integrity before and after refresh. A target-software save is rejected when it reintroduces a conflicting theme font or changes an approved effective font.
 
 `deferred` is a limitation, not a refresh success. State who approved it and require the target application to update fields before final visual QA. If the renderer and target software differ, report both and set target layout to unverified until that application is checked.
 
-`refreshed_target_word` requires a successful Microsoft Word backend plus core integrity audits. `target_pdf_ready_for_visual_qa` only means Word exported a PDF. Promote to `target_layout_verified` only after every PDF page has been inspected; never infer the physical page count from PAGE-field count.
+`selective_verified` requires successful Microsoft Word field calculation, core selective writeback, integrity audits, and a second no-save Word verification with matching page count. `target_pdf_ready_for_visual_qa` only means Word exported a PDF. Promote to `target_layout_verified` only after every PDF page has been inspected; never infer the physical page count from PAGE-field count.
 
 ## V0.3.0 whole-book run evidence
 
