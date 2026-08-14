@@ -326,6 +326,15 @@ def main() -> int:
             if kind == "field_role" and rule["properties"].get(
                 "rebuild_heading_numbering"
             ):
+                if (
+                    structure_map
+                    and structure_map.get("schema_version") == "1.5"
+                    and not structure_map.get("numbering", {}).get("approved")
+                ):
+                    raise FormatMonographError(
+                        "Heading numbering rebuild requires caller-approved "
+                        "structure-map numbering QA."
+                    )
                 heading_numbering_levels = max(
                     heading_numbering_levels,
                     int(rule["properties"].get("heading_levels", 4)),

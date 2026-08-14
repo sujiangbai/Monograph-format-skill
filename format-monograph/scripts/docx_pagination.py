@@ -14,13 +14,16 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from lxml import etree
 
-from _common import NS, FormatMonographError, style_effective_font
+from _common import (
+    NS,
+    STRUCTURAL_INDENT_ATTRIBUTES,
+    FormatMonographError,
+    style_effective_font,
+)
 
 
 FOOTER_PART = re.compile(r"word/footer\d+\.xml$")
 HEADER_FOOTER_PART = re.compile(r"word/(?:header|footer)\d+\.xml$")
-
-
 def _section_properties(document: Any) -> list[Any]:
     return document.element.body.xpath("./w:p/w:pPr/w:sectPr | ./w:sectPr")
 
@@ -82,6 +85,77 @@ def _boundary_before(document: Any, paragraph: Any) -> tuple[Any, bool]:
     boundary.append(p_pr)
     body.insert(position, boundary)
     return sect_pr, True
+
+
+def _paragraph_has_layout_payload(element: Any) -> bool:
+    if element.tag != qn("w:p"):
+        return True
+    if "".join(element.xpath(".//w:t/text()")).strip():
+        return True
+    return bool(
+        element.xpath(
+            ".//w:drawing | .//w:object | .//w:pict | .//w:br | .//w:fldChar | "
+            ".//w:instrText | .//w:footnoteReference | .//w:endnoteReference"
+        )
+    )
+
+
+def _is_generated_empty_section_boundary(element: Any) -> bool:
+    if element.tag != qn("w:p") or list(element) == []:
+        return False
+    children = list(element)
+    if len(children) != 1 or children[0].tag != qn("w:pPr"):
+        return False
+    properties = list(children[0])
+    return len(properties) == 1 and properties[0].tag == qn("w:sectPr")
+
+
+def _nonzero_indent_attributes(ind: Any | None) -> dict[str, str]:
+    if ind is None:
+        return {}
+    result = {}
+    for attribute in STRUCTURAL_INDENT_ATTRIBUTES:
+        value = ind.get(qn(f"w:{attribute}"))
+        if value is not None and value != "0":
+            result[attribute] = value
+    return result
+
+
+def _boundary_after_title(
+    document: Any, title_paragraph: Any, toc_paragraph: Any
+) -> tuple[Any, bool]:
+    body = document.element.body
+    children = list(body)
+    title_position = _body_position(document, title_paragraph)
+    toc_position = _body_position(document, toc_paragraph)
+    if title_position >= toc_position:
+        raise FormatMonographError("The book title must precede the TOC heading.")
+
+    between = children[title_position + 1 : toc_position]
+    if any(_paragraph_has_layout_payload(element) for element in between):
+        raise FormatMonographError(
+            "Non-empty authored content between the book title and TOC requires QA."
+        )
+
+    title_p_pr = title_paragraph._p.get_or_add_pPr()
+    existing = title_p_pr.find(qn("w:sectPr"))
+    generated_boundaries = [
+        element for element in between if _is_generated_empty_section_boundary(element)
+    ]
+    source = existing
+    if source is None and generated_boundaries:
+        generated_p_pr = generated_boundaries[-1].find(qn("w:pPr"))
+        source = generated_p_pr.find(qn("w:sectPr"))
+    if source is None:
+        source = _section_for_position(document, title_position)
+
+    inserted = existing is None
+    if existing is None:
+        existing = copy.deepcopy(source)
+        title_p_pr.append(existing)
+    for boundary in generated_boundaries:
+        body.remove(boundary)
+    return existing, inserted
 
 
 def _set_page_numbering(sect_pr: Any, start: int | None, number_format: str) -> None:
@@ -352,577 +426,4 @@ def _ensure_visible_footers(
 ) -> int:
     changed = 0
     restart_indexes = restart_indexes or set()
-    document.settings.odd_and_even_pages_header_footer = True
-    sections = list(document.sections)
-    for index, section in enumerate(sections[start_index:], start=start_index):
-        section.different_first_page_header_footer = False
-        if index in restart_indexes and index > 0:
-            for footer in (section.footer, section.even_page_footer):
-                if not footer.is_linked_to_previous:
-                    continue
-                if not _page_only_footer(footer):
-                    raise FormatMonographError(
-                        "A restarted section inherits non-page footer content."
-                    )
-                footer.is_linked_to_previous = False
-                changed += 1
-        changed += int(
-            _ensure_page_field(
-                section.footer,
-                WD_ALIGN_PARAGRAPH.RIGHT,
-                replace_static_page_text=replace_static_page_text,
-            )
-        )
-        changed += int(
-            _ensure_page_field(
-                section.even_page_footer,
-                WD_ALIGN_PARAGRAPH.LEFT,
-                replace_static_page_text=replace_static_page_text,
-            )
-        )
-        if index > start_index:
-            # A missing relationship inherits the prior footer. Existing independent
-            # footer content is retained and receives its own PAGE field above.
-            pass
-    return changed
-
-
-def apply_pagination_sections(
-    document: Any,
-    settings: dict[str, Any],
-    resolver: Callable[[Any, dict[str, Any]], Any],
-    *,
-    replace_static_page_text: bool = False,
-    front_matter: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if not settings.get("approved"):
-        return {}
-    toc_locator = settings.get("toc_start")
-    body_locator = settings.get("body_start")
-    if not isinstance(toc_locator, dict) or not isinstance(body_locator, dict):
-        raise FormatMonographError(
-            "Approved pagination_sections requires toc_start and body_start locators."
-        )
-    toc_paragraph = resolver(document, toc_locator)
-    body_paragraph = resolver(document, body_locator)
-    if _body_position(document, toc_paragraph) >= _body_position(document, body_paragraph):
-        raise FormatMonographError("TOC pagination start must precede body pagination start.")
-
-    front_matter = front_matter or {}
-    title_boundary_inserted = False
-    title_index = None
-    if front_matter.get("approved") and front_matter.get("separate_title_page"):
-        toc_section_start = getattr(
-            document, "_format_monograph_toc_heading", toc_paragraph
-        )
-        title_boundary, title_boundary_inserted = _boundary_before(
-            document, toc_section_start
-        )
-        _set_section_type(title_boundary, "nextPage")
-        _set_vertical_alignment(
-            title_boundary,
-            str(front_matter.get("title_page_vertical_alignment", "top")),
-        )
-        toc_section_start.paragraph_format.page_break_before = False
-        _hide_single_title_page_running_elements(title_boundary)
-        title_paragraph = getattr(document, "_format_monograph_book_title", None)
-        if title_paragraph is None:
-            title_paragraph = resolver(document, front_matter["book_title"])
-        title_index = section_index_for_paragraph(document, title_paragraph)
-
-    body_boundary, inserted = _boundary_before(document, body_paragraph)
-    if front_matter.get("approved"):
-        _set_section_type(body_boundary, "nextPage")
-        body_paragraph.paragraph_format.page_break_before = False
-    page_break_suppressed = _suppress_redundant_body_page_break(
-        body_paragraph, body_boundary
-    )
-    toc_index = section_index_for_paragraph(document, toc_paragraph)
-    body_index = section_index_for_paragraph(document, body_paragraph)
-    if body_index != toc_index + 1:
-        raise FormatMonographError(
-            "The approved TOC and body starts must form adjacent pagination sections."
-        )
-
-    sections = _section_properties(document)
-    starts = settings.get("start_at", {})
-    number_format = str(settings.get("number_format", "decimal"))
-    _set_page_numbering(sections[toc_index], int(starts.get("toc", 1)), number_format)
-    _set_page_numbering(sections[body_index], int(starts.get("body", 1)), number_format)
-    if settings.get("continue_after_body_start", True):
-        for sect_pr in sections[body_index + 1 :]:
-            _set_page_numbering(sect_pr, None, number_format)
-
-    fields_added = _ensure_visible_footers(
-        document,
-        toc_index,
-        restart_indexes={toc_index, body_index},
-        replace_static_page_text=replace_static_page_text,
-    )
-    return {
-        "title_section": title_index,
-        "toc_section": toc_index,
-        "body_section": body_index,
-        "inserted_title_section_break": title_boundary_inserted,
-        "inserted_body_section_break": inserted,
-        "suppressed_redundant_body_page_break": page_break_suppressed,
-        "page_fields_added": fields_added,
-    }
-
-
-def finalize_pagination_sections(
-    document: Any,
-    settings: dict[str, Any],
-    resolver: Callable[[Any, dict[str, Any]], Any],
-    *,
-    front_matter: dict[str, Any] | None = None,
-) -> bool:
-    if not settings.get("approved"):
-        return False
-    body_locator = settings.get("body_start")
-    if not isinstance(body_locator, dict):
-        raise FormatMonographError(
-            "Approved pagination_sections requires a body_start locator."
-        )
-    body_paragraph = resolver(document, body_locator)
-    body_index = section_index_for_paragraph(document, body_paragraph)
-    sections = _section_properties(document)
-    if not 0 <= body_index < len(sections):
-        raise FormatMonographError("Body pagination section is out of range.")
-    front_matter = front_matter or {}
-    if front_matter.get("approved"):
-        title_paragraph = getattr(document, "_format_monograph_book_title", None)
-        if title_paragraph is None:
-            title_paragraph = resolver(document, front_matter["book_title"])
-        title_index = section_index_for_paragraph(document, title_paragraph)
-        _hide_single_title_page_running_elements(sections[title_index])
-        _set_section_type(sections[title_index], "nextPage")
-        toc_heading = getattr(document, "_format_monograph_toc_heading", None)
-        if toc_heading is not None:
-            toc_heading.paragraph_format.page_break_before = False
-        _set_section_type(sections[body_index], "nextPage")
-        body_paragraph.paragraph_format.page_break_before = False
-        return True
-    return _suppress_redundant_body_page_break(body_paragraph, sections[body_index])
-
-
-def _relationship_targets(package: zipfile.ZipFile) -> dict[str, str]:
-    name = "word/_rels/document.xml.rels"
-    if name not in package.namelist():
-        return {}
-    root = etree.fromstring(package.read(name))
-    result = {}
-    for relationship in root:
-        identifier = relationship.get("Id")
-        target = relationship.get("Target", "")
-        if identifier:
-            result[identifier] = posixpath.normpath(posixpath.join("word", target))
-    return result
-
-
-def pagination_inventory(path: Path) -> dict[str, Any]:
-    with zipfile.ZipFile(path) as package:
-        document = etree.fromstring(package.read("word/document.xml"))
-        settings = (
-            etree.fromstring(package.read("word/settings.xml"))
-            if "word/settings.xml" in package.namelist()
-            else None
-        )
-        relationships = _relationship_targets(package)
-        referenced_parts: set[str] = set()
-        inherited: dict[str, str] = {}
-        sections = []
-        for index, sect_pr in enumerate(
-            document.xpath("./w:body/w:p/w:pPr/w:sectPr | ./w:body/w:sectPr", namespaces=NS)
-        ):
-            explicit = {}
-            for reference in sect_pr.xpath(
-                "./w:footerReference", namespaces=NS
-            ):
-                kind = reference.get(qn("w:type"), "default")
-                rel_id = reference.get(qn("r:id"))
-                if rel_id:
-                    explicit[kind] = rel_id
-                    inherited[kind] = rel_id
-                    target = relationships.get(rel_id)
-                    if target:
-                        referenced_parts.add(target)
-            effective = dict(inherited)
-            footer_fields = {}
-            footer_page_field_counts = {}
-            footer_non_page_payload = {}
-            for kind, rel_id in effective.items():
-                target = relationships.get(rel_id)
-                if target and target in package.namelist():
-                    footer_root = etree.fromstring(package.read(target))
-                    field_types = _field_types(footer_root)
-                    footer_fields[kind] = sorted(field_types)
-                    footer_page_field_counts[kind] = _page_field_count(footer_root)
-                    visible = [
-                        value.strip()
-                        for value in footer_root.xpath(".//w:t/text()", namespaces=NS)
-                        if value.strip()
-                    ]
-                    footer_non_page_payload[kind] = bool(
-                        not _page_only_payload(footer_root)
-                        or footer_root.xpath(
-                            ".//w:tbl | .//w:drawing | .//w:object | .//w:pict",
-                            namespaces=NS,
-                        )
-                        or any(not value.isdigit() for value in visible)
-                    )
-                else:
-                    footer_fields[kind] = []
-                    footer_page_field_counts[kind] = 0
-                    footer_non_page_payload[kind] = False
-            pg_num = sect_pr.find(qn("w:pgNumType"))
-            vertical_alignment = sect_pr.find(qn("w:vAlign"))
-            sections.append(
-                {
-                    "index": index,
-                    "page_number_start": (
-                        None if pg_num is None else pg_num.get(qn("w:start"))
-                    ),
-                    "page_number_format": (
-                        None if pg_num is None else pg_num.get(qn("w:fmt"))
-                    ),
-                    "different_first_page": sect_pr.find(qn("w:titlePg")) is not None,
-                    "vertical_alignment": (
-                        None
-                        if vertical_alignment is None
-                        else vertical_alignment.get(qn("w:val"), "top")
-                    ),
-                    "footer_references": explicit,
-                    "effective_footer_references": effective,
-                    "footer_fields": footer_fields,
-                    "footer_page_field_counts": footer_page_field_counts,
-                    "footer_non_page_payload": footer_non_page_payload,
-                    "missing_page_footer_types": [
-                        kind
-                        for kind in ("default", "even")
-                        if "PAGE" not in footer_fields.get(kind, [])
-                    ],
-                }
-            )
-        all_parts = {
-            name for name in package.namelist() if HEADER_FOOTER_PART.fullmatch(name)
-        }
-        all_referenced = {
-            relationships.get(rel_id)
-            for sect_pr in document.xpath(".//w:sectPr", namespaces=NS)
-            for rel_id in sect_pr.xpath(
-                "./w:headerReference/@r:id | ./w:footerReference/@r:id", namespaces=NS
-            )
-        }
-        return {
-            "odd_and_even_pages_header_footer": bool(
-                settings is not None
-                and settings.xpath("./w:evenAndOddHeaders", namespaces=NS)
-            ),
-            "sections": sections,
-            "page_number_restarts": [
-                item["index"] for item in sections if item["page_number_start"] is not None
-            ],
-            "orphan_header_footer_parts": sorted(all_parts - set(all_referenced)),
-        }
-
-
-def _resolve_audit_boundary(
-    document: Any,
-    locator: dict[str, Any],
-    resolver: Callable[[Any, dict[str, Any]], Any],
-    *,
-    allow_unique_toc_field: bool = False,
-    alternate_locators: list[dict[str, Any]] | None = None,
-) -> Any:
-    try:
-        return resolver(document, locator)
-    except FormatMonographError as original_error:
-        for alternate in alternate_locators or []:
-            try:
-                return resolver(document, alternate)
-            except FormatMonographError:
-                continue
-        if not allow_unique_toc_field:
-            raise original_error
-        matches = [
-            paragraph
-            for paragraph in document.paragraphs
-            if paragraph._p.xpath(
-                ".//w:fldSimple[starts-with(translate(normalize-space(@w:instr), "
-                "'toc', 'TOC'), 'TOC')] | "
-                ".//w:instrText[starts-with(translate(normalize-space(.), "
-                "'toc', 'TOC'), 'TOC')]"
-            )
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        raise original_error
-
-
-def audit_pagination_sections(
-    path: Path,
-    document: Any,
-    settings: dict[str, Any],
-    resolver: Callable[[Any, dict[str, Any]], Any],
-    structure_map: dict[str, Any] | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    inventory = pagination_inventory(path)
-    if not settings.get("approved"):
-        return [], inventory
-    toc = section_index_for_paragraph(
-        document,
-        _resolve_audit_boundary(
-            document,
-            settings["toc_start"],
-            resolver,
-            allow_unique_toc_field=True,
-        ),
-    )
-    body_locator = settings["body_start"]
-    alternate_body_locators = []
-    for heading in (structure_map or {}).get("headings", []):
-        heading_locator = heading.get("locator", {})
-        if (
-            heading.get("approved")
-            and heading_locator.get("text_sha256")
-            == body_locator.get("text_sha256")
-            and heading.get("normalized_text_sha256")
-        ):
-            alternate = copy.deepcopy(body_locator)
-            alternate["text_sha256"] = heading["normalized_text_sha256"]
-            alternate_body_locators.append(alternate)
-    body_paragraph = _resolve_audit_boundary(
-        document,
-        body_locator,
-        resolver,
-        alternate_locators=alternate_body_locators,
-    )
-    body = section_index_for_paragraph(document, body_paragraph)
-    failures = []
-    front_matter = (structure_map or {}).get("front_matter", {})
-    if front_matter.get("approved"):
-        title_paragraph = _resolve_audit_boundary(
-            document,
-            front_matter["book_title"],
-            resolver,
-        )
-        title_section = section_index_for_paragraph(document, title_paragraph)
-        toc_headings = [
-            paragraph
-            for paragraph in document.paragraphs
-            if paragraph.text.strip() == front_matter.get("toc_heading_text")
-            and paragraph.style is not None
-            and paragraph.style.name == "Monograph TOC Heading"
-        ]
-        if len(toc_headings) != 1:
-            failures.append(
-                {
-                    "property": "toc_heading",
-                    "expected": front_matter.get("toc_heading_text"),
-                    "actual_count": len(toc_headings),
-                }
-            )
-        elif section_index_for_paragraph(document, toc_headings[0]) != toc:
-            failures.append(
-                {"property": "toc_heading_section", "expected": toc}
-            )
-        if title_paragraph.style is None or title_paragraph.style.name != "Monograph Book Title":
-            failures.append(
-                {"property": "book_title_style", "expected": "Monograph Book Title"}
-            )
-        title_alignment = title_paragraph.alignment
-        if title_alignment is None and title_paragraph.style is not None:
-            title_alignment = title_paragraph.style.paragraph_format.alignment
-        if title_alignment != WD_ALIGN_PARAGRAPH.CENTER:
-            failures.append(
-                {"property": "book_title_alignment", "expected": "center"}
-            )
-        expected_title_format = {
-            "font_name_east_asia": "é»‘ä½“",
-            "font_name_ascii": "Times New Roman",
-            "font_size_pt": 22,
-            "bold": True,
-        }
-        expected_title_format.update(front_matter.get("book_title_format", {}))
-        title_style = title_paragraph.style
-        if title_style is not None:
-            actual_ascii = style_effective_font(document, title_style, "ascii")[0]
-            actual_east_asia = style_effective_font(document, title_style, "eastAsia")[0]
-            if actual_ascii != expected_title_format["font_name_ascii"]:
-                failures.append(
-                    {
-                        "property": "book_title_font_name_ascii",
-                        "expected": expected_title_format["font_name_ascii"],
-                        "actual": actual_ascii,
-                    }
-                )
-            if actual_east_asia != expected_title_format["font_name_east_asia"]:
-                failures.append(
-                    {
-                        "property": "book_title_font_name_east_asia",
-                        "expected": expected_title_format["font_name_east_asia"],
-                        "actual": actual_east_asia,
-                    }
-                )
-            actual_size = None if title_style.font.size is None else title_style.font.size.pt
-            if actual_size != float(expected_title_format["font_size_pt"]):
-                failures.append(
-                    {
-                        "property": "book_title_font_size_pt",
-                        "expected": float(expected_title_format["font_size_pt"]),
-                        "actual": actual_size,
-                    }
-                )
-        style_bold = (
-            title_paragraph.style is not None
-            and title_paragraph.style.font.bold is True
-        )
-        if any(
-            run.text and run.bold is not True and not (run.bold is None and style_bold)
-            for run in title_paragraph.runs
-        ):
-            failures.append({"property": "book_title_bold", "expected": True})
-        title_inventory = inventory["sections"][title_section]
-        expected_vertical = front_matter.get("title_page_vertical_alignment")
-        if expected_vertical and title_inventory.get("vertical_alignment") != expected_vertical:
-            failures.append(
-                {
-                    "section": title_section,
-                    "property": "title_page_vertical_alignment",
-                    "expected": expected_vertical,
-                    "actual": title_inventory.get("vertical_alignment"),
-                }
-            )
-        expected_spacing = expected_title_format.get("line_spacing_pt")
-        if expected_spacing is not None and title_style is not None:
-            actual_spacing = title_style.paragraph_format.line_spacing
-            actual_spacing_pt = getattr(actual_spacing, "pt", None)
-            if actual_spacing_pt != float(expected_spacing):
-                failures.append(
-                    {
-                        "property": "book_title_line_spacing_pt",
-                        "expected": float(expected_spacing),
-                        "actual": actual_spacing_pt,
-                    }
-                )
-            expected_rule = expected_title_format.get("line_spacing_rule")
-            rule_names = {
-                WD_LINE_SPACING.AT_LEAST: "at_least",
-                WD_LINE_SPACING.EXACTLY: "exact",
-                WD_LINE_SPACING.SINGLE: "single",
-                WD_LINE_SPACING.ONE_POINT_FIVE: "one_point_five",
-                WD_LINE_SPACING.DOUBLE: "double",
-            }
-            actual_rule = rule_names.get(title_style.paragraph_format.line_spacing_rule)
-            if expected_rule and actual_rule != expected_rule:
-                failures.append(
-                    {
-                        "property": "book_title_line_spacing_rule",
-                        "expected": expected_rule,
-                        "actual": actual_rule,
-                    }
-                )
-        if not title_inventory["different_first_page"]:
-            failures.append(
-                {"section": title_section, "property": "title_page_number_visible"}
-            )
-        if title_inventory["footer_page_field_counts"].get("first", 0):
-            failures.append(
-                {"section": title_section, "property": "title_page_first_footer_page_field"}
-            )
-    direct_page_break = body_paragraph.paragraph_format.page_break_before
-    inherited_page_break = (
-        body_paragraph.style.paragraph_format.page_break_before
-        if body_paragraph.style is not None
-        else None
-    )
-    if front_matter.get("approved"):
-        body_section_type = document.sections[body]._sectPr.find(qn("w:type"))
-        body_section_value = (
-            "nextPage"
-            if body_section_type is None
-            else body_section_type.get(qn("w:val"), "nextPage")
-        )
-        if direct_page_break is not True and body_section_value == "continuous":
-            failures.append(
-                {
-                    "section": body,
-                    "property": "body_page_break_for_continuous_restart",
-                    "expected": True,
-                    "actual": direct_page_break,
-                }
-            )
-    elif direct_page_break is True or (
-        direct_page_break is None and inherited_page_break is True
-    ):
-        failures.append(
-            {
-                "section": body,
-                "property": "redundant_page_break_before_at_body_start",
-                "expected": False,
-                "actual": True,
-            }
-        )
-    starts = settings.get("start_at", {})
-    expected = {toc: str(starts.get("toc", 1)), body: str(starts.get("body", 1))}
-    sections = inventory["sections"]
-    for index, start in expected.items():
-        if index >= len(sections) or sections[index]["page_number_start"] != start:
-            failures.append(
-                {"section": index, "property": "page_number_start", "expected": start}
-            )
-    if settings.get("continue_after_body_start", True):
-        for item in sections[body + 1 :]:
-            if item["page_number_start"] is not None:
-                failures.append(
-                    {
-                        "section": item["index"],
-                        "property": "unexpected_page_number_restart",
-                        "actual": item["page_number_start"],
-                    }
-                )
-    if not inventory["odd_and_even_pages_header_footer"]:
-        failures.append({"property": "odd_and_even_pages_header_footer", "expected": True})
-    for item in sections[toc:]:
-        if item["different_first_page"]:
-            failures.append(
-                {"section": item["index"], "property": "show_on_first_page", "expected": True}
-            )
-        if item["missing_page_footer_types"]:
-            failures.append(
-                {
-                    "section": item["index"],
-                    "property": "visible_page_footer_types",
-                    "missing": item["missing_page_footer_types"],
-                }
-            )
-        for kind in ("default", "even"):
-            count = item["footer_page_field_counts"].get(kind, 0)
-            if count != 1:
-                failures.append(
-                    {
-                        "section": item["index"],
-                        "property": "page_footer_field_count",
-                        "footer_type": kind,
-                        "expected": 1,
-                        "actual": count,
-                    }
-                )
-            if item["footer_non_page_payload"].get(kind, False):
-                failures.append(
-                    {
-                        "section": item["index"],
-                        "property": "page_footer_non_page_payload",
-                        "footer_type": kind,
-                        "expected": False,
-                    }
-                )
-    if inventory["orphan_header_footer_parts"]:
-        failures.append(
-            {
-                "property": "orphan_header_footer_parts",
-                "actual_count": len(inventory["orphan_header_footer_parts"]),
-            }
-        )
-    return failures, inventory
+    document.seã^:¶‰žËkºwµçUÉ¹…Ñ•}±½…Ñ½ÉÌè±¥ÍÑm‘¥ÑmÍÑÈ°¹åutð9½¹”€ô9½¹”°4(¤€´ø¹äè4(€€€ÑÉäè4(€€€€€€€É•ÑÕÉ¸É•Í½±Ù•È¡‘½Õµ•¹Ð°±½…Ñ½È¤4(€€€•á•ÁÐ½Éµ…Ñ5½¹½É…Á¡ÉÉ½È…Ì½É¥¥¹…±}•ÉÉ½Èè4(€€€€€€€™½È…±Ñ•É¹…Ñ”¥¸…±Ñ•É¹…Ñ•}±½…Ñ½ÉÌ½Èmtè4(€€€€€€€€€€€ÑÉäè4(€€€€€€€€€€€€€€€É•ÑÕÉ¸É•Í½±Ù•È¡‘½Õµ•¹Ð°…±Ñ•É¹…Ñ”¤4(€€€€€€€€€€€•á•ÁÐ½Éµ…Ñ5½¹½É…Á¡ÉÉ½Èè4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€¥˜¹½Ð…±±½Ý}Õ¹¥ÅÕ•}Ñ½}™¥•±è4(€€€€€€€€€€€É…¥Í”½É¥¥¹…±}•ÉÉ½È4(€€€€€€€µ…Ñ¡•Ì€ôl4(€€€€€€€€€€€Á…É…É…Á 4(€€€€€€€€€€€™½ÈÁ…É…É…Á ¥¸‘½Õµ•¹Ð¹Á…É…É…Á¡Ì4(€€€€€€€€€€€¥˜Á…É…É…Á ¹}À¹áÁ…Ñ  4(€€€€€€€€€€€€€€€€ˆ¸¼½Üé™±‘M¥µÁ±•mÍÑ…ÉÑÌµÝ¥Ñ ¡ÑÉ…¹Í±…Ñ”¡¹½Éµ…±¥é”µÍÁ…”¡Üé¥¹ÍÑÈ¤°€ˆ4(€€€€€€€€€€€€€€€€ˆÑ½Œœ°€Q=œ¤°€Q=œ¥tð€ˆ4(€€€€€€€€€€€€€€€€ˆ¸¼½Üé¥¹ÍÑÉQ•áÑmÍÑ…ÉÑÌµÝ¥Ñ ¡ÑÉ…¹Í±…Ñ”¡¹½Éµ…±¥é”µÍÁ…” ¸¤°€ˆ4(€€€€€€€€€€€€€€€€ˆÑ½Œœ°€Q=œ¤°€Q=œ¥tˆ4(€€€€€€€€€€€€¤4(€€€€€€€t4(€€€€€€€¥˜±•¸¡µ…Ñ¡•Ì¤€ôô€Äè4(€€€€€€€€€€€É•ÑÕÉ¸µ…Ñ¡•ÍlÁt4(€€€€€€€É…¥Í”½É¥¥¹…±}•ÉÉ½È4(4(4)‘•˜…Õ‘¥Ñ}Á…¥¹…Ñ¥½¹}Í•Ñ¥½¹Ì 4(€€€Á…Ñ èA…Ñ °4(€€€‘½Õµ•¹Ðè¹ä°4(€€€Í•ÑÑ¥¹Ìè‘¥ÑmÍÑÈ°¹åt°4(€€€É•Í½±Ù•Èè…±±…‰±•mm¹ä°‘¥ÑmÍÑÈ°¹åut°¹åt°4(€€€ÍÑÉÕÑÕÉ•}µ…Àè‘¥ÑmÍÑÈ°¹åtð9½¹”€ô9½¹”°4(¤€´øÑÕÁ±•m±¥ÍÑm‘¥ÑmÍÑÈ°¹åut°‘¥ÑmÍÑÈ°¹åutè4(€€€¥¹Ù•¹Ñ½Éä€ôÁ…¥¹…Ñ¥½¹}¥¹Ù•¹Ñ½Éä¡Á…Ñ ¤4(€€€¥˜¹½ÐÍ•ÑÑ¥¹Ì¹•Ð ‰…ÁÁÉ½Ù•ˆ¤è4(€€€€€€€É•ÑÕÉ¸mt°¥¹Ù•¹Ñ½Éä4(€€€Ñ½Œ€ôÍ•Ñ¥½¹}¥¹‘•á}™½É}Á…É…É…Á  4(€€€€€€€‘½Õµ•¹Ð°4(€€€€€€€}É•Í½±Ù•}…Õ‘¥Ñ}‰½Õ¹‘…Éä 4(€€€€€€€€€€€‘½Õµ•¹Ð°4(€€€€€€€€€€€Í•ÑÑ¥¹Íl‰Ñ½}ÍÑ…ÉÐ‰t°4(€€€€€€€€€€€É•Í½±Ù•È°4(€€€€€€€€€€€…±±½Ý}Õ¹¥ÅÕ•}Ñ½}™¥•±õQÉÕ”°4(€€€€€€€€¤°4(€€€€¤4(€€€‰½‘å}±½…Ñ½È€ôÍ•ÑÑ¥¹Íl‰‰½‘å}ÍÑ…ÉÐ‰t4(€€€…±Ñ•É¹…Ñ•}‰½‘å}±½…Ñ½ÉÌ€ômt4(€€€™½È¡•…‘¥¹œ¥¸€¡ÍÑÉÕÑÕÉ•}µ…À½Èíô¤¹•Ð ‰¡•…‘¥¹Ìˆ°mt¤è4(€€€€€€€¡•…‘¥¹}±½…Ñ½È€ô¡•…‘¥¹œ¹•Ð ‰±½…Ñ½Èˆ°íô¤4(€€€€€€€¥˜€ 4(€€€€€€€€€€€¡•…‘¥¹œ¹•Ð ‰…ÁÁÉ½Ù•ˆ¤4(€€€€€€€€€€€…¹¡•…‘¥¹}±½…Ñ½È¹•Ð ‰Ñ•áÑ}Í¡„ÈÔØˆ¤4(€€€€€€€€€€€€ôô‰½‘å}±½…Ñ½È¹•Ð ‰Ñ•áÑ}Í¡„ÈÔØˆ¤4(€€€€€€€€€€€…¹¡•…‘¥¹œ¹•Ð ‰¹½Éµ…±¥é•‘}Ñ•áÑ}Í¡„ÈÔØˆ¤4(€€€€€€€€¤è4(€€€€€€€€€€€…±Ñ•É¹…Ñ”€ô½Áä¹‘••Á½Áä¡‰½‘å}±½…Ñ½È¤4(€€€€€€€€€€€…±Ñ•É¹…Ñ•l‰Ñ•áÑ}Í¡„ÈÔØ‰t€ô¡•…‘¥¹l‰¹½Éµ…±¥é•‘}Ñ•áÑ}Í¡„ÈÔØ‰t4(€€€€€€€€€€€…±Ñ•É¹…Ñ•}‰½‘å}±½…Ñ½ÉÌ¹…ÁÁ•¹¡…±Ñ•É¹…Ñ”¤4(€€€‰½‘å}Á…É…É…Á €ô}É•Í½±Ù•}…Õ‘¥Ñ}‰½Õ¹‘…Éä 4(€€€€€€€‘½Õµ•¹Ð°4(€€€€€€€‰½‘å}±½…Ñ½È°4(€€€€€€€É•Í½±Ù•È°4(€€€€€€€…±Ñ•É¹…Ñ•}±½…Ñ½ÉÌõ…±Ñ•É¹…Ñ•}‰½‘å}±½…Ñ½ÉÌ°4(€€€€¤4(€€€‰½‘ä€ôÍ•Ñ¥½¹}¥¹‘•á}™½É}Á…É…É…Á ¡‘½Õµ•¹Ð°‰½‘å}Á…É…É…Á ¤4(€€€™…¥±ÕÉ•Ì€ômt4(€€€™É½¹Ñ}µ…ÑÑ•È€ô€¡ÍÑÉÕÑÕÉ•}µ…À½Èíô¤¹•Ð ‰™É½¹Ñ}µ…ÑÑ•Èˆ°íô¤4(€€€¥˜™É½¹Ñ}µ…ÑÑ•È¹•Ð ‰…ÁÁÉ½Ù•ˆ¤è4(€€€€€€€Ñ¥Ñ±•}Á…É…É…Á €ô}É•Í½±Ù•}…Õ‘¥Ñ}‰½Õ¹‘…Éä 4(€€€€€€€€€€€‘½Õµ•¹Ð°4(€€€€€€€€€€€™É½¹Ñ}µ…ÑÑ•Él‰‰½½­}Ñ¥Ñ±”‰t°4(€€€€€€€€€€€É•Í½±Ù•È°4(€€€€€€€€¤4(€€€€€€€Ñ¥Ñ±•}Í•Ñ¥½¸€ôÍ•Ñ¥½¹}¥¹‘•á}™½É}Á…É…É…Á ¡‘½Õµ•¹Ð°Ñ¥Ñ±•}Á…É…É…Á ¤4(€€€€€€€Ñ½}¡•…‘¥¹Ì€ôl4(€€€€€€€€€€€Á…É…É…Á 4(€€€€€€€€€€€™½ÈÁ…É…É…Á ¥¸‘½Õµ•¹Ð¹Á…É…É…Á¡Ì4(€€€€€€€€€€€¥˜Á…É…É…Á ¹Ñ•áÐ¹ÍÑÉ¥À ¤€ôô™É½¹Ñ}µ…ÑÑ•È¹•Ð ‰Ñ½}¡•…‘¥¹}Ñ•áÐˆ¤4(€€€€€€€€€€€…¹Á…É…É…Á ¹ÍÑå±”¥Ì¹½Ð9½¹”4(€€€€€€€€€€€…¹Á…É…É…Á ¹ÍÑå±”¹¹…µ”€ôô€‰5½¹½É…Á Q=!•…‘¥¹œˆ4(€€€€€€€t4(€€€€€€€¥˜±•¸¡Ñ½}¡•…‘¥¹Ì¤€„ô€Äè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰Ñ½}¡•…‘¥¹œˆ°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè™É½¹Ñ}µ…ÑÑ•È¹•Ð ‰Ñ½}¡•…‘¥¹}Ñ•áÐˆ¤°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…±}½Õ¹Ðˆè±•¸¡Ñ½}¡•…‘¥¹Ì¤°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€€€€€•±¥˜Í•Ñ¥½¹}¥¹‘•á}™½É}Á…É…É…Á ¡‘½Õµ•¹Ð°Ñ½}¡•…‘¥¹ÍlÁt¤€„ôÑ½Œè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰ÁÉ½Á•ÉÑäˆè€‰Ñ½}¡•…‘¥¹}Í•Ñ¥½¸ˆ°€‰•áÁ•Ñ•ˆèÑ½ô4(€€€€€€€€€€€€¤4(€€€€€€€¥˜Ñ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”¥Ì9½¹”½ÈÑ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”¹¹…µ”€„ô€‰5½¹½É…Á 	½½¬Q¥Ñ±”ˆè(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}ÍÑå±”ˆ°€‰•áÁ•Ñ•ˆè€‰5½¹½É…Á 	½½¬Q¥Ñ±”‰ô4(€€€€€€€€€€€€¤4(€€€€€€€Ñ¥Ñ±•}…±¥¹µ•¹Ð€ôÑ¥Ñ±•}Á…É…É…Á ¹…±¥¹µ•¹Ð(€€€€€€€¥˜Ñ¥Ñ±•}…±¥¹µ•¹Ð¥Ì9½¹”…¹Ñ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”¥Ì¹½Ð9½¹”è4(€€€€€€€€€€€Ñ¥Ñ±•}…±¥¹µ•¹Ð€ôÑ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”¹Á…É…É…Á¡}™½Éµ…Ð¹…±¥¹µ•¹Ð4(€€€€€€€¥˜Ñ¥Ñ±•}…±¥¹µ•¹Ð€„ô]}1%9}AIIA ¹9QHè(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}…±¥¹µ•¹Ðˆ°€‰•áÁ•Ñ•ˆè€‰•¹Ñ•È‰ô(€€€€€€€€€€€€¤(€€€€€€€Ñ¥Ñ±•}Á}ÁÈ€ôÑ¥Ñ±•}Á…É…É…Á ¹}À¹ÁAÈ(€€€€€€€Ñ¥Ñ±•}‘¥É•Ñ}¹Õµ}ÁÈ€ô€ (€€€€€€€€€€€9½¹”¥˜Ñ¥Ñ±•}Á}ÁÈ¥Ì9½¹”•±Í”Ñ¥Ñ±•}Á}ÁÈ¹™¥¹¡Å¸ ‰Üé¹ÕµAÈˆ¤¤(€€€€€€€€¤(€€€€€€€¥˜Ñ¥Ñ±•}‘¥É•Ñ}¹Õµ}ÁÈ¥Ì¹½Ð9½¹”è(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€ì‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}‘¥É•Ñ}¹Õµ‰•É¥¹œˆ°€‰•áÁ•Ñ•ˆè€‰…‰Í•¹Ð‰ô(€€€€€€€€€€€€¤(€€€€€€€‘¥É•Ñ}¥¹‘•¹Ð€ô€ (€€€€€€€€€€€9½¹”¥˜Ñ¥Ñ±•}Á}ÁÈ¥Ì9½¹”•±Í”Ñ¥Ñ±•}Á}ÁÈ¹™¥¹¡Å¸ ‰Üé¥¹ˆ¤¤(€€€€€€€€¤(€€€€€€€‘¥É•Ñ}¥¹‘•¹Ñ}½¹™±¥ÑÌ€ô}¹½¹é•É½}¥¹‘•¹Ñ}…ÑÑÉ¥‰ÕÑ•Ì¡‘¥É•Ñ}¥¹‘•¹Ð¤(€€€€€€€¥˜‘¥É•Ñ}¥¹‘•¹Ñ}½¹™±¥ÑÌè(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}‘¥É•Ñ}¥¹‘•¹Ðˆ°(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€À°(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè‘¥É•Ñ}¥¹‘•¹Ñ}½¹™±¥ÑÌ°(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€¤(€€€€€€€•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ð€ôì4(€€€€€€€€€€€€‰™½¹Ñ}¹…µ•}•…ÍÑ}…Í¥„ˆè€‹¦îG’öLˆ°4(€€€€€€€€€€€€‰™½¹Ñ}¹…µ•}…Í¥¤ˆè€‰Q¥µ•Ì9•ÜI½µ…¸ˆ°4(€€€€€€€€€€€€‰™½¹Ñ}Í¥é•}ÁÐˆè€ÈÈ°4(€€€€€€€€€€€€‰‰½±ˆèQÉÕ”°4(€€€€€€€ô4(€€€€€€€•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ð¹ÕÁ‘…Ñ”¡™É½¹Ñ}µ…ÑÑ•È¹•Ð ‰‰½½­}Ñ¥Ñ±•}™½Éµ…Ðˆ°íô¤¤4(€€€€€€€Ñ¥Ñ±•}ÍÑå±”€ôÑ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”(€€€€€€€¥˜Ñ¥Ñ±•}ÍÑå±”¥Ì¹½Ð9½¹”è(€€€€€€€€€€€ÍÑå±•}Á}ÁÈ€ôÑ¥Ñ±•}ÍÑå±”¹•±•µ•¹Ð¹ÁAÈ(€€€€€€€€€€€ÍÑå±•}¥¹‘•¹Ð€ô€ (€€€€€€€€€€€€€€€9½¹”¥˜ÍÑå±•}Á}ÁÈ¥Ì9½¹”•±Í”ÍÑå±•}Á}ÁÈ¹™¥¹¡Å¸ ‰Üé¥¹ˆ¤¤(€€€€€€€€€€€€¤(€€€€€€€€€€€ÍÑå±•}¥¹‘•¹Ñ}½¹™±¥ÑÌ€ô}¹½¹é•É½}¥¹‘•¹Ñ}…ÑÑÉ¥‰ÕÑ•Ì¡ÍÑå±•}¥¹‘•¹Ð¤(€€€€€€€€€€€É•ÅÕ¥É•‘}é•É½}…ÑÑÉ¥‰ÕÑ•Ì€ôì(€€€€€€€€€€€€€€€…ÑÑÉ¥‰ÕÑ”è€ (€€€€€€€€€€€€€€€€€€€9½¹”(€€€€€€€€€€€€€€€€€€€¥˜ÍÑå±•}¥¹‘•¹Ð¥Ì9½¹”(€€€€€€€€€€€€€€€€€€€•±Í”ÍÑå±•}¥¹‘•¹Ð¹•Ð¡Å¸¡˜‰Üéí…ÑÑÉ¥‰ÕÑ•ôˆ¤¤(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€™½È…ÑÑÉ¥‰ÕÑ”¥¸€ (€€€€€€€€€€€€€€€€€€€€‰±•™Ðˆ°(€€€€€€€€€€€€€€€€€€€€‰±•™Ñ¡…ÉÌˆ°(€€€€€€€€€€€€€€€€€€€€‰É¥¡Ðˆ°(€€€€€€€€€€€€€€€€€€€€‰É¥¡Ñ¡…ÉÌˆ°(€€€€€€€€€€€€€€€€€€€€‰™¥ÉÍÑ1¥¹”ˆ°(€€€€€€€€€€€€€€€€€€€€‰™¥ÉÍÑ1¥¹•¡…ÉÌˆ°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ÍÑå±•}¥¹‘•¹Ñ}½¹™±¥ÑÌ½È…¹ä (€€€€€€€€€€€€€€€Ù…±Õ”€„ô€ˆÀˆ™½ÈÙ…±Õ”¥¸É•ÅÕ¥É•‘}é•É½}…ÑÑÉ¥‰ÕÑ•Ì¹Ù…±Õ•Ì ¤(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}ÍÑå±•}¥¹‘•¹Ðˆ°(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€À°(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆèì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¨©É•ÅÕ¥É•‘}é•É½}…ÑÑÉ¥‰ÕÑ•Ì°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¨©ÍÑå±•}¥¹‘•¹Ñ}½¹™±¥ÑÌ°(€€€€€€€€€€€€€€€€€€€€€€€ô°(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€…ÑÕ…±}…Í¥¤€ôÍÑå±•}•™™•Ñ¥Ù•}™½¹Ð¡‘½Õµ•¹Ð°Ñ¥Ñ±•}ÍÑå±”°€‰…Í¥¤ˆ¥lÁt4(€€€€€€€€€€€…ÑÕ…±}•…ÍÑ}…Í¥„€ôÍÑå±•}•™™•Ñ¥Ù•}™½¹Ð¡‘½Õµ•¹Ð°Ñ¥Ñ±•}ÍÑå±”°€‰•…ÍÑÍ¥„ˆ¥lÁt4(€€€€€€€€€€€¥˜…ÑÕ…±}…Í¥¤€„ô•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ñl‰™½¹Ñ}¹…µ•}…Í¥¤‰tè4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}™½¹Ñ}¹…µ•}…Í¥¤ˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ñl‰™½¹Ñ}¹…µ•}…Í¥¤‰t°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}…Í¥¤°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€¥˜…ÑÕ…±}•…ÍÑ}…Í¥„€„ô•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ñl‰™½¹Ñ}¹…µ•}•…ÍÑ}…Í¥„‰tè4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}™½¹Ñ}¹…µ•}•…ÍÑ}…Í¥„ˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ñl‰™½¹Ñ}¹…µ•}•…ÍÑ}…Í¥„‰t°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}•…ÍÑ}…Í¥„°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€…ÑÕ…±}Í¥é”€ô9½¹”¥˜Ñ¥Ñ±•}ÍÑå±”¹™½¹Ð¹Í¥é”¥Ì9½¹”•±Í”Ñ¥Ñ±•}ÍÑå±”¹™½¹Ð¹Í¥é”¹ÁÐ4(€€€€€€€€€€€¥˜…ÑÕ…±}Í¥é”€„ô™±½…Ð¡•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ñl‰™½¹Ñ}Í¥é•}ÁÐ‰t¤è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}™½¹Ñ}Í¥é•}ÁÐˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè™±½…Ð¡•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ñl‰™½¹Ñ}Í¥é•}ÁÐ‰t¤°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}Í¥é”°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€ÍÑå±•}‰½±€ô€ 4(€€€€€€€€€€€Ñ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”¥Ì¹½Ð9½¹”4(€€€€€€€€€€€…¹Ñ¥Ñ±•}Á…É…É…Á ¹ÍÑå±”¹™½¹Ð¹‰½±¥ÌQÉÕ”4(€€€€€€€€¤4(€€€€€€€¥˜…¹ä 4(€€€€€€€€€€€ÉÕ¸¹Ñ•áÐ…¹ÉÕ¸¹‰½±¥Ì¹½ÐQÉÕ”…¹¹½Ð€¡ÉÕ¸¹‰½±¥Ì9½¹”…¹ÍÑå±•}‰½±¤4(€€€€€€€€€€€™½ÈÉÕ¸¥¸Ñ¥Ñ±•}Á…É…É…Á ¹ÉÕ¹Ì4(€€€€€€€€¤è4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹¡ì‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}‰½±ˆ°€‰•áÁ•Ñ•ˆèQÉÕ•ô¤4(€€€€€€€Ñ¥Ñ±•}¥¹Ù•¹Ñ½Éä€ô¥¹Ù•¹Ñ½Éål‰Í•Ñ¥½¹Ì‰umÑ¥Ñ±•}Í•Ñ¥½¹t(€€€€€€€Ñ¥Ñ±•}Í•Ñ¥½¹}ÁÉ½Á•ÉÑ¥•Ì€ô€ (€€€€€€€€€€€9½¹”¥˜Ñ¥Ñ±•}Á}ÁÈ¥Ì9½¹”•±Í”Ñ¥Ñ±•}Á}ÁÈ¹™¥¹¡Å¸ ‰ÜéÍ•ÑAÈˆ¤¤(€€€€€€€€¤(€€€€€€€¥˜Ñ¥Ñ±•}Í•Ñ¥½¹}ÁÉ½Á•ÉÑ¥•Ì¥Ì9½¹”è(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}Í•Ñ¥½¹}‰½Õ¹‘…Éäˆ°(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€‰…ÑÑ…¡•‘}Ñ½}‰½½­}Ñ¥Ñ±•}Á…É…É…Á ˆ°(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€¤(€€€€€€€•áÁ•Ñ•‘}Ù•ÉÑ¥…°€ô™É½¹Ñ}µ…ÑÑ•È¹•Ð ‰Ñ¥Ñ±•}Á…•}Ù•ÉÑ¥…±}…±¥¹µ•¹Ðˆ¤4(€€€€€€€¥˜•áÁ•Ñ•‘}Ù•ÉÑ¥…°…¹Ñ¥Ñ±•}¥¹Ù•¹Ñ½Éä¹•Ð ‰Ù•ÉÑ¥…±}…±¥¹µ•¹Ðˆ¤€„ô•áÁ•Ñ•‘}Ù•ÉÑ¥…°è4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆèÑ¥Ñ±•}Í•Ñ¥½¸°4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰Ñ¥Ñ±•}Á…•}Ù•ÉÑ¥…±}…±¥¹µ•¹Ðˆ°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}Ù•ÉÑ¥…°°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆèÑ¥Ñ±•}¥¹Ù•¹Ñ½Éä¹•Ð ‰Ù•ÉÑ¥…±}…±¥¹µ•¹Ðˆ¤°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€€€€€•áÁ•Ñ•‘}ÍÁ…¥¹œ€ô•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ð¹•Ð ‰±¥¹•}ÍÁ…¥¹}ÁÐˆ¤4(€€€€€€€¥˜•áÁ•Ñ•‘}ÍÁ…¥¹œ¥Ì¹½Ð9½¹”…¹Ñ¥Ñ±•}ÍÑå±”¥Ì¹½Ð9½¹”è4(€€€€€€€€€€€…ÑÕ…±}ÍÁ…¥¹œ€ôÑ¥Ñ±•}ÍÑå±”¹Á…É…É…Á¡}™½Éµ…Ð¹±¥¹•}ÍÁ…¥¹œ4(€€€€€€€€€€€…ÑÕ…±}ÍÁ…¥¹}ÁÐ€ô•Ñ…ÑÑÈ¡…ÑÕ…±}ÍÁ…¥¹œ°€‰ÁÐˆ°9½¹”¤4(€€€€€€€€€€€¥˜…ÑÕ…±}ÍÁ…¥¹}ÁÐ€„ô™±½…Ð¡•áÁ•Ñ•‘}ÍÁ…¥¹œ¤è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}±¥¹•}ÍÁ…¥¹}ÁÐˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè™±½…Ð¡•áÁ•Ñ•‘}ÍÁ…¥¹œ¤°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}ÍÁ…¥¹}ÁÐ°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€•áÁ•Ñ•‘}ÉÕ±”€ô•áÁ•Ñ•‘}Ñ¥Ñ±•}™½Éµ…Ð¹•Ð ‰±¥¹•}ÍÁ…¥¹}ÉÕ±”ˆ¤4(€€€€€€€€€€€ÉÕ±•}¹…µ•Ì€ôì4(€€€€€€€€€€€€€€€]}1%9}MA%9¹Q}1MPè€‰…Ñ}±•…ÍÐˆ°4(€€€€€€€€€€€€€€€]}1%9}MA%9¹aQ1dè€‰•á…Ðˆ°4(€€€€€€€€€€€€€€€]}1%9}MA%9¹M%91è€‰Í¥¹±”ˆ°4(€€€€€€€€€€€€€€€]}1%9}MA%9¹=9}A=%9Q}%Yè€‰½¹•}Á½¥¹Ñ}™¥Ù”ˆ°4(€€€€€€€€€€€€€€€]}1%9}MA%9¹=U	1è€‰‘½Õ‰±”ˆ°4(€€€€€€€€€€€ô4(€€€€€€€€€€€…ÑÕ…±}ÉÕ±”€ôÉÕ±•}¹…µ•Ì¹•Ð¡Ñ¥Ñ±•}ÍÑå±”¹Á…É…É…Á¡}™½Éµ…Ð¹±¥¹•}ÍÁ…¥¹}ÉÕ±”¤4(€€€€€€€€€€€¥˜•áÁ•Ñ•‘}ÉÕ±”…¹…ÑÕ…±}ÉÕ±”€„ô•áÁ•Ñ•‘}ÉÕ±”è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½½­}Ñ¥Ñ±•}±¥¹•}ÍÁ…¥¹}ÉÕ±”ˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}ÉÕ±”°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}ÉÕ±”°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€¥˜¹½ÐÑ¥Ñ±•}¥¹Ù•¹Ñ½Éål‰‘¥™™•É•¹Ñ}™¥ÉÍÑ}Á…”‰tè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰Í•Ñ¥½¸ˆèÑ¥Ñ±•}Í•Ñ¥½¸°€‰ÁÉ½Á•ÉÑäˆè€‰Ñ¥Ñ±•}Á…•}¹Õµ‰•É}Ù¥Í¥‰±”‰ô4(€€€€€€€€€€€€¤4(€€€€€€€¥˜Ñ¥Ñ±•}¥¹Ù•¹Ñ½Éål‰™½½Ñ•É}Á…•}™¥•±‘}½Õ¹ÑÌ‰t¹•Ð ‰™¥ÉÍÐˆ°€À¤è4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰Í•Ñ¥½¸ˆèÑ¥Ñ±•}Í•Ñ¥½¸°€‰ÁÉ½Á•ÉÑäˆè€‰Ñ¥Ñ±•}Á…•}™¥ÉÍÑ}™½½Ñ•É}Á…•}™¥•±‰ô4(€€€€€€€€€€€€¤4(€€€‘¥É•Ñ}Á…•}‰É•…¬€ô‰½‘å}Á…É…É…Á ¹Á…É…É…Á¡}™½Éµ…Ð¹Á…•}‰É•…­}‰•™½É”4(€€€¥¹¡•É¥Ñ•‘}Á…•}‰É•…¬€ô€ 4(€€€€€€€‰½‘å}Á…É…É…Á ¹ÍÑå±”¹Á…É…É…Á¡}™½Éµ…Ð¹Á…•}‰É•…­}‰•™½É”4(€€€€€€€¥˜‰½‘å}Á…É…É…Á ¹ÍÑå±”¥Ì¹½Ð9½¹”4(€€€€€€€•±Í”9½¹”4(€€€€¤4(€€€¥˜™É½¹Ñ}µ…ÑÑ•È¹•Ð ‰…ÁÁÉ½Ù•ˆ¤è4(€€€€€€€‰½‘å}Í•Ñ¥½¹}ÑåÁ”€ô‘½Õµ•¹Ð¹Í•Ñ¥½¹Ím‰½‘åt¹}Í•ÑAÈ¹™¥¹¡Å¸ ‰ÜéÑåÁ”ˆ¤¤4(€€€€€€€‰½‘å}Í•Ñ¥½¹}Ù…±Õ”€ô€ 4(€€€€€€€€€€€€‰¹•áÑA…”ˆ4(€€€€€€€€€€€¥˜‰½‘å}Í•Ñ¥½¹}ÑåÁ”¥Ì9½¹”4(€€€€€€€€€€€•±Í”‰½‘å}Í•Ñ¥½¹}ÑåÁ”¹•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°€‰¹•áÑA…”ˆ¤4(€€€€€€€€¤4(€€€€€€€¥˜‘¥É•Ñ}Á…•}‰É•…¬¥Ì¹½ÐQÉÕ”…¹‰½‘å}Í•Ñ¥½¹}Ù…±Õ”€ôô€‰½¹Ñ¥¹Õ½ÕÌˆè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆè‰½‘ä°4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰½‘å}Á…•}‰É•…­}™½É}½¹Ñ¥¹Õ½ÕÍ}É•ÍÑ…ÉÐˆ°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆèQÉÕ”°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè‘¥É•Ñ}Á…•}‰É•…¬°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€•±¥˜‘¥É•Ñ}Á…•}‰É•…¬¥ÌQÉÕ”½È€ 4(€€€€€€€‘¥É•Ñ}Á…•}‰É•…¬¥Ì9½¹”…¹¥¹¡•É¥Ñ•‘}Á…•}‰É•…¬¥ÌQÉÕ”4(€€€€¤è4(€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆè‰½‘ä°4(€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰É•‘Õ¹‘…¹Ñ}Á…•}‰É•…­}‰•™½É•}…Ñ}‰½‘å}ÍÑ…ÉÐˆ°4(€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè…±Í”°4(€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆèQÉÕ”°4(€€€€€€€€€€€ô4(€€€€€€€€¤4(€€€ÍÑ…ÉÑÌ€ôÍ•ÑÑ¥¹Ì¹•Ð ‰ÍÑ…ÉÑ}…Ðˆ°íô¤4(€€€•áÁ•Ñ•€ôíÑ½ŒèÍÑÈ¡ÍÑ…ÉÑÌ¹•Ð ‰Ñ½Œˆ°€Ä¤¤°‰½‘äèÍÑÈ¡ÍÑ…ÉÑÌ¹•Ð ‰‰½‘äˆ°€Ä¤¥ô4(€€€Í•Ñ¥½¹Ì€ô¥¹Ù•¹Ñ½Éål‰Í•Ñ¥½¹Ì‰t4(€€€™½È¥¹‘•à°ÍÑ…ÉÐ¥¸•áÁ•Ñ•¹¥Ñ•µÌ ¤è4(€€€€€€€¥˜¥¹‘•à€øô±•¸¡Í•Ñ¥½¹Ì¤½ÈÍ•Ñ¥½¹Ím¥¹‘•ául‰Á…•}¹Õµ‰•É}ÍÑ…ÉÐ‰t€„ôÍÑ…ÉÐè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰Í•Ñ¥½¸ˆè¥¹‘•à°€‰ÁÉ½Á•ÉÑäˆè€‰Á…•}¹Õµ‰•É}ÍÑ…ÉÐˆ°€‰•áÁ•Ñ•ˆèÍÑ…ÉÑô4(€€€€€€€€€€€€¤4(€€€¥˜Í•ÑÑ¥¹Ì¹•Ð ‰½¹Ñ¥¹Õ•}…™Ñ•É}‰½‘å}ÍÑ…ÉÐˆ°QÉÕ”¤è4(€€€€€€€™½È¥Ñ•´¥¸Í•Ñ¥½¹Ím‰½‘ä€¬€Ä€étè4(€€€€€€€€€€€¥˜¥Ñ•µl‰Á…•}¹Õµ‰•É}ÍÑ…ÉÐ‰t¥Ì¹½Ð9½¹”è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆè¥Ñ•µl‰¥¹‘•à‰t°4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰Õ¹•áÁ•Ñ•‘}Á…•}¹Õµ‰•É}É•ÍÑ…ÉÐˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè¥Ñ•µl‰Á…•}¹Õµ‰•É}ÍÑ…ÉÐ‰t°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€¥˜¹½Ð¥¹Ù•¹Ñ½Éål‰½‘‘}…¹‘}•Ù•¹}Á…•Í}¡•…‘•É}™½½Ñ•È‰tè4(€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹¡ì‰ÁÉ½Á•ÉÑäˆè€‰½‘‘}…¹‘}•Ù•¹}Á…•Í}¡•…‘•É}™½½Ñ•Èˆ°€‰•áÁ•Ñ•ˆèQÉÕ•ô¤4(€€€™½È¥Ñ•´¥¸Í•Ñ¥½¹ÍmÑ½Œétè4(€€€€€€€¥˜¥Ñ•µl‰‘¥™™•É•¹Ñ}™¥ÉÍÑ}Á…”‰tè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì‰Í•Ñ¥½¸ˆè¥Ñ•µl‰¥¹‘•à‰t°€‰ÁÉ½Á•ÉÑäˆè€‰Í¡½Ý}½¹}™¥ÉÍÑ}Á…”ˆ°€‰•áÁ•Ñ•ˆèQÉÕ•ô4(€€€€€€€€€€€€¤4(€€€€€€€¥˜¥Ñ•µl‰µ¥ÍÍ¥¹}Á…•}™½½Ñ•É}ÑåÁ•Ì‰tè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆè¥Ñ•µl‰¥¹‘•à‰t°4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰Ù¥Í¥‰±•}Á…•}™½½Ñ•É}ÑåÁ•Ìˆ°4(€€€€€€€€€€€€€€€€€€€€‰µ¥ÍÍ¥¹œˆè¥Ñ•µl‰µ¥ÍÍ¥¹}Á…•}™½½Ñ•É}ÑåÁ•Ì‰t°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€€€€€™½È­¥¹¥¸€ ‰‘•™…Õ±Ðˆ°€‰•Ù•¸ˆ¤è4(€€€€€€€€€€€½Õ¹Ð€ô¥Ñ•µl‰™½½Ñ•É}Á…•}™¥•±‘}½Õ¹ÑÌ‰t¹•Ð¡­¥¹°€À¤4(€€€€€€€€€€€¥˜½Õ¹Ð€„ô€Äè4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆè¥Ñ•µl‰¥¹‘•à‰t°4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰Á…•}™½½Ñ•É}™¥•±‘}½Õ¹Ðˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰™½½Ñ•É}ÑåÁ”ˆè­¥¹°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€Ä°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè½Õ¹Ð°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€¥˜¥Ñ•µl‰™½½Ñ•É}¹½¹}Á…•}Á…å±½…‰t¹•Ð¡­¥¹°…±Í”¤è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰Í•Ñ¥½¸ˆè¥Ñ•µl‰¥¹‘•à‰t°4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰Á…•}™½½Ñ•É}¹½¹}Á…•}Á…å±½…ˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰™½½Ñ•É}ÑåÁ”ˆè­¥¹°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè…±Í”°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€¥˜¥¹Ù•¹Ñ½Éål‰½ÉÁ¡…¹}¡•…‘•É}™½½Ñ•É}Á…ÉÑÌ‰tè4(€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰½ÉÁ¡…¹}¡•…‘•É}™½½Ñ•É}Á…ÉÑÌˆ°4(€€€€€€€€€€€€€€€€‰…ÑÕ…±}½Õ¹Ðˆè±•¸¡¥¹Ù•¹Ñ½Éål‰½ÉÁ¡…¹}¡•…‘•É}™½½Ñ•É}Á…ÉÑÌ‰t¤°4(€€€€€€€€€€€ô4(€€€€€€€€¤4(€€€É•ÑÕÉ¸™…¥±ÕÉ•Ì°¥¹Ù•¹Ñ½Éä4(
