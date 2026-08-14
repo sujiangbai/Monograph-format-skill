@@ -1,0 +1,642 @@
+{
+  "schema_version": "1.1",
+  "profile_id": "technical-textbook-layout-v0.3.1-draft",
+  "name": "理工科教材通用版式 V0.3.1 候选配置",
+  "locale": "zh-CN",
+  "scope": {
+    "document_type": "monograph",
+    "input_format": "DOCX",
+    "notes": "基于两本钢结构教材的共同版式特征形成的可执行候选配置。扫描页仅用于相对布局观察；纸张尺寸沿用原 DOCX，比例边距需在真实可编辑样章上验证。"
+  },
+  "target_applications": [
+    "Microsoft Word 2016",
+    "Microsoft Word 2019",
+    "Microsoft Word 2021",
+    "Microsoft 365",
+    "LibreOffice Writer"
+  ],
+  "runtime_policy": {
+    "caller_requirements_highest": true,
+    "editable_equations_required": true,
+    "formula_image_policy": "block",
+    "legacy_equation_policy": "qa",
+    "field_rebuild_policy": "explicit_or_unambiguous"
+  },
+  "source_precedence": [
+    "user_requirement",
+    "written_requirement",
+    "docx_template",
+    "pdf_specification",
+    "sample_book",
+    "image",
+    "text_note"
+  ],
+  "sources": [
+    {
+      "id": "SRC-301",
+      "type": "user_requirement",
+      "label": "项目用户确认的运行时规则",
+      "summary": "任何调用者在当前任务中明确提出的格式要求及后续 QA 决定具有最高格式优先级；公式必须保持可编辑且不得转换为图片。当前基线要求目录和正文分别从阿拉伯数字 1 起排，正文跨章节连续，奇偶页均显示外侧页码。",
+      "public": true
+    },
+    {
+      "id": "SRC-302",
+      "type": "sample_book",
+      "label": "《钢结构基本原理（第三版）》版式样书",
+      "locator": "Private scan; source pages, OCR, and local paths are not committed",
+      "summary": "用于观察教材的前置部分、标题层级、运行页眉、图表公式、例题习题、附录和参考文献组织；扫描几何不作为准确页边距。",
+      "public": false
+    },
+    {
+      "id": "SRC-303",
+      "type": "sample_book",
+      "label": "《钢结构设计原理》版式样书",
+      "locator": "Private scan; source pages, OCR, and local paths are not committed",
+      "summary": "用于补充镜像版心比例、章节结构、按章编号、章末提要、参考文献和双栏索引等相对版式证据；扫描裁切不作为成品尺寸。",
+      "public": false
+    }
+  ],
+  "rules": [
+    {
+      "id": "FMT-PAGE-301",
+      "category": "page",
+      "selector": {
+        "kind": "document",
+        "value": "all_sections"
+      },
+      "properties": {
+        "page_size_policy": "preserve",
+        "mirror_margins": true,
+        "margin_inner_ratio": 0.12,
+        "margin_outer_ratio": 0.105,
+        "margin_top_ratio": 0.096,
+        "margin_bottom_ratio": 0.085,
+        "header_distance_ratio": 0.055,
+        "footer_distance_ratio": 0.05,
+        "gutter_mm": 0,
+        "different_first_page_header_footer": false,
+        "odd_and_even_pages_header_footer": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "两本样书均呈镜像版心；精确毫米值受扫描影响，因此保持原纸张尺寸并采用待验证比例。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic",
+      "notes": "比例边距为候选值；批准前必须用真实 DOCX 在目标应用中逐页验证。"
+    },
+    {
+      "id": "FMT-BODY-301",
+      "category": "body",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "body_text"
+      },
+      "properties": {
+        "font_name_east_asia": "宋体",
+        "font_name_ascii": "Times New Roman",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 10.5,
+        "bold": false,
+        "alignment": "justify",
+        "line_spacing_rule": "exact",
+        "line_spacing_pt": 18,
+        "first_line_indent_chars": 2,
+        "space_before_pt": 0,
+        "space_after_pt": 0,
+        "widow_control": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "两本教材正文均呈中文宋体类、西文衬线体、两端对齐和约两字首行缩进。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-301",
+      "category": "heading",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "chapter_title"
+      },
+      "properties": {
+        "font_name_east_asia": "黑体",
+        "font_name_ascii": "Arial",
+        "font_name_complex_script": "Arial",
+        "font_size_pt": 18,
+        "color_hex": "000000",
+        "bold": true,
+        "alignment": "center",
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 24,
+        "space_after_pt": 18,
+        "page_break_before": true,
+        "keep_with_next": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "章题为正文中最强层级，居中并留明显上下空白。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-302",
+      "category": "heading",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "level_2_section"
+      },
+      "properties": {
+        "font_name_east_asia": "黑体",
+        "font_name_ascii": "Arial",
+        "font_name_complex_script": "Arial",
+        "font_size_pt": 14,
+        "color_hex": "000000",
+        "bold": true,
+        "alignment": "left",
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 18,
+        "space_after_pt": 9,
+        "keep_with_next": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "二级标题使用显著黑体类层级并与正文分隔。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-303",
+      "category": "heading",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "level_3_section"
+      },
+      "properties": {
+        "font_name_east_asia": "黑体",
+        "font_name_ascii": "Arial",
+        "font_name_complex_script": "Arial",
+        "font_size_pt": 12,
+        "color_hex": "000000",
+        "bold": true,
+        "alignment": "left",
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 12,
+        "space_after_pt": 6,
+        "keep_with_next": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "三级标题保持黑体类强调但弱于二级标题。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-304",
+      "category": "heading",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "level_4_section"
+      },
+      "properties": {
+        "font_name_east_asia": "宋体",
+        "font_name_ascii": "Times New Roman",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 10.5,
+        "color_hex": "000000",
+        "bold": true,
+        "alignment": "left",
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 9,
+        "space_after_pt": 3,
+        "keep_with_next": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "四级标题接近正文大小，以字重和段距区分。",
+      "confidence": "low",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-CAP-301",
+      "category": "caption",
+      "selector": {
+        "kind": "caption_role",
+        "value": "all"
+      },
+      "properties": {
+        "font_name_east_asia": "宋体",
+        "font_name_ascii": "Times New Roman",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 9,
+        "alignment": "center",
+        "line_spacing_rule": "exact",
+        "line_spacing_pt": 15,
+        "space_before_pt": 0,
+        "space_after_pt": 0,
+        "numbering_mode": "manual_text",
+        "preserve_identifier": true,
+        "domain_context": "unknown",
+        "allow_automatic_renumbering": false,
+        "preserve_table_cell_caption_position": true
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "图题和表题均使用较小字号并居中；图题在下、表题在上。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic",
+      "notes": "题注编号默认保留为可编辑人工文本；建筑、土木和结构工程内容中的剖面、节点、详图或图纸标识需结合语义逐项确认。"
+    },
+    {
+      "id": "FMT-TABLE-301",
+      "category": "table",
+      "selector": {
+        "kind": "table_role",
+        "value": "all"
+      },
+      "properties": {
+        "alignment": "center",
+        "repeat_header_row": true,
+        "prevent_row_split": true,
+        "available_width_percent": 100,
+        "allow_autofit": true,
+        "cell_margins_mm": {
+          "top": 1.0,
+          "right": 1.5,
+          "bottom": 1.0,
+          "left": 1.5
+        },
+        "vertical_alignment": "center",
+        "border_preset": "preserve",
+        "font_name_east_asia": "宋体",
+        "font_name_ascii": "Times New Roman",
+        "font_size_pt": 9,
+        "line_spacing_pt": 15,
+        "header_bold": true
+      },
+      "source_ids": [
+        "SRC-301",
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "跨页表应重复首行表头，普通数据行不得跨页拆分。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "automatic",
+      "notes": "超高行必须允许拆分并报警；列角色、列宽、边框预设及横向分节仍须在结构映射中逐表批准。"
+    },
+    {
+      "id": "FMT-FIELD-301",
+      "category": "field",
+      "selector": {
+        "kind": "field_role",
+        "value": "derived_fields"
+      },
+      "properties": {
+        "update_on_open": true,
+        "mark_fields_dirty": true,
+        "convert_explicit_markers": true,
+        "rebuild_heading_numbering": true,
+        "heading_levels": 4,
+        "strip_manual_heading_prefixes": true
+      },
+      "source_ids": [
+        "SRC-301",
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "目录、页码、标题编号、题注和交叉引用应使用真实 Word 字段或关联样式的多级列表。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "automatic",
+      "notes": "仅转换明确标记或无歧义手工前缀；歧义内容必须进入阻塞 QA。"
+    },
+    {
+      "id": "FMT-EQ-301",
+      "category": "equation",
+      "selector": {
+        "kind": "equation_role",
+        "value": "all"
+      },
+      "properties": {
+        "require_editable_equations": true,
+        "preserve_editable_objects": true,
+        "block_formula_images": true
+      },
+      "source_ids": [
+        "SRC-301"
+      ],
+      "evidence_summary": "用户明确要求公式必须可编辑，允许 OMML、MathType/OLE 或 LaTeX 转 OMML，禁止图片替代。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-EQ-302",
+      "category": "equation",
+      "selector": {
+        "kind": "equation_role",
+        "value": "display_equation_layout"
+      },
+      "properties": {
+        "alignment": "center",
+        "number_alignment": "right",
+        "numbering_pattern": "（{chapter}.{sequence}）",
+        "numbering_scope": "per_chapter",
+        "preserve_existing_omml_and_ole": true,
+        "latex_output": "omml"
+      },
+      "source_ids": [
+        "SRC-301",
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "独立公式居中、编号右齐并按章连续；公式对象必须保持或转换为可编辑对象。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-TOC-301",
+      "category": "toc",
+      "selector": {
+        "kind": "section_role",
+        "value": "table_of_contents"
+      },
+      "properties": {
+        "field_type": "TOC",
+        "chapter_font_size_pt": 10.5,
+        "chapter_bold": true,
+        "section_font_size_pt": 10.5,
+        "level_3_font_size_pt": 9,
+        "leader": "dots",
+        "page_number_alignment": "right",
+        "front_matter_number_format": "lower_roman"
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "目录按层级区分，使用点引导线和右对齐页码；前置页候选使用小写罗马数字。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-HEADER-301",
+      "category": "header_footer",
+      "selector": {
+        "kind": "section_role",
+        "value": "running_headers_and_page_numbers"
+      },
+      "properties": {
+        "font_size_pt": 9,
+        "mirrored": true,
+        "page_number_position": "outer",
+        "chapter_first_page_visible_header": false,
+        "chapter_first_page_visible_page_number": false,
+        "continue_page_numbering": true,
+        "page_field": "PAGE"
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "正文采用镜像页眉页码，章首页隐藏可见页眉和页码但继续计数。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-NOTE-301",
+      "category": "note",
+      "selector": {
+        "kind": "note_role",
+        "value": "footnotes_endnotes_and_bibliography"
+      },
+      "properties": {
+        "font_name_east_asia": "宋体",
+        "font_name_ascii": "Times New Roman",
+        "font_size_pt": 9,
+        "line_spacing_rule": "exact",
+        "line_spacing_pt": 15,
+        "hanging_indent": true,
+        "preserve_note_type": true
+      },
+      "source_ids": [
+        "SRC-301",
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "脚注、尾注和参考文献使用较小字号与悬挂关系；脚注和尾注不得互换。",
+      "confidence": "low",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-QUOTE-301",
+      "category": "body",
+      "selector": {
+        "kind": "paragraph_role",
+        "value": "long_quote"
+      },
+      "properties": {
+        "font_name_east_asia": "宋体",
+        "font_name_ascii": "Times New Roman",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 9.5,
+        "line_spacing_rule": "exact",
+        "line_spacing_pt": 16,
+        "left_indent_pt": 21,
+        "right_indent_pt": 21,
+        "space_before_pt": 6,
+        "space_after_pt": 6
+      },
+      "source_ids": [
+        "SRC-301"
+      ],
+      "evidence_summary": "长引文使用较小字号、固定行距和左右约两字符缩进。",
+      "confidence": "low",
+      "status": "draft",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-INDEX-301",
+      "category": "index",
+      "selector": {
+        "kind": "index_role",
+        "value": "existing_index"
+      },
+      "properties": {
+        "font_size_pt": 9,
+        "line_spacing_rule": "exact",
+        "line_spacing_pt": 15,
+        "columns": 2,
+        "column_gap_mm": 8,
+        "preserve_entries": true,
+        "preserve_stroke_groups": true
+      },
+      "source_ids": [
+        "SRC-303"
+      ],
+      "evidence_summary": "第二本样书后置索引呈双栏并保留笔画分组。",
+      "confidence": "medium",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-ANSWER-301",
+      "category": "answer",
+      "selector": {
+        "kind": "appendix_role",
+        "value": "existing_answers"
+      },
+      "properties": {
+        "heading_rank": "chapter",
+        "body_font_size_pt": 10.5,
+        "body_line_spacing_pt": 18,
+        "format_existing_only": true,
+        "generate_or_infer_answers": false
+      },
+      "source_ids": [
+        "SRC-301"
+      ],
+      "evidence_summary": "答案仅格式化已有内容，不推导、补写或改变答案。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-CALLOUT-301",
+      "category": "callout",
+      "selector": {
+        "kind": "callout_role",
+        "value": "teaching_prompt"
+      },
+      "properties": {
+        "container": "single_cell_table",
+        "border_color_hex": "000000",
+        "border_width_pt": 0.5,
+        "cell_padding_mm": 2,
+        "font_name_east_asia": "楷体",
+        "font_size_pt": 10.5,
+        "line_spacing_pt": 18
+      },
+      "source_ids": [
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "本章提要等教学提示采用独立框体，与正文建立清晰层级。",
+      "confidence": "low",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-SECTION-301",
+      "category": "section",
+      "selector": {
+        "kind": "section_role",
+        "value": "confirmed_wide_table"
+      },
+      "properties": {
+        "orientation": "landscape",
+        "section_break_before": true,
+        "section_break_after": true,
+        "page_numbering": "continuous",
+        "header_footer_orientation": "normal",
+        "rotate_table_content_only": false
+      },
+      "source_ids": [
+        "SRC-301",
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "经用户确认的宽表应以前后分节切换横向页面，页码连续且页眉页脚保持正常方向。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    },
+    {
+      "id": "FMT-TABLE-302",
+      "category": "table",
+      "selector": {
+        "kind": "table_role",
+        "value": "continued_table"
+      },
+      "properties": {
+        "create_only_for_existing_split_or_confirmed_break": true,
+        "label_pattern": "续表 {chapter}.{sequence}",
+        "repeat_header": true
+      },
+      "source_ids": [
+        "SRC-301",
+        "SRC-302",
+        "SRC-303"
+      ],
+      "evidence_summary": "续表只用于已有拆分表或用户明确指定断点，并重复表头。",
+      "confidence": "high",
+      "status": "draft",
+      "application": "manual_review"
+    }
+  ],
+  "conflicts": [],
+  "open_questions": [
+    {
+      "id": "QA-301",
+      "question": "请提供包含自定义标题样式、真实目录和交叉引用的可编辑教材 DOCX 样章，以验证字段识别和无歧义迁移。",
+      "blocking": true
+    },
+    {
+      "id": "QA-302",
+      "question": "请提供至少一个包含 OMML、MathType/OLE 和旧版公式对象的可编辑样章，以验证对象分类、哈希保护及 Word 兼容性。",
+      "blocking": true
+    },
+    {
+      "id": "QA-303",
+      "question": "请提供包含跨页表、续表断点和宽表的可编辑样章，以确认超高行判定及横向分节策略。",
+      "blocking": true
+    },
+    {
+      "id": "QA-304",
+      "question": "请补充包含脚注、尾注、长引文、答案和复杂教学提示框的出版社样例。",
+      "blocking": false
+    },
+    {
+      "id": "QA-305",
+      "question": "目标电脑是否已安装宋体、黑体、楷体、Times New Roman 和 Arial？缺失字体不得静默替换。",
+      "blocking": true
+    }
+  ],
+  "approval": {
+    "status": "draft",
+    "notes": "候选配置。必须解决阻塞 QA、生成项目副本并在 Word/LibreOffice 中完成逐页视觉验收后，方可批准用于真实书稿。"
+  }
+}

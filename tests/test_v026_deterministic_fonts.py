@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import struct
 import sys
@@ -47,10 +48,12 @@ from structure_map import (  # noqa: E402
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    audit_structure_heading_operations,
     audit_structure_image_operations,
     audit_structure_table_operations,
     candidate_structure_map,
     prime_structure_map_locators,
+    resolve_paragraph_locator,
     structure_content_inventory,
     structure_content_fingerprint,
     text_sha256,
@@ -767,7 +770,21 @@ class V026DeterministicFontTests(unittest.TestCase):
     def test_front_matter_blank_block_spacing_and_table_rules_are_structural(self) -> None:
         source = self.root / "front-matter-tables.docx"
         document = Document()
-        document.add_paragraph("Synthetic whole-book title")
+        title = document.add_paragraph("Synthetic whole-book title")
+        title_p_pr = title._p.get_or_add_pPr()
+        title_ind = OxmlElement("w:ind")
+        for attribute, value in (
+            ("left", "720"),
+            ("leftChars", "200"),
+            ("right", "360"),
+            ("rightChars", "100"),
+            ("firstLine", "240"),
+            ("hangingChars", "100"),
+        ):
+            title_ind.set(qn(f"w:{attribute}"), value)
+        title_p_pr.append(title_ind)
+        title_num_pr = OxmlElement("w:numPr")
+        title_p_pr.append(title_num_pr)
         document.add_paragraph("[[TOC]]")
         document.add_paragraph("第1章 Synthetic body")
         table = document.add_table(rows=5, cols=4)
@@ -823,6 +840,18 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertEqual(source_inventory, output_inventory)
         reloaded = Document(output)
         self.assertEqual("Monograph Book Title", reloaded.paragraphs[0].style.name)
+        title_p_pr = reloaded.paragraphs[0]._p.pPr
+        self.assertIsNone(title_p_pr.find(qn("w:numPr")))
+        self.assertIsNotNone(title_p_pr.find(qn("w:sectPr")))
+        self.assertEqual(
+            "Monograph TOC Heading",
+            reloaded.paragraphs[1].style.name,
+        )
+        direct_title_ind = title_p_pr.find(qn("w:ind"))
+        if direct_title_ind is not None:
+            self.assertTrue(
+                all(value == "0" for value in direct_title_ind.attrib.values())
+            )
         title_style = reloaded.paragraphs[0].style
         self.assertTrue(title_style.font.bold)
         self.assertEqual(22, title_style.font.size.pt)
@@ -831,6 +860,16 @@ class V026DeterministicFontTests(unittest.TestCase):
             title_style.paragraph_format.line_spacing_rule,
         )
         self.assertEqual(33, title_style.paragraph_format.line_spacing.pt)
+        title_style_ind = title_style.element.pPr.find(qn("w:ind"))
+        for attribute in (
+            "left",
+            "leftChars",
+            "right",
+            "rightChars",
+            "firstLine",
+            "firstLineChars",
+        ):
+            self.assertEqual("0", title_style_ind.get(qn(f"w:{attribute}")))
         self.assertEqual(
             "center",
             reloaded.sections[0]
@@ -865,6 +904,14 @@ class V026DeterministicFontTests(unittest.TestCase):
         )
         self.assertEqual("目    录", toc_heading.text)
         self.assertIs(False, toc_heading.paragraph_format.page_break_before)
+        pagination_failures, _ = audit_pagination_sections(
+            output,
+            reloaded,
+            structure["pagination_sections"],
+            resolve_paragraph_locator,
+            structure,
+        )
+        self.assertFalse(pagination_failures)
         self.assertEqual(
             1,
             sum(
@@ -900,6 +947,27 @@ class V026DeterministicFontTests(unittest.TestCase):
                 shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
                 self.assertIsNotNone(shading)
                 self.assertEqual("auto", shading.get(qn("w:fill")))
+
+    def test_front_matter_blocks_authored_content_between_title_and_toc(self) -> None:
+        source = self.root / "front-matter-authored-content.docx"
+        document = Document()
+        document.add_paragraph("Synthetic whole-book title")
+        document.add_paragraph("Authored front-matter content")
+        document.add_paragraph("[[TOC]]")
+        document.add_paragraph("第1章 Synthetic body")
+        document.save(source)
+
+        structure = candidate_structure_map(source)
+        structure["status"] = "approved"
+        structure["pagination_sections"]["approved"] = True
+        structure["front_matter"]["approved"] = True
+        formatted = Document(source)
+        prime_structure_map_locators(formatted, structure)
+        with self.assertRaisesRegex(
+            FormatMonographError,
+            "Non-empty authored content between the book title and TOC requires QA",
+        ):
+            apply_structure_map(formatted, structure)
 
     def test_technical_table_rebuilds_cell_borders_and_adds_semantic_separator(self) -> None:
         document = Document()
@@ -1184,7 +1252,18 @@ class V026DeterministicFontTests(unittest.TestCase):
                 },
             )
             paragraph = document.add_paragraph("Synthetic heading", style=style_name)
-            paragraph.paragraph_format.first_line_indent = Pt(18)
+            direct_ind = paragraph._p.get_or_add_pPr().get_or_add_ind()
+            for attribute, value in (
+                ("left", "720"),
+                ("leftChars", "200"),
+                ("right", "360"),
+                ("rightChars", "100"),
+                ("firstLine", "240"),
+                ("hangingChars", "100"),
+            ):
+                direct_ind.set(qn(f"w:{attribute}"), value)
+            direct_num_pr = OxmlElement("w:numPr")
+            paragraph._p.get_or_add_pPr().append(direct_num_pr)
 
         properties = {
             "rebuild_heading_numbering": True,
@@ -1206,9 +1285,91 @@ class V026DeterministicFontTests(unittest.TestCase):
         )
         for paragraph in reloaded.paragraphs:
             self.assertIsNone(paragraph.paragraph_format.first_line_indent)
+            self.assertIsNone(paragraph._p.pPr.find(qn("w:numPr")))
+            direct_ind = paragraph._p.pPr.find(qn("w:ind"))
+            if direct_ind is not None:
+                self.assertFalse(direct_ind.attrib)
         for style_name, _east_asia, _ascii_name, _size in specifications:
             ind = reloaded.styles[style_name].element.pPr.find(qn("w:ind"))
-            self.assertEqual("0", ind.get(qn("w:firstLineChars")))
+            for attribute in (
+                "left",
+                "leftChars",
+                "right",
+                "rightChars",
+                "firstLine",
+                "firstLineChars",
+            ):
+                self.assertEqual("0", ind.get(qn(f"w:{attribute}")))
+
+        for level in range(4):
+            numbering_level = reloaded.styles[f"Heading {level + 1}"].element.pPr.find(
+                qn("w:numPr")
+            )
+            self.assertIsNotNone(numbering_level)
+        structure = {
+            "schema_version": "1.5",
+            "numbering": {"approved": True},
+            "headings": [
+                {
+                    "approved": True,
+                    "level": level,
+                    "paragraph": level - 1,
+                    "text_sha256": text_sha256(reloaded.paragraphs[level - 1].text),
+                }
+                for level in range(1, 5)
+            ],
+        }
+        self.assertFalse(audit_structure_heading_operations(reloaded, structure))
+
+    def test_unapproved_direct_heading_numbering_is_preserved_and_reported(self) -> None:
+        document = Document()
+        paragraph = document.add_paragraph("1.1 Synthetic heading", style="Heading 2")
+        apply_field_properties(
+            document,
+            {
+                "rebuild_heading_numbering": True,
+                "heading_levels": 4,
+                "chapter_start": 1,
+            },
+        )
+        style_num_pr = document.styles["Heading 2"].element.pPr.find(qn("w:numPr"))
+        paragraph._p.get_or_add_pPr().append(copy.deepcopy(style_num_pr))
+        num_id = style_num_pr.find(qn("w:numId")).get(qn("w:val"))
+        abstract_id = next(
+            item
+            for item in document.part.numbering_part.element.findall(qn("w:num"))
+            if item.get(qn("w:numId")) == num_id
+        ).find(qn("w:abstractNumId")).get(qn("w:val"))
+        abstract = next(
+            item
+            for item in document.part.numbering_part.element.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        )
+        level = next(
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == "1"
+        )
+        level.find(qn("w:pPr")).find(qn("w:ind")).set(qn("w:left"), "720")
+        structure = {
+            "schema_version": "1.5",
+            "numbering": {"approved": False},
+            "headings": [
+                {
+                    "approved": True,
+                    "level": 2,
+                    "paragraph": 0,
+                    "text_sha256": text_sha256(paragraph.text),
+                }
+            ],
+        }
+        apply_structure_map(document, structure)
+        self.assertIsNotNone(paragraph._p.pPr.find(qn("w:numPr")))
+        failures = audit_structure_heading_operations(document, structure)
+        self.assertIn(
+            "heading_direct_numbering_requires_qa",
+            {failure["property"] for failure in failures},
+        )
 
 
 if __name__ == "__main__":

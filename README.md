@@ -4,7 +4,7 @@
 
 它面向需要在 Codex、Claude Code、Gemini CLI、VS Code / GitHub Copilot 等支持 `SKILL.md` 的 Agent 中复用排版能力的人。这个 skill 的目标不是替作者改写内容，而是在用户确认规则后，依据出版社规范、样书、模板或明确要求，对 Word 文档进行受控格式化、审计和交付。
 
-当前状态：**V0.3.0 候选实现**。
+当前状态：**V0.3.1 候选实现**。
 
 ## 适合谁使用
 
@@ -52,7 +52,7 @@
 9. 运行审计、字段终稿化和渲染检查。
 10. 交付前确认内容一致性、公式对象、媒体对象、字段缓存、页码和视觉 QA。
 
-V0.3.0 整书运行使用统一入口：
+V0.3.1 整书运行使用统一入口：
 
 ```text
 <python> format-monograph/scripts/run_monograph.py prepare <input.docx> --profile <profile.json> --work-dir <directory>

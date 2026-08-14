@@ -14,13 +14,16 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from lxml import etree
 
-from _common import NS, FormatMonographError, style_effective_font
+from _common import (
+    NS,
+    STRUCTURAL_INDENT_ATTRIBUTES,
+    FormatMonographError,
+    style_effective_font,
+)
 
 
 FOOTER_PART = re.compile(r"word/footer\d+\.xml$")
 HEADER_FOOTER_PART = re.compile(r"word/(?:header|footer)\d+\.xml$")
-
-
 def _section_properties(document: Any) -> list[Any]:
     return document.element.body.xpath("./w:p/w:pPr/w:sectPr | ./w:sectPr")
 
@@ -82,6 +85,77 @@ def _boundary_before(document: Any, paragraph: Any) -> tuple[Any, bool]:
     boundary.append(p_pr)
     body.insert(position, boundary)
     return sect_pr, True
+
+
+def _paragraph_has_layout_payload(element: Any) -> bool:
+    if element.tag != qn("w:p"):
+        return True
+    if "".join(element.xpath(".//w:t/text()")).strip():
+        return True
+    return bool(
+        element.xpath(
+            ".//w:drawing | .//w:object | .//w:pict | .//w:br | .//w:fldChar | "
+            ".//w:instrText | .//w:footnoteReference | .//w:endnoteReference"
+        )
+    )
+
+
+def _is_generated_empty_section_boundary(element: Any) -> bool:
+    if element.tag != qn("w:p") or list(element) == []:
+        return False
+    children = list(element)
+    if len(children) != 1 or children[0].tag != qn("w:pPr"):
+        return False
+    properties = list(children[0])
+    return len(properties) == 1 and properties[0].tag == qn("w:sectPr")
+
+
+def _nonzero_indent_attributes(ind: Any | None) -> dict[str, str]:
+    if ind is None:
+        return {}
+    result = {}
+    for attribute in STRUCTURAL_INDENT_ATTRIBUTES:
+        value = ind.get(qn(f"w:{attribute}"))
+        if value is not None and value != "0":
+            result[attribute] = value
+    return result
+
+
+def _boundary_after_title(
+    document: Any, title_paragraph: Any, toc_paragraph: Any
+) -> tuple[Any, bool]:
+    body = document.element.body
+    children = list(body)
+    title_position = _body_position(document, title_paragraph)
+    toc_position = _body_position(document, toc_paragraph)
+    if title_position >= toc_position:
+        raise FormatMonographError("The book title must precede the TOC heading.")
+
+    between = children[title_position + 1 : toc_position]
+    if any(_paragraph_has_layout_payload(element) for element in between):
+        raise FormatMonographError(
+            "Non-empty authored content between the book title and TOC requires QA."
+        )
+
+    title_p_pr = title_paragraph._p.get_or_add_pPr()
+    existing = title_p_pr.find(qn("w:sectPr"))
+    generated_boundaries = [
+        element for element in between if _is_generated_empty_section_boundary(element)
+    ]
+    source = existing
+    if source is None and generated_boundaries:
+        generated_p_pr = generated_boundaries[-1].find(qn("w:pPr"))
+        source = generated_p_pr.find(qn("w:sectPr"))
+    if source is None:
+        source = _section_for_position(document, title_position)
+
+    inserted = existing is None
+    if existing is None:
+        existing = copy.deepcopy(source)
+        title_p_pr.append(existing)
+    for boundary in generated_boundaries:
+        body.remove(boundary)
+    return existing, inserted
 
 
 def _set_page_numbering(sect_pr: Any, start: int | None, number_format: str) -> None:
@@ -415,8 +489,11 @@ def apply_pagination_sections(
         toc_section_start = getattr(
             document, "_format_monograph_toc_heading", toc_paragraph
         )
-        title_boundary, title_boundary_inserted = _boundary_before(
-            document, toc_section_start
+        title_paragraph = getattr(document, "_format_monograph_book_title", None)
+        if title_paragraph is None:
+            title_paragraph = resolver(document, front_matter["book_title"])
+        title_boundary, title_boundary_inserted = _boundary_after_title(
+            document, title_paragraph, toc_section_start
         )
         _set_section_type(title_boundary, "nextPage")
         _set_vertical_alignment(
@@ -425,9 +502,6 @@ def apply_pagination_sections(
         )
         toc_section_start.paragraph_format.page_break_before = False
         _hide_single_title_page_running_elements(title_boundary)
-        title_paragraph = getattr(document, "_format_monograph_book_title", None)
-        if title_paragraph is None:
-            title_paragraph = resolver(document, front_matter["book_title"])
         title_index = section_index_for_paragraph(document, title_paragraph)
 
     body_boundary, inserted = _boundary_before(document, body_paragraph)
@@ -738,6 +812,26 @@ def audit_pagination_sections(
             failures.append(
                 {"property": "book_title_alignment", "expected": "center"}
             )
+        title_p_pr = title_paragraph._p.pPr
+        title_direct_num_pr = (
+            None if title_p_pr is None else title_p_pr.find(qn("w:numPr"))
+        )
+        if title_direct_num_pr is not None:
+            failures.append(
+                {"property": "book_title_direct_numbering", "expected": "absent"}
+            )
+        direct_indent = (
+            None if title_p_pr is None else title_p_pr.find(qn("w:ind"))
+        )
+        direct_indent_conflicts = _nonzero_indent_attributes(direct_indent)
+        if direct_indent_conflicts:
+            failures.append(
+                {
+                    "property": "book_title_direct_indent",
+                    "expected": 0,
+                    "actual": direct_indent_conflicts,
+                }
+            )
         expected_title_format = {
             "font_name_east_asia": "黑体",
             "font_name_ascii": "Times New Roman",
@@ -747,6 +841,39 @@ def audit_pagination_sections(
         expected_title_format.update(front_matter.get("book_title_format", {}))
         title_style = title_paragraph.style
         if title_style is not None:
+            style_p_pr = title_style.element.pPr
+            style_indent = (
+                None if style_p_pr is None else style_p_pr.find(qn("w:ind"))
+            )
+            style_indent_conflicts = _nonzero_indent_attributes(style_indent)
+            required_zero_attributes = {
+                attribute: (
+                    None
+                    if style_indent is None
+                    else style_indent.get(qn(f"w:{attribute}"))
+                )
+                for attribute in (
+                    "left",
+                    "leftChars",
+                    "right",
+                    "rightChars",
+                    "firstLine",
+                    "firstLineChars",
+                )
+            }
+            if style_indent_conflicts or any(
+                value != "0" for value in required_zero_attributes.values()
+            ):
+                failures.append(
+                    {
+                        "property": "book_title_style_indent",
+                        "expected": 0,
+                        "actual": {
+                            **required_zero_attributes,
+                            **style_indent_conflicts,
+                        },
+                    }
+                )
             actual_ascii = style_effective_font(document, title_style, "ascii")[0]
             actual_east_asia = style_effective_font(document, title_style, "eastAsia")[0]
             if actual_ascii != expected_title_format["font_name_ascii"]:
@@ -784,6 +911,16 @@ def audit_pagination_sections(
         ):
             failures.append({"property": "book_title_bold", "expected": True})
         title_inventory = inventory["sections"][title_section]
+        title_section_properties = (
+            None if title_p_pr is None else title_p_pr.find(qn("w:sectPr"))
+        )
+        if title_section_properties is None:
+            failures.append(
+                {
+                    "property": "book_title_section_boundary",
+                    "expected": "attached_to_book_title_paragraph",
+                }
+            )
         expected_vertical = front_matter.get("title_page_vertical_alignment")
         if expected_vertical and title_inventory.get("vertical_alignment") != expected_vertical:
             failures.append(

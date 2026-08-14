@@ -1698,26 +1698,82 @@ def _heading_numbering_run_properties(document: Any, style: Any) -> Any:
     return r_pr
 
 
-def _zero_heading_first_line_indent(document: Any, levels: int) -> None:
-    controlled = ("firstLine", "firstLineChars", "hanging", "hangingChars")
+STRUCTURAL_INDENT_ATTRIBUTES = (
+    "left",
+    "leftChars",
+    "start",
+    "startChars",
+    "right",
+    "rightChars",
+    "end",
+    "endChars",
+    "firstLine",
+    "firstLineChars",
+    "hanging",
+    "hangingChars",
+)
+
+
+def _set_zero_structural_indent(ind: Any) -> None:
+    for attribute in (
+        "left",
+        "leftChars",
+        "right",
+        "rightChars",
+        "firstLine",
+        "firstLineChars",
+    ):
+        ind.set(qn(f"w:{attribute}"), "0")
+    for attribute in (
+        "start",
+        "startChars",
+        "end",
+        "endChars",
+        "hanging",
+        "hangingChars",
+    ):
+        ind.attrib.pop(qn(f"w:{attribute}"), None)
+
+
+def normalize_structural_paragraph(
+    paragraph: Any,
+    *,
+    style: Any | None = None,
+    clear_direct_numbering: bool = False,
+) -> None:
+    target_style = style or paragraph.style
+    if target_style is not None:
+        ind = target_style.element.get_or_add_pPr().get_or_add_ind()
+        _set_zero_structural_indent(ind)
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    direct_ind = p_pr.find(qn("w:ind"))
+    if direct_ind is not None:
+        for attribute in STRUCTURAL_INDENT_ATTRIBUTES:
+            direct_ind.attrib.pop(qn(f"w:{attribute}"), None)
+        if not direct_ind.attrib and len(direct_ind) == 0:
+            p_pr.remove(direct_ind)
+    if clear_direct_numbering:
+        num_pr = p_pr.find(qn("w:numPr"))
+        if num_pr is not None:
+            p_pr.remove(num_pr)
+
+
+def _normalize_heading_indentation(
+    document: Any, levels: int, *, clear_direct_numbering: bool
+) -> None:
     for level in range(levels):
         style = ensure_paragraph_style(document, f"Heading {level + 1}")
         ind = style.element.get_or_add_pPr().get_or_add_ind()
-        ind.set(qn("w:firstLine"), "0")
-        ind.set(qn("w:firstLineChars"), "0")
-        for attribute in ("hanging", "hangingChars"):
-            ind.attrib.pop(qn(f"w:{attribute}"), None)
+        _set_zero_structural_indent(ind)
         for paragraph in iter_document_paragraphs(document):
             if paragraph.style is None or paragraph.style.name != style.name:
                 continue
-            p_pr = paragraph._p.pPr
-            direct_ind = None if p_pr is None else p_pr.find(qn("w:ind"))
-            if direct_ind is None:
-                continue
-            for attribute in controlled:
-                direct_ind.attrib.pop(qn(f"w:{attribute}"), None)
-            if not direct_ind.attrib and len(direct_ind) == 0:
-                p_pr.remove(direct_ind)
+            normalize_structural_paragraph(
+                paragraph,
+                style=style,
+                clear_direct_numbering=clear_direct_numbering,
+            )
 
 
 def _numbering_level_for_style(document: Any, level: int) -> Any | None:
@@ -1758,7 +1814,9 @@ def _numbering_level_for_style(document: Any, level: int) -> Any | None:
 
 
 def synchronize_heading_numbering_format(document: Any, levels: int) -> int:
-    _zero_heading_first_line_indent(document, levels)
+    _normalize_heading_indentation(
+        document, levels, clear_direct_numbering=True
+    )
     changed = 0
     for level in range(levels):
         lvl = _numbering_level_for_style(document, level)
@@ -1772,10 +1830,9 @@ def synchronize_heading_numbering_format(document: Any, levels: int) -> int:
         if ind is None:
             ind = OxmlElement("w:ind")
             p_pr.append(ind)
-        ind.set(qn("w:firstLine"), "0")
-        ind.set(qn("w:firstLineChars"), "0")
-        for attribute in ("hanging", "hangingChars"):
-            ind.attrib.pop(qn(f"w:{attribute}"), None)
+        _set_zero_structural_indent(ind)
+        for tabs in list(p_pr.findall(qn("w:tabs"))):
+            p_pr.remove(tabs)
         previous = lvl.find(qn("w:rPr"))
         if previous is not None:
             lvl.remove(previous)
@@ -1800,7 +1857,9 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
     multi.set(qn("w:val"), "multilevel")
     abstract.append(multi)
 
-    _zero_heading_first_line_indent(document, levels)
+    _normalize_heading_indentation(
+        document, levels, clear_direct_numbering=True
+    )
     for level in range(levels):
         lvl = OxmlElement("w:lvl")
         lvl.set(qn("w:ilvl"), str(level))
@@ -1823,8 +1882,7 @@ def _ensure_heading_numbering(document: Any, levels: int, chapter_start: int = 1
         lvl.extend([start, num_fmt, p_style, lvl_text, suff])
         lvl_p_pr = OxmlElement("w:pPr")
         lvl_ind = OxmlElement("w:ind")
-        lvl_ind.set(qn("w:firstLine"), "0")
-        lvl_ind.set(qn("w:firstLineChars"), "0")
+        _set_zero_structural_indent(lvl_ind)
         lvl_p_pr.append(lvl_ind)
         lvl.append(lvl_p_pr)
         style = ensure_paragraph_style(document, f"Heading {level + 1}")

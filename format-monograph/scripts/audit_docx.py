@@ -37,6 +37,7 @@ from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
+    audit_structure_heading_operations,
     audit_structure_image_operations,
     audit_structure_table_operations,
     has_semantic_structure_map,
@@ -990,6 +991,11 @@ def main() -> int:
             else ([], {})
         )
         content_ok = original_fp == formatted_fp
+        structure_heading_failures = (
+            audit_structure_heading_operations(document, structure_map)
+            if structure_map
+            else []
+        )
         structure_table_failures = (
             audit_structure_table_operations(document, structure_map)
             if structure_map
@@ -1003,6 +1009,7 @@ def main() -> int:
         rules_ok = (
             all(item["status"] != "fail" for item in rule_results)
             and not pagination_failures
+            and not structure_heading_failures
             and not structure_table_failures
             and not structure_image_failures
         )
@@ -1050,6 +1057,10 @@ def main() -> int:
                 "passed": not pagination_failures,
                 "failures": pagination_failures,
                 "inventory": pagination,
+            },
+            "structure_heading_operations": {
+                "passed": not structure_heading_failures,
+                "failures": structure_heading_failures,
             },
             "structure_table_operations": {
                 "passed": not structure_table_failures,

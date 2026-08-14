@@ -38,6 +38,10 @@ affected cache. Never copy a `run-state.json` between manuscripts.
   `frozen_scopes`. Apply may continue for approved objects outside those scopes.
 - Preserve existing appendix, figure, table, and equation identifiers unless an
   individual change is explicitly approved.
+- Require the book-title section boundary to end on the title paragraph so an
+  auxiliary empty paragraph cannot shift vertical centering. Require approved
+  Heading 1-4 paragraphs and their numbering levels to pass zero-indent and
+  direct-numbering audits before delivery.
 - Never approve a table header only because it is the first row.
 - Never move an image or table. A floating table remains frozen when changing it
   to inline/no-wrap would alter its anchor or position.
@@ -56,6 +60,8 @@ affected cache. Never copy a `run-state.json` between manuscripts.
 - Set `final_ready` only when critical QA is closed, field results are safely
   refreshed, integrity audits pass, and the manifest confirms every page was
   inspected with no unresolved issue.
+- Retain `run-state.json` and the generated audit JSON as execution evidence.
+  Agent prose or a DOCX that merely opens is not evidence of completion.
 - Do not place manuscript text, local task artifacts, or rendered pages in
   public logs, repositories, CI artifacts, or compatibility fixtures.
 

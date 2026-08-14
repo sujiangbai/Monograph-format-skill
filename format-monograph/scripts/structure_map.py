@@ -25,7 +25,9 @@ from _common import (
     CONTENT_PART,
     FIELD_MARKER_PATTERN,
     NS,
+    STRUCTURAL_INDENT_ATTRIBUTES,
     FormatMonographError,
+    _numbering_level_for_style,
     _heading_prefix_pattern,
     _paragraph_text_without_field_results,
     _unique_row_cells,
@@ -34,6 +36,7 @@ from _common import (
     clear_controlled_direct_format,
     content_fingerprint,
     ensure_paragraph_style,
+    normalize_structural_paragraph,
 )
 from docx_pagination import apply_pagination_sections, section_index_for_paragraph
 
@@ -66,6 +69,8 @@ DEFAULT_BOOK_TITLE_FORMAT = {
     "bold": True,
     "alignment": "center",
     "first_line_indent_chars": 0,
+    "left_indent_pt": 0,
+    "right_indent_pt": 0,
     "line_spacing_rule": "at_least",
     "line_spacing_pt": 33,
     "space_before_pt": 0,
@@ -2757,6 +2762,9 @@ def _apply_toc_ranges(document: Any, structure_map: dict[str, Any]) -> int:
 
 def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
     changed = 0
+    clear_direct_numbering = bool(
+        structure_map.get("numbering", {}).get("approved")
+    )
     for entry in structure_map.get("headings", []):
         if not entry.get("approved"):
             continue
@@ -2768,7 +2776,13 @@ def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
             if entry.get("locator")
             else _verified_paragraph(document, entry)
         )
-        paragraph.style = ensure_paragraph_style(document, f"Heading {level}")
+        style = ensure_paragraph_style(document, f"Heading {level}")
+        paragraph.style = style
+        normalize_structural_paragraph(
+            paragraph,
+            style=style,
+            clear_direct_numbering=clear_direct_numbering,
+        )
         changed += 1
     return changed
 
@@ -3052,6 +3066,11 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     apply_style_properties(title_style, title_format)
     title.style = title_style
     clear_controlled_direct_format(title, title_format)
+    normalize_structural_paragraph(
+        title,
+        style=title_style,
+        clear_direct_numbering=True,
+    )
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.first_line_indent = Pt(0)
 
@@ -3543,6 +3562,228 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         },
     ]
     return [change for change in changes if change["targets"]]
+
+
+def _indent_conflicts(ind: Any | None) -> dict[str, str]:
+    if ind is None:
+        return {}
+    return {
+        attribute: value
+        for attribute in STRUCTURAL_INDENT_ATTRIBUTES
+        if (value := ind.get(qn(f"w:{attribute}"))) not in {None, "0"}
+    }
+
+
+def _direct_numbering_level(document: Any, paragraph: Any) -> Any | None:
+    p_pr = paragraph._p.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    if num_pr is None:
+        return None
+    num_id_element = num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    ilvl_element = num_pr.find(qn("w:ilvl"))
+    ilvl = "0" if ilvl_element is None else ilvl_element.get(qn("w:val"), "0")
+    root = document.part.numbering_part.element
+    num = next(
+        (item for item in root.findall(qn("w:num")) if item.get(qn("w:numId")) == num_id),
+        None,
+    )
+    abstract_ref = None if num is None else num.find(qn("w:abstractNumId"))
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(qn("w:val"))
+    abstract = next(
+        (
+            item
+            for item in root.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        ),
+        None,
+    )
+    if abstract is None:
+        return None
+    return next(
+        (
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == ilvl
+        ),
+        None,
+    )
+
+
+def audit_structure_heading_operations(
+    document: Any, structure_map: dict[str, Any]
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    numbering_approved = bool(structure_map.get("numbering", {}).get("approved"))
+    required_zero = (
+        "left",
+        "leftChars",
+        "right",
+        "rightChars",
+        "firstLine",
+        "firstLineChars",
+    )
+    for entry in structure_map.get("headings", []):
+        if not entry.get("approved"):
+            continue
+        level = int(entry["level"])
+        try:
+            paragraph = (
+                _verified_locator_paragraph(document, entry)
+                if entry.get("locator")
+                else _verified_paragraph(document, entry)
+            )
+        except FormatMonographError:
+            normalized_hash = entry.get("normalized_text_sha256")
+            candidates = [
+                paragraph
+                for paragraph in document.paragraphs
+                if paragraph.style is not None
+                and paragraph.style.name == f"Heading {level}"
+                and normalized_hash
+                and text_sha256(paragraph.text) == normalized_hash
+            ]
+            if len(candidates) != 1:
+                failures.append(
+                    {"level": level, "property": "heading_locator", "expected": "unique"}
+                )
+                continue
+            paragraph = candidates[0]
+
+        if paragraph.style is None or paragraph.style.name != f"Heading {level}":
+            failures.append(
+                {
+                    "level": level,
+                    "property": "heading_style",
+                    "expected": f"Heading {level}",
+                }
+            )
+            continue
+        p_pr = paragraph._p.pPr
+        direct_ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+        conflicts = _indent_conflicts(direct_ind)
+        if conflicts:
+            failures.append(
+                {
+                    "level": level,
+                    "property": "heading_direct_indent",
+                    "expected": 0,
+                    "actual": conflicts,
+                }
+            )
+
+        style_p_pr = paragraph.style.element.pPr
+        style_ind = None if style_p_pr is None else style_p_pr.find(qn("w:ind"))
+        style_values = {
+            attribute: (
+                None
+                if style_ind is None
+                else style_ind.get(qn(f"w:{attribute}"))
+            )
+            for attribute in required_zero
+        }
+        if _indent_conflicts(style_ind) or any(
+            value != "0" for value in style_values.values()
+        ):
+            failures.append(
+                {
+                    "level": level,
+                    "property": "heading_style_indent",
+                    "expected": 0,
+                    "actual": style_values,
+                }
+            )
+
+        direct_num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+        if numbering_approved and direct_num_pr is not None:
+            failures.append(
+                {
+                    "level": level,
+                    "property": "heading_direct_numbering",
+                    "expected": "absent",
+                }
+            )
+        if numbering_approved:
+            numbering_level = _numbering_level_for_style(document, level - 1)
+        elif direct_num_pr is not None:
+            numbering_level = _direct_numbering_level(document, paragraph)
+        else:
+            numbering_level = None
+        direct_num_id_element = (
+            None if direct_num_pr is None else direct_num_pr.find(qn("w:numId"))
+        )
+        direct_num_id = (
+            None
+            if direct_num_id_element is None
+            else direct_num_id_element.get(qn("w:val"))
+        )
+        if numbering_approved and numbering_level is None:
+            failures.append(
+                {
+                    "level": level,
+                    "property": "heading_numbering_level",
+                    "expected": "resolved_style_linked_level",
+                }
+            )
+        elif (
+            not numbering_approved
+            and direct_num_pr is not None
+            and direct_num_id not in {None, "0"}
+            and numbering_level is None
+        ):
+            failures.append(
+                {
+                    "level": level,
+                    "property": "heading_direct_numbering_requires_qa",
+                    "expected": "resolvable_zero_indent_numbering_or_approval",
+                }
+            )
+        if numbering_level is not None:
+            numbering_p_pr = numbering_level.find(qn("w:pPr"))
+            numbering_ind = (
+                None
+                if numbering_p_pr is None
+                else numbering_p_pr.find(qn("w:ind"))
+            )
+            numbering_conflicts = _indent_conflicts(numbering_ind)
+            numbering_values = {
+                attribute: (
+                    None
+                    if numbering_ind is None
+                    else numbering_ind.get(qn(f"w:{attribute}"))
+                )
+                for attribute in required_zero
+            }
+            tabs = (
+                []
+                if numbering_p_pr is None
+                else numbering_p_pr.findall(qn("w:tabs"))
+            )
+            if numbering_conflicts or tabs or (
+                numbering_approved
+                and any(value != "0" for value in numbering_values.values())
+            ):
+                failures.append(
+                    {
+                        "level": level,
+                        "property": (
+                            "heading_numbering_indent"
+                            if numbering_approved
+                            else "heading_direct_numbering_requires_qa"
+                        ),
+                        "expected": {"indent": 0, "tabs": 0},
+                        "actual": {
+                            "indent": numbering_values,
+                            "conflicts": numbering_conflicts,
+                            "tabs": len(tabs),
+                        },
+                    }
+                )
+    return failures
 
 
 def audit_structure_table_operations(
