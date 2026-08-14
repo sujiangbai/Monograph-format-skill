@@ -389,4 +389,697 @@ def audit_section_rule(
             "gutter_mm": section.gutter.mm,
             "header_distance_ratio": section.header_distance.mm / height,
             "footer_distance_ratio": section.footer_distance.mm / height,
-        ã~ô¶‰žËkºwµçL9½¹”è4(€€€€€€€É•ÑÕÉ¸9½¹”4(€€€…‰ÍÑÉ…Ñ}¥€ô…‰ÍÑÉ…Ñ}É•˜¹•Ð¡Å¸ ‰ÜéÙ…°ˆ¤¤4(€€€…‰ÍÑÉ…Ð€ô¹•áÐ 4(€€€€€€€€ 4(€€€€€€€€€€€¥Ñ•´4(€€€€€€€€€€€™½È¥Ñ•´¥¸É½½Ð¹™¥¹‘…±°¡Å¸ ‰Üé…‰ÍÑÉ…Ñ9Õ´ˆ¤¤4(€€€€€€€€€€€¥˜¥Ñ•´¹•Ð¡Å¸ ‰Üé…‰ÍÑÉ…Ñ9Õµ%ˆ¤¤€ôô…‰ÍÑÉ…Ñ}¥4(€€€€€€€€¤°4(€€€€€€€9½¹”°4(€€€€¤4(€€€¥˜…‰ÍÑÉ…Ð¥Ì9½¹”è4(€€€€€€€É•ÑÕÉ¸9½¹”4(€€€É•ÑÕÉ¸¹•áÐ 4(€€€€€€€€ 4(€€€€€€€€€€€¥Ñ•´4(€€€€€€€€€€€™½È¥Ñ•´¥¸…‰ÍÑÉ…Ð¹™¥¹‘…±°¡Å¸ ‰Üé±Ù°ˆ¤¤4(€€€€€€€€€€€¥˜¥Ñ•´¹•Ð¡Å¸ ‰Üé¥±Ù°ˆ¤¤€ôôÍÑÈ¡±•Ù•°¤4(€€€€€€€€¤°4(€€€€€€€9½¹”°4(€€€€¤4(4(4)‘•˜¡•…‘¥¹}¹Õµ‰•É¥¹}™½Éµ…Ñ}™…¥±ÕÉ•Ì¡‘½Õµ•¹Ðè¹ä°±•Ù•±Ìè¥¹Ð¤€´ø±¥ÍÑm‘¥Ñtè4(€€€™…¥±ÕÉ•Ì€ômt4(€€€™½È±•Ù•°¥¸É…¹”¡±•Ù•±Ì¤è4(€€€€€€€ÍÑå±”€ô‘½Õµ•¹Ð¹ÍÑå±•Ím˜‰!•…‘¥¹œí±•Ù•°€¬€Åô‰t4(€€€€€€€±Ù°€ô¡•…‘¥¹}¹Õµ‰•É¥¹}±•Ù•°¡‘½Õµ•¹Ð°±•Ù•°¤4(€€€€€€€¥˜±Ù°¥Ì9½¹”è4(€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€¥¹€ô±Ù°¹™¥¹¡Å¸ ‰ÜéÁAÈˆ¤€¬€ˆ¼ˆ€¬Å¸ ‰Üé¥¹ˆ¤¤4(€€€€€€€¡…Í}é•É½}¥¹‘•¹Ð€ô¥¹¥Ì¹½Ð9½¹”…¹€ 4(€€€€€€€€€€€¥¹¹•Ð¡Å¸ ‰Üé™¥ÉÍÑ1¥¹•¡…ÉÌˆ¤¤€ôô€ˆÀˆ4(€€€€€€€€€€€½È¥¹¹•Ð¡Å¸ ‰Üé™¥ÉÍÑ1¥¹”ˆ¤¤€ôô€ˆÀˆ4(€€€€€€€€¤4(€€€€€€€¥˜¹½Ð¡…Í}é•É½}¥¹‘•¹Ðè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰¡•…‘¥¹}™¥ÉÍÑ}±¥¹•}¥¹‘•¹Ðˆ°4(€€€€€€€€€€€€€€€€€€€€‰¡•…‘¥¹}±•Ù•°ˆè±•Ù•°€¬€Ä°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€À°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€€€€€É}ÁÈ€ô±Ù°¹™¥¹¡Å¸ ‰ÜéÉAÈˆ¤¤4(€€€€€€€É}™½¹ÑÌ€ô9½¹”¥˜É}ÁÈ¥Ì9½¹”•±Í”É}ÁÈ¹™¥¹¡Å¸ ‰ÜéÉ½¹ÑÌˆ¤¤4(€€€€€€€•áÁ•Ñ•‘}™½¹ÑÌ€ôì4(€€€€€€€€€€€€‰…Í¥¤ˆèÍÑå±•}•™™•Ñ¥Ù•}™½¹Ð¡‘½Õµ•¹Ð°ÍÑå±”°€‰…Í¥¤ˆ¥lÁt°4(€€€€€€€€€€€€‰¡¹Í¤ˆèÍÑå±•}•™™•Ñ¥Ù•}™½¹Ð¡‘½Õµ•¹Ð°ÍÑå±”°€‰…Í¥¤ˆ¥lÁt°4(€€€€€€€€€€€€‰•…ÍÑÍ¥„ˆèÍÑå±•}•™™•Ñ¥Ù•}™½¹Ð¡‘½Õµ•¹Ð°ÍÑå±”°€‰•…ÍÑÍ¥„ˆ¥lÁt°4(€€€€€€€€€€€€‰ÌˆèÍÑå±•}•™™•Ñ¥Ù•}™½¹Ð¡‘½Õµ•¹Ð°ÍÑå±”°€‰Ìˆ¥lÁt°4(€€€€€€€ô4(€€€€€€€…ÑÕ…±}™½¹ÑÌ€ôì4(€€€€€€€€€€€…ÑÑÉ¥‰ÕÑ”è9½¹”¥˜É}™½¹ÑÌ¥Ì9½¹”•±Í”É}™½¹ÑÌ¹•Ð¡Å¸¡˜‰Üéí…ÑÑÉ¥‰ÕÑ•ôˆ¤¤4(€€€€€€€€€€€™½È…ÑÑÉ¥‰ÕÑ”¥¸•áÁ•Ñ•‘}™½¹ÑÌ4(€€€€€€€ô4(€€€€€€€¥˜…ÑÕ…±}™½¹ÑÌ€„ô•áÁ•Ñ•‘}™½¹ÑÌè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰¡•…‘¥¹}¹Õµ‰•É¥¹}™½¹ÑÌˆ°4(€€€€€€€€€€€€€€€€€€€€‰¡•…‘¥¹}±•Ù•°ˆè±•Ù•°€¬€Ä°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}™½¹ÑÌ°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}™½¹ÑÌ°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€€€€€•áÁ•Ñ•‘}Í¥é”€ôÍÑå±•}Ù…±Õ”¡‘½Õµ•¹Ð°ÍÑå±”°€‰™½¹Ñ}Í¥é•}ÁÐˆ¤4(€€€€€€€Í¥é”€ô9½¹”¥˜É}ÁÈ¥Ì9½¹”•±Í”É}ÁÈ¹™¥¹¡Å¸ ‰ÜéÍèˆ¤¤4(€€€€€€€…ÑÕ…±}Í¥é”€ô9½¹”¥˜Í¥é”¥Ì9½¹”•±Í”¥¹Ð¡Í¥é”¹•Ð¡Å¸ ‰ÜéÙ…°ˆ¤¤¤€¼€È4(€€€€€€€¥˜¹½Ð±½Í”¡…ÑÕ…±}Í¥é”°•áÁ•Ñ•‘}Í¥é”¤è4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰¡•…‘¥¹}¹Õµ‰•É¥¹}™½¹Ñ}Í¥é•}ÁÐˆ°4(€€€€€€€€€€€€€€€€€€€€‰¡•…‘¥¹}±•Ù•°ˆè±•Ù•°€¬€Ä°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}Í¥é”°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}Í¥é”°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€€€€€•áÁ•Ñ•‘}‰½±€ôÍÑå±•}Ù…±Õ”¡‘½Õµ•¹Ð°ÍÑå±”°€‰‰½±ˆ¤4(€€€€€€€‰½±€ô9½¹”¥˜É}ÁÈ¥Ì9½¹”•±Í”É}ÁÈ¹™¥¹¡Å¸ ‰Üéˆˆ¤¤4(€€€€€€€…ÑÕ…±}‰½±€ô9½¹”¥˜‰½±¥Ì9½¹”•±Í”‰½±¹•Ð¡Å¸ ‰ÜéÙ…°ˆ¤°€ˆÄˆ¤¹½Ð¥¸ìˆÀˆ°€‰™…±Í”‰ô4(€€€€€€€¥˜…ÑÕ…±}‰½±€„ô•áÁ•Ñ•‘}‰½±è4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰¡•…‘¥¹}¹Õµ‰•É¥¹}‰½±ˆ°4(€€€€€€€€€€€€€€€€€€€€‰¡•…‘¥¹}±•Ù•°ˆè±•Ù•°€¬€Ä°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè•áÁ•Ñ•‘}‰½±°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}‰½±°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€É•ÑÕÉ¸™…¥±ÕÉ•Ì4(4(4)‘•˜…Õ‘¥Ñ}™¥•±‘}ÉÕ±” 4(€€€‘½Õµ•¹Ðè¹ä°4(€€€ÉÕ±”è‘¥Ð°4(€€€¡…ÁÑ•É}ÍÑ…ÉÐè¥¹Ðð9½¹”€ô9½¹”°4(€€€Á…Ñ èA…Ñ ð9½¹”€ô9½¹”°4(¤€´ø±¥ÍÑm‘¥Ñtè4(€€€™…¥±ÕÉ•Ì€ômt4(€€€ÁÉ½Á•ÉÑ¥•Ì€ôÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t4(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰ÕÁ‘…Ñ•}½¹}½Á•¸ˆ¤…¹¹½Ð‘½Õµ•¹Ñ}Ñ½±”¡‘½Õµ•¹Ð°€‰ÕÁ‘…Ñ•¥•±‘Ìˆ¤è4(€€€€€€€É•™É•Í¡•€ôÁ…Ñ ¥Ì¹½Ð9½¹”…¹™¥•±‘}…¡•}¥¹Ù•¹Ñ½Éä¡Á…Ñ ¥l‰ÍÑ…ÑÕÌ‰t€ôô€‰É•™É•Í¡•ˆ4(€€€€€€€¥˜¹½ÐÉ•™É•Í¡•è4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹¡ì‰ÁÉ½Á•ÉÑäˆè€‰ÕÁ‘…Ñ•}½¹}½Á•¸ˆ°€‰•áÁ•Ñ•ˆèQÉÕ”°€‰…ÑÕ…°ˆè…±Í•ô¤4(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰½¹Ù•ÉÑ}•áÁ±¥¥Ñ}µ…É­•ÉÌˆ¤è4(€€€€€€€É•µ…¥¹¥¹œ€ôl4(€€€€€€€€€€€Á…É…É…Á ¹Ñ•áÐ4(€€€€€€€€€€€™½ÈÁ…É…É…Á ¥¸‘½Õµ•¹Ð¹Á…É…É…Á¡Ì4(€€€€€€€€€€€¥˜}™¥•±‘}¥¹ÍÑÉÕÑ¥½¹}™½É}µ…É­•È¡Á…É…É…Á ¹Ñ•áÐ¹ÍÑÉ¥À ¤¤¥Ì¹½Ð9½¹”4(€€€€€€€t4(€€€€€€€¥˜É•µ…¥¹¥¹œè4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰½¹Ù•ÉÑ}•áÁ±¥¥Ñ}µ…É­•ÉÌˆ°4(€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€‰¹¼µ…É­•ÉÌˆ°4(€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆèÉ•µ…¥¹¥¹lèÄÁt°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(€€€±•Ù•±Ì€ô¥¹Ð¡ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰¡•…‘¥¹}±•Ù•±Ìˆ°€Ð¤¤4(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰É•‰Õ¥±‘}¡•…‘¥¹}¹Õµ‰•É¥¹œˆ¤è4(€€€€€€€™½È±•Ù•°¥¸É…¹” Ä°±•Ù•±Ì€¬€Ä¤è4(€€€€€€€€€€€ÍÑå±”€ô‘½Õµ•¹Ð¹ÍÑå±•Ím˜‰!•…‘¥¹œí±•Ù•±ô‰t4(€€€€€€€€€€€Á}ÁÈ€ôÍÑå±”¹•±•µ•¹Ð¹ÁAÈ4(€€€€€€€€€€€¥˜Á}ÁÈ¥Ì9½¹”½ÈÁ}ÁÈ¹™¥¹¡Å¸ ‰Üé¹ÕµAÈˆ¤¤¥Ì9½¹”è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰É•‰Õ¥±‘}¡•…‘¥¹}¹Õµ‰•É¥¹œˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè˜‰¹Õµ‰•É¥¹œ½¸!•…‘¥¹œí±•Ù•±ôˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè€‰µ¥ÍÍ¥¹œˆ°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€™…¥±ÕÉ•Ì¹•áÑ•¹¡¡•…‘¥¹}¹Õµ‰•É¥¹}™½Éµ…Ñ}™…¥±ÕÉ•Ì¡‘½Õµ•¹Ð°±•Ù•±Ì¤¤4(€€€€€€€¥˜¡…ÁÑ•É}ÍÑ…ÉÐ¥Ì¹½Ð9½¹”è4(€€€€€€€€€€€…ÑÕ…±}ÍÑ…ÉÐ€ô¡•…‘¥¹}¹Õµ‰•É¥¹}ÍÑ…ÉÐ¡‘½Õµ•¹Ð¤4(€€€€€€€€€€€¥˜…ÑÕ…±}ÍÑ…ÉÐ€„ô¡…ÁÑ•É}ÍÑ…ÉÐè4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰¡…ÁÑ•É}ÍÑ…ÉÐˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè¡…ÁÑ•É}ÍÑ…ÉÐ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆè…ÑÕ…±}ÍÑ…ÉÐ°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰ÍÑÉ¥Á}µ…¹Õ…±}¡•…‘¥¹}ÁÉ•™¥á•Ìˆ¤è4(€€€€€€€™½ÈÁ…É…É…Á ¥¸‘½Õµ•¹Ð¹Á…É…É…Á¡Ìè4(€€€€€€€€€€€¥˜¹½ÐÁ…É…É…Á ¹ÍÑå±”½È¹½ÐÁ…É…É…Á ¹ÍÑå±”¹¹…µ”¹ÍÑ…ÉÑÍÝ¥Ñ  ‰!•…‘¥¹œ€ˆ¤è4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€€€€€ÑÉäè4(€€€€€€€€€€€€€€€±•Ù•°€ô¥¹Ð¡Á…É…É…Á ¹ÍÑå±”¹¹…µ”¹ÍÁ±¥Ð ¥l´Åt¤4(€€€€€€€€€€€•á•ÁÐY…±Õ•ÉÉ½Èè4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€€€€€¥˜±•Ù•°€ðô±•Ù•±Ì…¹}¡•…‘¥¹}ÁÉ•™¥á}Á…ÑÑ•É¸¡±•Ù•°¤¹µ…Ñ ¡Á…É…É…Á ¹Ñ•áÐ¤è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰ÍÑÉ¥Á}µ…¹Õ…±}¡•…‘¥¹}ÁÉ•™¥á•Ìˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€‰¹¼µ…¹Õ…°ÁÉ•™¥àˆ°4(€€€€€€€€€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆèÁ…É…É…Á ¹Ñ•áÑlèàÁt°4(€€€€€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€€¤4(€€€É•ÑÕÉ¸™…¥±ÕÉ•Ì4(4(4)‘•˜…Õ‘¥Ñ}•ÅÕ…Ñ¥½¹}ÉÕ±”¡Á…Ñ èA…Ñ °ÉÕ±”è‘¥Ð¤€´ø±¥ÍÑm‘¥Ñtè4(€€€Ù…±Õ•Ì€ô•ÅÕ…Ñ¥½¹}¥¹Ù•¹Ñ½Éä¡Á…Ñ ¤4(€€€™…¥±ÕÉ•Ì€ômt4(€€€ÁÉ½Á•ÉÑ¥•Ì€ôÉÕ±•l‰ÁÉ½Á•ÉÑ¥•Ì‰t4(€€€¥˜ÁÉ½Á•ÉÑ¥•Ì¹•Ð ‰‰±½­}™½ÉµÕ±…}¥µ…•Ìˆ¤…¹Ù…±Õ•Íl‰™½ÉµÕ±…}¥µ…•}…¹‘¥‘…Ñ•Ì‰tè4(€€€€€€€™…¥±ÕÉ•Ì¹…ÁÁ•¹ 4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€‰ÁÉ½Á•ÉÑäˆè€‰‰±½­}™½ÉµÕ±…}¥µ…•Ìˆ°4(€€€€€€€€€€€€€€€€‰•áÁ•Ñ•ˆè€À°4(€€€€€€€€€€€€€€€€‰…ÑÕ…°ˆèÙ…±Õ•Íl‰™½ÉµÕ±…}¥µ…•}…¹‘¥‘…Ñ•Ì‰t°4(€€€€€€€€€€€ô4(€€€€€€€€¤4(€€€É•ÑÕÉ¸™…¥±ÕÉ•Ì4(4(4)‘•˜ÕÍ•Í}‘•É¥Ù•‘}¹½Éµ…±¥é…Ñ¥½¸¡ÁÉ½™¥±”è‘¥Ð¤€´ø‰½½°è4(€€€É•ÑÕÉ¸…¹ä 4(€€€€€€€ÉÕ±”¹•Ð ‰ÍÑ…ÑÕÌˆ¤€ôô€‰…ÁÁÉ½Ù•ˆ4(€€€€€€€…¹ÉÕ±”¹•Ð ‰…ÁÁ±¥…Ñ¥½¸ˆ¤€ôô€‰…ÕÑ½µ…Ñ¥Œˆ4(€€€€€€€…¹ÉÕ±”¹•Ð ‰Í•±•Ñ½Èˆ°íô¤¹•Ð ‰­¥¹ˆ¤€ôô€‰™¥•±‘}É½±”ˆ4(€€€€€€€…¹…¹ä 4(€€€€€€€€€€€ÉÕ±”¹•Ð ‰ÁÉ½Á•ÉÑ¥•Ìˆ°íô¤¹•Ð¡­•ä¤4(€€€€€€€€€€€™½È­•ä¥¸€ 4(€€€€€€€€€€€€€€€€‰½¹Ù•ÉÑ}•áÁ±¥¥Ñ}µ…É­•ÉÌˆ°4(€€€€€€€€€€€€€€€€‰É•‰Õ¥±‘}¡•…‘¥¹}¹Õµ‰•É¥¹œˆ°4(€€€€€€€€€€€€€€€€‰ÍÑÉ¥Á}µ…¹Õ…±}¡•…‘¥¹}ÁÉ•™¥á•Ìˆ°4(€€€€€€€€€€€€¤4(€€€€€€€€¤4(€€€€€€€™½ÈÉÕ±”¥¸ÁÉ½™¥±”¹•Ð ‰ÉÕ±•Ìˆ°mt¤4(€€€€¤4(4(4)‘•˜µ…¥¸ ¤€´ø¥¹Ðè4(€€€Á…ÉÍ•È€ô…ÉÁ…ÉÍ”¹ÉÕµ•¹ÑA…ÉÍ•È ¤4(€€€Á…ÉÍ•È¹…‘‘}…ÉÕµ•¹Ð ‰½É¥¥¹…°ˆ°ÑåÁ”õA…Ñ ¤4(€€€Á…ÉÍ•È¹…‘‘}…ÉÕµ•¹Ð ‰™½Éµ…ÑÑ•ˆ°ÑåÁ”õA…Ñ ¤4(€€€Á…ÉÍ•È¹…‘‘}…ÉÕµ•¹Ð ˆ´µÁÉ½™¥±”ˆ°É•ÅÕ¥É•õQÉÕ”°ÑåÁ”õA…Ñ ¤4(€€€Á…ÉÍ•È¹…‘‘}…ÉÕµ•¹Ð ˆ´µÍÑÉÕÑÕÉ”µµ…Àˆ°ÑåÁ”õA…Ñ ¤4(€€€Á…ÉÍ•È¹…‘‘}…ÉÕµ•¹Ð ˆ´µ½ÕÑÁÕÐˆ°ÑåÁ”õA…Ñ ¤4(€€€…ÉÌ€ôÁ…ÉÍ•È¹Á…ÉÍ•}…ÉÌ ¤4(4(€€€ÑÉäè4(€€€€€€€ÁÉ½™¥±•}•ÉÉ½ÉÌ°ÁÉ½™¥±”€ôÙ…±¥‘…Ñ”¡…ÉÌ¹ÁÉ½™¥±”¤4(€€€€€€€¥˜ÁÉ½™¥±•}•ÉÉ½ÉÌè4(€€€€€€€€€€€É…¥Í”½Éµ…Ñ5½¹½É…Á¡ÉÉ½È ‰AÉ½™¥±”Ù…±¥‘…Ñ¥½¸™…¥±•è€ˆ€¬€ˆì€ˆ¹©½¥¸¡ÁÉ½™¥±•}•ÉÉ½ÉÌ¤¤4(€€€€€€€¹½Éµ…±¥é”€ôÕÍ•Í}‘•É¥Ù•‘}¹½Éµ…±¥é…Ñ¥½¸¡ÁÉ½™¥±”¤4(€€€€€€€ÍÑÉÕÑÕÉ•}µ…À€ô±½…‘}ÍÑÉÕÑÕÉ•}µ…À¡…ÉÌ¹ÍÑÉÕÑÕÉ•}µ…À¤¥˜…ÉÌ¹ÍÑÉÕÑÕÉ•}µ…À•±Í”9½¹”4(€€€€€€€½É¥¥¹…±}™À€ô€ 4(€€€€€€€€€€€ÍÑÉÕÑÕÉ•}½¹Ñ•¹Ñ}™¥¹•ÉÁÉ¥¹Ð¡…ÉÌ¹½É¥¥¹…°°ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€•±Í”½¹Ñ•¹Ñ}™¥¹•ÉÁÉ¥¹Ð¡…ÉÌ¹½É¥¥¹…°°¹½Éµ…±¥é•}‘•É¥Ù•õ¹½Éµ…±¥é”¤4(€€€€€€€€¤4(€€€€€€€™½Éµ…ÑÑ•‘}™À€ô€ 4(€€€€€€€€€€€ÍÑÉÕÑÕÉ•}½¹Ñ•¹Ñ}™¥¹•ÉÁÉ¥¹Ð¡…ÉÌ¹™½Éµ…ÑÑ•°ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€•±Í”½¹Ñ•¹Ñ}™¥¹•ÉÁÉ¥¹Ð¡…ÉÌ¹™½Éµ…ÑÑ•°¹½Éµ…±¥é•}‘•É¥Ù•õ¹½Éµ…±¥é”¤4(€€€€€€€€¤4(€€€€€€€½É¥¥¹…±}½‰©•ÑÌ€ôÁÉ½Ñ•Ñ•‘}½‰©•Ñ}µ…¹¥™•ÍÐ¡…ÉÌ¹½É¥¥¹…°¤4(€€€€€€€™½Éµ…ÑÑ•‘}½‰©•ÑÌ€ôÁÉ½Ñ•Ñ•‘}½‰©•Ñ}µ…¹¥™•ÍÐ¡…ÉÌ¹™½Éµ…ÑÑ•¤4(€€€€€€€½É¥¥¹…±}Á…å±½…‘Ì€ôÁÉ½Ñ•Ñ•‘}Á…å±½…‘}µ…¹¥™•ÍÐ¡…ÉÌ¹½É¥¥¹…°¤4(€€€€€€€™½Éµ…ÑÑ•‘}Á…å±½…‘Ì€ôÁÉ½Ñ•Ñ•‘}Á…å±½…‘}µ…¹¥™•ÍÐ¡…ÉÌ¹™½Éµ…ÑÑ•¤4(€€€€€€€½‰©•ÑÍ}½¬€ô½É¥¥¹…±}Á…å±½…‘Ì€ôô™½Éµ…ÑÑ•‘}Á…å±½…‘Ì4(€€€€€€€‘½Õµ•¹Ð€ô±½…‘}‘½Õµ•¹Ð¡…ÉÌ¹™½Éµ…ÑÑ•¤4(€€€€€€€ÉÕ±•}É•ÍÕ±ÑÌ€ômt4(4(€€€€€€€™½ÈÉÕ±”¥¸ÁÉ½™¥±•l‰ÉÕ±•Ì‰tè4(€€€€€€€€€€€¥˜ÉÕ±•l‰ÍÑ…ÑÕÌ‰t€„ô€‰…ÁÁÉ½Ù•ˆè4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€€€€€¥˜ÉÕ±•l‰…ÁÁ±¥…Ñ¥½¸‰t€ôô€‰µ…¹Õ…±}É•Ù¥•Üˆè4(€€€€€€€€€€€€€€€ÉÕ±•}É•ÍÕ±ÑÌ¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€€€€€ì‰¥ˆèÉÕ±•l‰¥‰t°€‰ÍÑ…ÑÕÌˆè€‰µ…¹Õ…±}É•Ù¥•Üˆ°€‰™…¥±ÕÉ•Ìˆèmuô4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”4(€€€€€€€€€€€­¥¹€ôÉÕ±•l‰Í•±•Ñ½È‰ul‰­¥¹‰t4(€€€€€€€€€€€¥˜­¥¹¥¸ì‰‘½Õµ•¹Ðˆ°€‰Í•Ñ¥½¹}É½±”‰ôè4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì€ô…Õ‘¥Ñ}Í•Ñ¥½¹}ÉÕ±”¡‘½Õµ•¹Ð°ÉÕ±”°ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€•±¥˜­¥¹€ôô€‰Ñ…‰±•}É½±”ˆè4(€€€€€€€€€€€€€€€Ñ…‰±•}Ñ…É•ÑÌ€ô€ 4(€€€€€€€€€€€€€€€€€€€…ÁÁÉ½Ù•‘}‘…Ñ…}Ñ…‰±•Ì¡‘½Õµ•¹Ð°ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À…¹¡…Í}Í•µ…¹Ñ¥}ÍÑÉÕÑÕÉ•}µ…À¡ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€€€€€€€€€•±Í”9½¹”4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì€ô…Õ‘¥Ñ}Ñ…‰±•}ÉÕ±”¡‘½Õµ•¹Ð°ÉÕ±”°Ñ…‰±•}Ñ…É•ÑÌ¤4(€€€€€€€€€€€•±¥˜­¥¹€ôô€‰™¥•±‘}É½±”ˆè4(€€€€€€€€€€€€€€€¹Õµ‰•É¥¹œ€ôÍÑÉÕÑÕÉ•}µ…À¹•Ð ‰¹Õµ‰•É¥¹œˆ°íô¤¥˜ÍÑÉÕÑÕÉ•}µ…À•±Í”íô4(€€€€€€€€€€€€€€€¡…ÁÑ•É}ÍÑ…ÉÐ€ô€ 4(€€€€€€€€€€€€€€€€€€€¥¹Ð¡¹Õµ‰•É¥¹l‰¡…ÁÑ•É}ÍÑ…ÉÐ‰t¤4(€€€€€€€€€€€€€€€€€€€¥˜¹Õµ‰•É¥¹œ¹•Ð ‰…ÁÁÉ½Ù•ˆ¤4(€€€€€€€€€€€€€€€€€€€•±Í”9½¹”4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì€ô…Õ‘¥Ñ}™¥•±‘}ÉÕ±” 4(€€€€€€€€€€€€€€€€€€€‘½Õµ•¹Ð°ÉÕ±”°¡…ÁÑ•É}ÍÑ…ÉÐ°…ÉÌ¹™½Éµ…ÑÑ•4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€•±¥˜­¥¹€ôô€‰•ÅÕ…Ñ¥½¹}É½±”ˆè4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì€ô…Õ‘¥Ñ}•ÅÕ…Ñ¥½¹}ÉÕ±”¡…ÉÌ¹™½Éµ…ÑÑ•°ÉÕ±”¤4(€€€€€€€€€€€•±¥˜€ 4(€€€€€€€€€€€€€€€ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€€€€€…¹¡…Í}Í•µ…¹Ñ¥}ÍÑÉÕÑÕÉ•}µ…À¡ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€€€€€…¹­¥¹¥¸ì‰Á…É…É…Á¡}É½±”ˆ°€‰…ÁÑ¥½¹}É½±”ˆ°€‰‰¥‰±¥½É…Á¡å}É½±”‰ô4(€€€€€€€€€€€€¤è4(€€€€€€€€€€€€€€€Á…É…É…Á¡Ì€ô…ÁÁÉ½Ù•‘}É½±•}Á…É…É…Á¡Ì 4(€€€€€€€€€€€€€€€€€€€‘½Õµ•¹Ð°ÍÑÉÕÑÕÉ•}µ…À°ÉÕ±•l‰Í•±•Ñ½È‰t4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì€ô…Õ‘¥Ñ}Á…É…É…Á¡}ÉÕ±”¡‘½Õµ•¹Ð°ÉÕ±”°Á…É…É…Á¡Ì¤4(€€€€€€€€€€€•±Í”è4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì€ô…Õ‘¥Ñ}ÍÑå±•}ÉÕ±”¡‘½Õµ•¹Ð°ÉÕ±”¤4(€€€€€€€€€€€ÉÕ±•}É•ÍÕ±ÑÌ¹…ÁÁ•¹ 4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€€‰¥ˆèÉÕ±•l‰¥‰t°4(€€€€€€€€€€€€€€€€€€€€‰ÍÑ…ÑÕÌˆè€‰Á…ÍÌˆ¥˜¹½Ð™…¥±ÕÉ•Ì•±Í”€‰™…¥°ˆ°4(€€€€€€€€€€€€€€€€€€€€‰™…¥±ÕÉ•Ìˆè™…¥±ÕÉ•Ì°4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€¤4(4(€€€€€€€Á…¥¹…Ñ¥½¹}™…¥±ÕÉ•Ì°Á…¥¹…Ñ¥½¸€ô€ 4(€€€€€€€€€€€…Õ‘¥Ñ}Á…¥¹…Ñ¥½¹}Í•Ñ¥½¹Ì 4(€€€€€€€€€€€€€€€…ÉÌ¹™½Éµ…ÑÑ•°4(€€€€€€€€€€€€€€€‘½Õµ•¹Ð°4(€€€€€€€€€€€€€€€ÍÑÉÕÑÕÉ•}µ…À¹•Ð ‰Á…¥¹…Ñ¥½¹}Í•Ñ¥½¹Ìˆ°íô¤°4(€€€€€€€€€€€€€€€É•Í½±Ù•}Á…É…É…Á¡}±½…Ñ½È°4(€€€€€€€€€€€€€€€ÍÑÉÕÑÕÉ•}µ…À°4(€€€€€€€€€€€€¤4(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€•±Í”€¡mt°íô¤4(€€€€€€€€¤4(€€€€€€€½¹Ñ•¹Ñ}½¬€ô½É¥¥¹…±}™À€ôô™½Éµ…ÑÑ•‘}™À(€€€€€€€ÍÑÉÕÑÕÉ•}¡•…‘¥¹}™…¥±ÕÉ•Ì€ô€ (€€€€€€€€€€€…Õ‘¥Ñ}ÍÑÉÕÑÕÉ•}¡•…‘¥¹}½Á•É…Ñ¥½¹Ì¡‘½Õµ•¹Ð°ÍÑÉÕÑÕÉ•}µ…À¤(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À(€€€€€€€€€€€•±Í”mt(€€€€€€€€¤(€€€€€€€ÍÑÉÕÑÕÉ•}Ñ…‰±•}™…¥±ÕÉ•Ì€ô€ (€€€€€€€€€€€…Õ‘¥Ñ}ÍÑÉÕÑÕÉ•}Ñ…‰±•}½Á•É…Ñ¥½¹Ì¡‘½Õµ•¹Ð°ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€•±Í”mt4(€€€€€€€€¤4(€€€€€€€ÍÑÉÕÑÕÉ•}¥µ…•}™…¥±ÕÉ•Ì€ô€ 4(€€€€€€€€€€€…Õ‘¥Ñ}ÍÑÉÕÑÕÉ•}¥µ…•}½Á•É…Ñ¥½¹Ì¡‘½Õµ•¹Ð°ÍÑÉÕÑÕÉ•}µ…À¤4(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€•±Í”mt4(€€€€€€€€¤4(€€€€€€€ÉÕ±•Í}½¬€ô€ 4(€€€€€€€€€€€…±°¡¥Ñ•µl‰ÍÑ…ÑÕÌ‰t€„ô€‰™…¥°ˆ™½È¥Ñ•´¥¸ÉÕ±•}É•ÍÕ±ÑÌ¤(€€€€€€€€€€€…¹¹½ÐÁ…¥¹…Ñ¥½¹}™…¥±ÕÉ•Ì(€€€€€€€€€€€…¹¹½ÐÍÑÉÕÑÕÉ•}¡•…‘¥¹}™…¥±ÕÉ•Ì(€€€€€€€€€€€…¹¹½ÐÍÑÉÕÑÕÉ•}Ñ…‰±•}™…¥±ÕÉ•Ì(€€€€€€€€€€€…¹¹½ÐÍÑÉÕÑÕÉ•}¥µ…•}™…¥±ÕÉ•Ì4(€€€€€€€€¤4(€€€€€€€…ÁÑ¥½¹}É•Á±…•µ•¹ÑÌ€ô€ 4(€€€€€€€€€€€…Õ‘¥Ñ}…ÁÑ¥½¹}¥‘•¹Ñ¥™¥•É}É•Á±…•µ•¹ÑÌ 4(€€€€€€€€€€€€€€€…ÉÌ¹½É¥¥¹…°°…ÉÌ¹™½Éµ…ÑÑ•°ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€€¤4(€€€€€€€€€€€¥˜ÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€•±Í”mt4(€€€€€€€€¤4(€€€€€€€…ÁÑ¥½¹}É•Á±…•µ•¹ÑÍ}½¬€ô…±° 4(€€€€€€€€€€€¥Ñ•µl‰ÍÑ…ÑÕÌ‰t€ôô€‰Á…ÍÌˆ™½È¥Ñ•´¥¸…ÁÑ¥½¹}É•Á±…•µ•¹ÑÌ4(€€€€€€€€¤4(€€€€€€€É•ÍÕ±Ð€ôì4(€€€€€€€€€€€€‰Á…ÍÍ•ˆè½¹Ñ•¹Ñ}½¬…¹½‰©•ÑÍ}½¬…¹ÉÕ±•Í}½¬…¹…ÁÑ¥½¹}É•Á±…•µ•¹ÑÍ}½¬°4(€€€€€€€€€€€€‰½¹Ñ•¹Ñ}¥¹Ñ•É¥Ñäˆèì4(€€€€€€€€€€€€€€€€‰Á…ÍÍ•ˆè½¹Ñ•¹Ñ}½¬°4(€€€€€€€€€€€€€€€€‰½É¥¥¹…±}Í¡„ÈÔØˆè½É¥¥¹…±}™À°4(€€€€€€€€€€€€€€€€‰™½Éµ…ÑÑ•‘}Í¡„ÈÔØˆè™½Éµ…ÑÑ•‘}™À°4(€€€€€€€€€€€€€€€€‰™¥•±‘}É•ÍÕ±ÑÍ}…¹‘}…ÁÁÉ½Ù•‘}‘•É¥Ù•‘}Ù…±Õ•Í}•á±Õ‘•ˆè‰½½° 4(€€€€€€€€€€€€€€€€€€€¹½Éµ…±¥é”½ÈÍÑÉÕÑÕÉ•}µ…À4(€€€€€€€€€€€€€€€€¤°4(€€€€€€€€€€€€€€€€‰¹½Éµ…±¥é…Ñ¥½¹}Í½ÕÉ•Ìˆèl4(€€€€€€€€€€€€€€€€€€€Í½ÕÉ”4(€€€€€€€€€€€€€€€€€€€™½ÈÍ½ÕÉ”°•¹…‰±•¥¸€ 4(€€€€€€€€€€€€€€€€€€€€€€€€ ‰ÁÉ½™¥±•}™¥•±‘}ÉÕ±•Ìˆ°¹½Éµ…±¥é”¤°4(€€€€€€€€€€€€€€€€€€€€€€€€ ‰…ÁÁÉ½Ù•‘}ÍÑÉÕÑÕÉ•}µ…Àˆ°‰½½°¡ÍÑÉÕÑÕÉ•}µ…À¤¤°4(€€€€€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€€€€€¥˜•¹…‰±•4(€€€€€€€€€€€€€€€t°4(€€€€€€€€€€€ô°4(€€€€€€€€€€€€‰ÁÉ½Ñ•Ñ•‘}½‰©•Ñ}¥¹Ñ•É¥Ñäˆèì4(€€€€€€€€€€€€€€€€‰Á…ÍÍ•ˆè½‰©•ÑÍ}½¬°4(€€€€€€€€€€€€€€€€‰½É¥¥¹…°ˆè½É¥¥¹…±}½‰©•ÑÌ°4(€€€€€€€€€€€€€€€€‰™½Éµ…ÑÑ•ˆè™½Éµ…ÑÑ•‘}½‰©•ÑÌ°4(€€€€€€€€€€€€€€€€‰Á…å±½…‘}½µÁ…É¥Í½¸ˆèì4(€€€€€€€€€€€€€€€€€€€€‰Á…Ñ¡}¥¹‘•Á•¹‘•¹ÐˆèQÉÕ”°4(€€€€€€€€€€€€€€€€€€€€‰½É¥¥¹…°ˆè½É¥¥¹…±}Á…å±½…‘Ì°4(€€€€€€€€€€€€€€€€€€€€‰™½Éµ…ÑÑ•ˆè™½Éµ…ÑÑ•‘}Á…å±½…‘Ì°4(€€€€€€€€€€€€€€€ô°4(€€€€€€€€€€€ô°4(€€€€€€€€€€€€‰•ÅÕ…Ñ¥½¹Ìˆè•ÅÕ…Ñ¥½¹}¥¹Ù•¹Ñ½Éä¡…ÉÌ¹™½Éµ…ÑÑ•¤°4(€€€€€€€€€€€€‰…ÁÁÉ½Ù•‘}µ…¹Õ…±}¥‘•¹Ñ¥™¥•É}É•Á±…•µ•¹ÑÌˆè…ÁÑ¥½¹}É•Á±…•µ•¹ÑÌ°4(€€€€€€€€€€€€‰Á…¥¹…Ñ¥½¸ˆèì(€€€€€€€€€€€€€€€€‰Á…ÍÍ•ˆè¹½ÐÁ…¥¹…Ñ¥½¹}™…¥±ÕÉ•Ì°(€€€€€€€€€€€€€€€€‰™…¥±ÕÉ•ÌˆèÁ…¥¹…Ñ¥½¹}™…¥±ÕÉ•Ì°(€€€€€€€€€€€€€€€€‰¥¹Ù•¹Ñ½ÉäˆèÁ…¥¹…Ñ¥½¸°(€€€€€€€€€€€ô°(€€€€€€€€€€€€‰ÍÑÉÕÑÕÉ•}¡•…‘¥¹}½Á•É…Ñ¥½¹Ìˆèì(€€€€€€€€€€€€€€€€‰Á…ÍÍ•ˆè¹½ÐÍÑÉÕÑÕÉ•}¡•…‘¥¹}™…¥±ÕÉ•Ì°(€€€€€€€€€€€€€€€€‰™…¥±ÕÉ•ÌˆèÍÑÉÕÑÕÉ•}¡•…‘¥¹}™…¥±ÕÉ•Ì°(€€€€€€€€€€€ô°(€€€€€€€€€€€€‰ÍÑÉÕÑÕÉ•}Ñ…‰±•}½Á•É…Ñ¥½¹Ìˆèì(€€€€€€€€€€€€€€€€‰Á…ÍÍ•ˆè¹½ÐÍÑÉÕÑÕÉ•}Ñ…‰±•}™…¥±ÕÉ•Ì°4(€€€€€€€€€€€€€€€€‰™…¥±ÕÉ•ÌˆèÍÑÉÕÑÕÉ•}Ñ…‰±•}™…¥±ÕÉ•Ì°4(€€€€€€€€€€€ô°4(€€€€€€€€€€€€‰ÍÑÉÕÑÕÉ•}¥µ…•}½Á•É…Ñ¥½¹Ìˆèì4(€€€€€€€€€€€€€€€€‰Á…ÍÍ•ˆè¹½ÐÍÑÉÕÑÕÉ•}¥µ…•}™…¥±ÕÉ•Ì°4(€€€€€€€€€€€€€€€€‰™…¥±ÕÉ•ÌˆèÍÑÉÕÑÕÉ•}¥µ…•}™…¥±ÕÉ•Ì°4(€€€€€€€€€€€ô°4(€€€€€€€€€€€€‰ÉÕ±•ÌˆèÉÕ±•}É•ÍÕ±ÑÌ°4(€€€€€€€ô4(€€€€€€€¥˜…ÉÌ¹½ÕÑÁÕÐè4(€€€€€€€€€€€ÝÉ¥Ñ•}©Í½¸¡…ÉÌ¹½ÕÑÁÕÐ°É•ÍÕ±Ð¤4(€€€€€€€ÁÉ¥¹Ð¡©Í½¸¹‘ÕµÁÌ¡É•ÍÕ±Ð°•¹ÍÕÉ•}…Í¥¤õ…±Í”°¥¹‘•¹ÐôÈ¤¤4(€€€€€€€É•ÑÕÉ¸€À¥˜É•ÍÕ±Ñl‰Á…ÍÍ•‰t•±Í”€Ä4(€€€•á•ÁÐ€¡½Éµ…Ñ5½¹½É…Á¡ÉÉ½È°=MÉÉ½È°Y…±Õ•ÉÉ½È¤…Ì•áŒè4(€€€€€€€ÁÉ¥¹Ð¡ÍÑÈ¡•áŒ¤°™¥±”õÍåÌ¹ÍÑ‘•ÉÈ¤4(€€€€€€€É•ÑÕÉ¸€Ä4(4(4)¥˜}}¹…µ•}|€ôô€‰}}µ…¥¹}|ˆè4(€€€É…¥Í”MåÍÑ•µá¥Ð¡µ…¥¸ ¤¤4(
+            "margin_inner_ratio": section.left_margin.mm / width,
+            "margin_outer_ratio": section.right_margin.mm / width,
+            "margin_top_ratio": section.top_margin.mm / height,
+            "margin_bottom_ratio": section.bottom_margin.mm / height,
+            "mirror_margins": document_toggle(document, "mirrorMargins"),
+            "page_size_policy": "preserve",
+            "different_first_page_header_footer": bool(section.different_first_page_header_footer),
+            "odd_and_even_pages_header_footer": bool(
+                document.settings.odd_and_even_pages_header_footer
+            ),
+            "orientation": "landscape" if section.page_width > section.page_height else "portrait",
+        }
+        for key, expected in rule["properties"].items():
+            if (
+                key == "different_first_page_header_footer"
+                and index == 0
+                and (structure_map or {}).get("front_matter", {}).get("approved")
+            ):
+                continue
+            actual = values.get(key, "<unsupported>")
+            if not compare_value(key, actual, expected):
+                failures.append(
+                    {
+                        "section": index,
+                        "property": key,
+                        "expected": expected,
+                        "actual": actual,
+                    }
+                )
+    return failures
+
+
+def row_property(row: Any, name: str) -> bool:
+    tr_pr = row._tr.trPr
+    return tr_pr is not None and tr_pr.find(qn(f"w:{name}")) is not None
+
+
+def _border_value(container: Any, name: str) -> tuple[str | None, int | None]:
+    border = None if container is None else container.find(qn(f"w:{name}"))
+    return (
+        None if border is None else border.get(qn("w:val")),
+        None if border is None else int(border.get(qn("w:sz"), "0")),
+    )
+
+
+def _technical_textbook_table_matches(
+    table: Any, entry: dict, properties: dict | None = None
+) -> bool:
+    properties = properties or {}
+    major_size = round(float(properties.get("major_border_pt", 1)) * 8)
+    minor_size = round(float(properties.get("minor_border_pt", 0.5)) * 8)
+    inside_vertical = bool(properties.get("inside_vertical_borders", True))
+    borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+    caption_row = entry.get("caption_row")
+    has_caption = caption_row is not None and 0 <= int(caption_row) < len(table.rows)
+    expected = {
+        "top": (("nil", 0) if has_caption else ("single", major_size)),
+        "bottom": ("single", major_size),
+        "left": ("nil", 0),
+        "right": ("nil", 0),
+        "insideH": ("nil", 0),
+        "insideV": (
+            ("single", minor_size) if inside_vertical else ("nil", 0)
+        ),
+    }
+    if any(_border_value(borders, name) != value for name, value in expected.items()):
+        return False
+    for row in table.rows:
+        seen: set[Any] = set()
+        for cell in row.cells:
+            if cell._tc in seen:
+                continue
+            seen.add(cell._tc)
+            shading = cell._tc.get_or_add_tcPr().find(qn("w:shd"))
+            if shading is not None and shading.get(qn("w:fill")) not in {None, "auto"}:
+                return False
+            cell_borders = cell._tc.get_or_add_tcPr().find(qn("w:tcBorders"))
+            if cell_borders is not None and any(
+                _border_value(cell_borders, name)[0] not in {None, "nil"}
+                for name in ("left", "right", "insideH", "insideV")
+            ):
+                return False
+    for row_index in properties.get("horizontal_rule_rows", []):
+        if not 0 < int(row_index) < len(table.rows):
+            return False
+        for cell in table.rows[int(row_index)].cells:
+            if _border_value(_cell_border_container(cell), "top") != (
+                "single",
+                minor_size,
+            ):
+                return False
+    return True
+
+
+def _cell_border_container(cell: Any) -> Any:
+    return cell._tc.get_or_add_tcPr().find(qn("w:tcBorders"))
+
+
+def _table_visual_value(
+    table: Any, entry: dict, key: str, properties: dict | None = None
+) -> Any:
+    tbl_pr = table._tbl.tblPr
+    if key == "available_width_percent":
+        width = tbl_pr.find(qn("w:tblW"))
+        return (
+            None
+            if width is None or width.get(qn("w:type")) != "pct"
+            else int(width.get(qn("w:w"), "0")) / 50
+        )
+    if key == "allow_autofit":
+        return bool(table.autofit)
+    if key == "cell_margins_mm":
+        container = tbl_pr.find(qn("w:tblCellMar"))
+        if container is None:
+            return None
+        result = {}
+        for name in ("top", "right", "bottom", "left"):
+            element = container.find(qn(f"w:{name}"))
+            value = 0 if element is None else int(element.get(qn("w:w"), "0"))
+            result[name] = round(value / 1440 * 25.4, 3)
+        return result
+    if key == "vertical_alignment":
+        values = {
+            (
+                cell.vertical_alignment.name.lower()
+                if cell.vertical_alignment is not None
+                else "none"
+            )
+            for row in table.rows
+            for cell in row.cells
+        }
+        return values.pop() if len(values) == 1 else sorted(values)
+    if key == "preferred_column_widths_percent":
+        if not table.rows:
+            return []
+        result = []
+        for cell in table.rows[0].cells:
+            width = cell._tc.get_or_add_tcPr().find(qn("w:tcW"))
+            result.append(
+                None
+                if width is None or width.get(qn("w:type")) != "pct"
+                else int(width.get(qn("w:w"), "0")) / 50
+            )
+        return result
+    if key == "border_preset":
+        borders = tbl_pr.find(qn("w:tblBorders"))
+        if borders is None:
+            return "preserve"
+        values = {
+            name: (
+                None
+                if borders.find(qn(f"w:{name}")) is None
+                else borders.find(qn(f"w:{name}")).get(qn("w:val"))
+            )
+            for name in ("top", "left", "bottom", "right", "insideH", "insideV")
+        }
+        if all(value == "single" for value in values.values()):
+            return "full_grid"
+        if values["top"] == values["bottom"] == "single" and all(
+            values[name] == "nil" for name in ("left", "right", "insideH", "insideV")
+        ):
+            return "three_line"
+        if _technical_textbook_table_matches(table, entry, properties):
+            return "technical_textbook"
+        if all(value == "nil" for value in values.values()):
+            return "borderless"
+        return "custom"
+    return "<verified_by_content_and_visual_qa>"
+
+
+def audit_table_rule(
+    document: Any,
+    rule: dict,
+    targets: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> list[dict]:
+    failures = []
+    selected = targets if targets is not None else [(table, {}) for table in document.tables]
+    for index, (table, entry) in enumerate(selected):
+        effective = _table_effective_properties(rule["properties"], entry)
+        for key, expected in effective.items():
+            if key == "table_style":
+                actual = table.style.name if table.style else None
+            elif key == "alignment":
+                actual = normalized_alignment(str(table.alignment))
+            elif key == "repeat_header_row":
+                rows = entry.get("repeat_header_rows", [0])
+                actual = bool(rows) and all(
+                    0 <= int(row_index) < len(table.rows)
+                    and row_property(table.rows[int(row_index)], "tblHeader")
+                    for row_index in rows
+                )
+            elif key == "prevent_row_split":
+                caption_row = entry.get("caption_row")
+                actual = all(
+                    row_property(row, "cantSplit")
+                    for row_index, row in enumerate(table.rows)
+                    if caption_row is None or row_index != int(caption_row)
+                )
+            elif key in {
+                "available_width_percent",
+                "preferred_column_widths_percent",
+                "allow_autofit",
+                "cell_margins_mm",
+                "vertical_alignment",
+                "all_cell_alignment",
+                "text_wrapping",
+                "border_preset",
+            }:
+                if key == "all_cell_alignment":
+                    values = {
+                        normalized_alignment(str(paragraph.alignment))
+                        for row in table.rows
+                        for cell in row.cells
+                        for paragraph in cell.paragraphs
+                        if paragraph.text.strip()
+                    }
+                    actual = values.pop() if len(values) == 1 else sorted(values)
+                elif key == "text_wrapping":
+                    actual = (
+                        "around"
+                        if table._tbl.tblPr.find(qn("w:tblpPr")) is not None
+                        else "none"
+                    )
+                else:
+                    actual = (
+                        "preserve"
+                        if key == "border_preset" and expected == "preserve"
+                        else _table_visual_value(table, entry, key, effective)
+                    )
+            elif key in {
+                "column_roles",
+                "column_alignments",
+                "header_bold",
+                "header_shading_hex",
+                "font_size_pt",
+                "line_spacing_pt",
+                "major_border_pt",
+                "minor_border_pt",
+                "inside_vertical_borders",
+                "horizontal_rule_rows",
+            }:
+                actual = expected
+            elif key in {
+                "font_name_ascii",
+                "font_name_east_asia",
+                "font_name_complex_script",
+            }:
+                actual = [
+                    run_font_value(document, paragraph, run, key)
+                    for row_index, row in enumerate(table.rows)
+                    if entry.get("caption_row") is None
+                    or row_index != int(entry["caption_row"])
+                    for cell in row.cells
+                    for paragraph in cell.paragraphs
+                    for run in paragraph.runs
+                    if run.text
+                ]
+            else:
+                actual = "<unsupported>"
+            if not compare_value(key, actual, expected):
+                failures.append(
+                    {
+                        "table": index,
+                        "property": key,
+                        "expected": expected,
+                        "actual": actual,
+                    }
+                )
+    return failures
+
+
+def heading_numbering_start(document: Any) -> int | None:
+    style = document.styles["Heading 1"]
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    for num in root.findall(qn("w:num")):
+        if num.get(qn("w:numId")) != num_id:
+            continue
+        for override in num.findall(qn("w:lvlOverride")):
+            if override.get(qn("w:ilvl")) == "0":
+                start = override.find(qn("w:startOverride"))
+                if start is not None:
+                    return int(start.get(qn("w:val")))
+        abstract_ref = num.find(qn("w:abstractNumId"))
+        if abstract_ref is None:
+            return None
+        abstract_id = abstract_ref.get(qn("w:val"))
+        for abstract in root.findall(qn("w:abstractNum")):
+            if abstract.get(qn("w:abstractNumId")) != abstract_id:
+                continue
+            for level in abstract.findall(qn("w:lvl")):
+                if level.get(qn("w:ilvl")) == "0":
+                    start = level.find(qn("w:start"))
+                    return None if start is None else int(start.get(qn("w:val")))
+    return None
+
+
+def heading_numbering_level(document: Any, level: int) -> Any | None:
+    style = document.styles[f"Heading {level + 1}"]
+    p_pr = style.element.pPr
+    num_pr = None if p_pr is None else p_pr.find(qn("w:numPr"))
+    num_id_element = None if num_pr is None else num_pr.find(qn("w:numId"))
+    if num_id_element is None:
+        return None
+    num_id = num_id_element.get(qn("w:val"))
+    root = document.part.numbering_part.element
+    num = next(
+        (item for item in root.findall(qn("w:num")) if item.get(qn("w:numId")) == num_id),
+        None,
+    )
+    abstract_ref = None if num is None else num.find(qn("w:abstractNumId"))
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(qn("w:val"))
+    abstract = next(
+        (
+            item
+            for item in root.findall(qn("w:abstractNum"))
+            if item.get(qn("w:abstractNumId")) == abstract_id
+        ),
+        None,
+    )
+    if abstract is None:
+        return None
+    return next(
+        (
+            item
+            for item in abstract.findall(qn("w:lvl"))
+            if item.get(qn("w:ilvl")) == str(level)
+        ),
+        None,
+    )
+
+
+def heading_numbering_format_failures(document: Any, levels: int) -> list[dict]:
+    failures = []
+    for level in range(levels):
+        style = document.styles[f"Heading {level + 1}"]
+        lvl = heading_numbering_level(document, level)
+        if lvl is None:
+            continue
+        ind = lvl.find(qn("w:pPr") + "/" + qn("w:ind"))
+        has_zero_indent = ind is not None and (
+            ind.get(qn("w:firstLineChars")) == "0"
+            or ind.get(qn("w:firstLine")) == "0"
+        )
+        if not has_zero_indent:
+            failures.append(
+                {
+                    "property": "heading_first_line_indent",
+                    "heading_level": level + 1,
+                    "expected": 0,
+                }
+            )
+        r_pr = lvl.find(qn("w:rPr"))
+        r_fonts = None if r_pr is None else r_pr.find(qn("w:rFonts"))
+        expected_fonts = {
+            "ascii": style_effective_font(document, style, "ascii")[0],
+            "hAnsi": style_effective_font(document, style, "ascii")[0],
+            "eastAsia": style_effective_font(document, style, "eastAsia")[0],
+            "cs": style_effective_font(document, style, "cs")[0],
+        }
+        actual_fonts = {
+            attribute: None if r_fonts is None else r_fonts.get(qn(f"w:{attribute}"))
+            for attribute in expected_fonts
+        }
+        if actual_fonts != expected_fonts:
+            failures.append(
+                {
+                    "property": "heading_numbering_fonts",
+                    "heading_level": level + 1,
+                    "expected": expected_fonts,
+                    "actual": actual_fonts,
+                }
+            )
+        expected_size = style_value(document, style, "font_size_pt")
+        size = None if r_pr is None else r_pr.find(qn("w:sz"))
+        actual_size = None if size is None else int(size.get(qn("w:val"))) / 2
+        if not close(actual_size, expected_size):
+            failures.append(
+                {
+                    "property": "heading_numbering_font_size_pt",
+                    "heading_level": level + 1,
+                    "expected": expected_size,
+                    "actual": actual_size,
+                }
+            )
+        expected_bold = style_value(document, style, "bold")
+        bold = None if r_pr is None else r_pr.find(qn("w:b"))
+        actual_bold = None if bold is None else bold.get(qn("w:val"), "1") not in {"0", "false"}
+        if actual_bold != expected_bold:
+            failures.append(
+                {
+                    "property": "heading_numbering_bold",
+                    "heading_level": level + 1,
+                    "expected": expected_bold,
+                    "actual": actual_bold,
+                }
+            )
+    return failures
+
+
+def audit_field_rule(
+    document: Any,
+    rule: dict,
+    chapter_start: int | None = None,
+    path: Path | None = None,
+) -> list[dict]:
+    failures = []
+    properties = rule["properties"]
+    if properties.get("update_on_open") and not document_toggle(document, "updateFields"):
+        refreshed = path is not None and field_cache_inventory(path)["status"] == "refreshed"
+        if not refreshed:
+            failures.append({"property": "update_on_open", "expected": True, "actual": False})
+    if properties.get("convert_explicit_markers"):
+        remaining = [
+            paragraph.text
+            for paragraph in document.paragraphs
+            if _field_instruction_for_marker(paragraph.text.strip()) is not None
+        ]
+        if remaining:
+            failures.append(
+                {
+                    "property": "convert_explicit_markers",
+                    "expected": "no markers",
+                    "actual": remaining[:10],
+                }
+            )
+    levels = int(properties.get("heading_levels", 4))
+    if properties.get("rebuild_heading_numbering"):
+        for level in range(1, levels + 1):
+            style = document.styles[f"Heading {level}"]
+            p_pr = style.element.pPr
+            if p_pr is None or p_pr.find(qn("w:numPr")) is None:
+                failures.append(
+                    {
+                        "property": "rebuild_heading_numbering",
+                        "expected": f"numbering on Heading {level}",
+                        "actual": "missing",
+                    }
+                )
+        failures.extend(heading_numbering_format_failures(document, levels))
+        if chapter_start is not None:
+            actual_start = heading_numbering_start(document)
+            if actual_start != chapter_start:
+                failures.append(
+                    {
+                        "property": "chapter_start",
+                        "expected": chapter_start,
+                        "actual": actual_start,
+                    }
+                )
+    if properties.get("strip_manual_heading_prefixes"):
+        for paragraph in document.paragraphs:
+            if not paragraph.style or not paragraph.style.name.startswith("Heading "):
+                continue
+            try:
+                level = int(paragraph.style.name.split()[-1])
+            except ValueError:
+                continue
+            if level <= levels and _heading_prefix_pattern(level).match(paragraph.text):
+                failures.append(
+                    {
+                        "property": "strip_manual_heading_prefixes",
+                        "expected": "no manual prefix",
+                        "actual": paragraph.text[:80],
+                    }
+                )
+    return failures
+
+
+def audit_equation_rule(path: Path, rule: dict) -> list[dict]:
+    values = equation_inventory(path)
+    failures = []
+    properties = rule["properties"]
+    if properties.get("block_formula_images") and values["formula_image_candidates"]:
+        failures.append(
+            {
+                "property": "block_formula_images",
+                "expected": 0,
+                "actual": values["formula_image_candidates"],
+            }
+        )
+    return failures
+
+
+def uses_derived_normalization(profile: dict) -> bool:
+    return any(
+        rule.get("status") == "approved"
+        and rule.get("application") == "automatic"
+        and rule.get("selector", {}).get("kind") == "field_role"
+        and any(
+            rule.get("properties", {}).get(key)
+            for key in (
+                "convert_explicit_markers",
+                "rebuild_heading_numbering",
+                "strip_manual_heading_prefixes",
+            )
+        )
+        for rule in profile.get("rules", [])
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("original", type=Path)
+    parser.add_argument("formatted", type=Path)
+    parser.add_argument("--profile", required=True, type=Path)
+    parser.add_argument("--structure-map", type=Path)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+
+    try:
+        profile_errors, profile = validate(args.profile)
+        if profile_errors:
+            raise FormatMonographError("Profile validation failed: " + "; ".join(profile_errors))
+        normalize = uses_derived_normalization(profile)
+        structure_map = load_structure_map(args.structure_map) if args.structure_map else None
+        original_fp = (
+            structure_content_fingerprint(args.original, structure_map)
+            if structure_map
+            else content_fingerprint(args.original, normalize_derived=normalize)
+        )
+        formatted_fp = (
+            structure_content_fingerprint(args.formatted, structure_map)
+            if structure_map
+            else content_fingerprint(args.formatted, normalize_derived=normalize)
+        )
+        original_objects = protected_object_manifest(args.original)
+        formatted_objects = protected_object_manifest(args.formatted)
+        original_payloads = protected_payload_manifest(args.original)
+        formatted_payloads = protected_payload_manifest(args.formatted)
+        objects_ok = original_payloads == formatted_payloads
+        document = load_document(args.formatted)
+        rule_results = []
+
+        for rule in profile["rules"]:
+            if rule["status"] != "approved":
+                continue
+            if rule["application"] == "manual_review":
+                rule_results.append(
+                    {"id": rule["id"], "status": "manual_review", "failures": []}
+                )
+                continue
+            kind = rule["selector"]["kind"]
+            if kind in {"document", "section_role"}:
+                failures = audit_section_rule(document, rule, structure_map)
+            elif kind == "table_role":
+                table_targets = (
+                    approved_data_tables(document, structure_map)
+                    if structure_map and has_semantic_structure_map(structure_map)
+                    else None
+                )
+                failures = audit_table_rule(document, rule, table_targets)
+            elif kind == "field_role":
+                numbering = structure_map.get("numbering", {}) if structure_map else {}
+                chapter_start = (
+                    int(numbering["chapter_start"])
+                    if numbering.get("approved")
+                    else None
+                )
+                failures = audit_field_rule(
+                    document, rule, chapter_start, args.formatted
+                )
+            elif kind == "equation_role":
+                failures = audit_equation_rule(args.formatted, rule)
+            elif (
+                structure_map
+                and has_semantic_structure_map(structure_map)
+                and kind in {"paragraph_role", "caption_role", "bibliography_role"}
+            ):
+                paragraphs = approved_role_paragraphs(
+                    document, structure_map, rule["selector"]
+                )
+                failures = audit_paragraph_rule(document, rule, paragraphs)
+            else:
+                failures = audit_style_rule(document, rule)
+            rule_results.append(
+                {
+                    "id": rule["id"],
+                    "status": "pass" if not failures else "fail",
+                    "failures": failures,
+                }
+            )
+
+        pagination_failures, pagination = (
+            audit_pagination_sections(
+                args.formatted,
+                document,
+                structure_map.get("pagination_sections", {}),
+                resolve_paragraph_locator,
+                structure_map,
+            )
+            if structure_map
+            else ([], {})
+        )
+        content_ok = original_fp == formatted_fp
+        structure_heading_failures = (
+            audit_structure_heading_operations(document, structure_map)
+            if structure_map
+            else []
+        )
+        structure_table_failures = (
+            audit_structure_table_operations(document, structure_map)
+            if structure_map
+            else []
+        )
+        structure_image_failures = (
+            audit_structure_image_operations(document, structure_map)
+            if structure_map
+            else []
+        )
+        rules_ok = (
+            all(item["status"] != "fail" for item in rule_results)
+            and not pagination_failures
+            and not structure_heading_failures
+            and not structure_table_failures
+            and not structure_image_failures
+        )
+        caption_replacements = (
+            audit_caption_identifier_replacements(
+                args.original, args.formatted, structure_map
+            )
+            if structure_map
+            else []
+        )
+        caption_replacements_ok = all(
+            item["status"] == "pass" for item in caption_replacements
+        )
+        result = {
+            "passed": content_ok and objects_ok and rules_ok and caption_replacements_ok,
+            "content_integrity": {
+                "passed": content_ok,
+                "original_sha256": original_fp,
+                "formatted_sha256": formatted_fp,
+                "field_results_and_approved_derived_values_excluded": bool(
+                    normalize or structure_map
+                ),
+                "normalization_sources": [
+                    source
+                    for source, enabled in (
+                        ("profile_field_rules", normalize),
+                        ("approved_structure_map", bool(structure_map)),
+                    )
+                    if enabled
+                ],
+            },
+            "protected_object_integrity": {
+                "passed": objects_ok,
+                "original": original_objects,
+                "formatted": formatted_objects,
+                "payload_comparison": {
+                    "path_independent": True,
+                    "original": original_payloads,
+                    "formatted": formatted_payloads,
+                },
+            },
+            "equations": equation_inventory(args.formatted),
+            "approved_manual_identifier_replacements": caption_replacements,
+            "pagination": {
+                "passed": not pagination_failures,
+                "failures": pagination_failures,
+                "inventory": pagination,
+            },
+            "structure_heading_operations": {
+                "passed": not structure_heading_failures,
+                "failures": structure_heading_failures,
+            },
+            "structure_table_operations": {
+                "passed": not structure_table_failures,
+                "failures": structure_table_failures,
+            },
+            "structure_image_operations": {
+                "passed": not structure_image_failures,
+                "failures": structure_image_failures,
+            },
+            "rules": rule_results,
+        }
+        if args.output:
+            write_json(args.output, result)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["passed"] else 1
+    except (FormatMonographError, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
