@@ -45,6 +45,13 @@ affected cache. Never copy a `run-state.json` between manuscripts.
 - Never approve a table header only because it is the first row.
 - Never move an image or table. A floating table remains frozen when changing it
   to inline/no-wrap would alter its anchor or position.
+- Approve fixed-line image visibility separately from resizing. Repair only an
+  image-only inline paragraph or a proven simple exact-height row; freeze mixed
+  text, floating objects, text boxes, merged rows, and uncertain layout tables.
+- Build the TOC source list only from approved semantic headings and confirmed
+  appendices. Use one source mode for the entire TOC. If style-based selection
+  can admit an image or unapproved outline paragraph, switch to pure-text TC
+  fields rather than moving the object.
 - Representative trial selections cover front matter, heading levels,
   appendices, and one or two examples per figure/table class. One candidate is
   limited to 30 rendered pages and is not whole-book pagination evidence.
@@ -54,6 +61,10 @@ affected cache. Never copy a `run-state.json` between manuscripts.
 - Target-application updates occur in a disposable copy. Parse and uniquely
   match each approved field, then patch only its result into the core-generated
   baseline. Never replace an entire backend XML part.
+- Before TOC writeback, verify text-only payload, exact source count and order,
+  level, title hash, internal target, and page value. Reject the complete TOC on
+  any DrawingML, VML, OLE, text box, table, external relationship, empty item,
+  duplicate/extra item, or source mismatch.
 - Establish sections, visible page-number rules, headers, footers, and field
   instructions before calling Word. Require the adapter to report zero
   structural changes.

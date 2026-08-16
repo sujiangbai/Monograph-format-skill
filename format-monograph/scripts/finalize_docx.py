@@ -44,6 +44,7 @@ from structure_map import (
     approved_data_tables,
     approved_role_paragraphs,
     has_semantic_structure_map,
+    toc_result_contract,
 )
 from structure_map import (
     load_structure_map,
@@ -973,6 +974,9 @@ def main() -> int:
                 "Formatted input failed the stable pre-finalization content audit."
             )
         baseline_objects = protected_payload_manifest(baseline)
+        approved_toc_contract = toc_result_contract(
+            load_document(args.input), structure_map
+        )
         input_font_failures = effective_font_failures(
             args.input, profile, structure_map
         )
@@ -1073,6 +1077,9 @@ def main() -> int:
                         )
                         refresh_input = offset_input
                         allowed_field_types.add("=")
+                    writeback_field_types = set(allowed_field_types)
+                    if approved_toc_contract is not None:
+                        writeback_field_types.add("TC")
                     refreshed = refresh_root / "refreshed.docx"
                     backend = external_refresh(
                         refresh_input,
@@ -1088,7 +1095,8 @@ def main() -> int:
                         refresh_input,
                         refreshed,
                         args.output,
-                        allowed_field_types=allowed_field_types,
+                        allowed_field_types=writeback_field_types,
+                        toc_contract=approved_toc_contract,
                     )
                     backend["layout_measurements"] = measurements
                     backend["removed_page_boundary_spacers"] = spacers_removed
@@ -1153,7 +1161,12 @@ def main() -> int:
                                 args.input,
                                 refreshed,
                                 args.output,
-                                allowed_field_types=DEFAULT_ALLOWED_FIELD_TYPES,
+                                allowed_field_types=(
+                                    set(DEFAULT_ALLOWED_FIELD_TYPES) | {"TC"}
+                                    if approved_toc_contract is not None
+                                    else DEFAULT_ALLOWED_FIELD_TYPES
+                                ),
+                                toc_contract=approved_toc_contract,
                             )
                         )
                         delivery_status = "selective_verified"

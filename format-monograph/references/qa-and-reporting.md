@@ -34,15 +34,19 @@
 7. 目录/正文页码分区、每个重启点、奇偶 PAGE 页脚、首页显示状态和孤立页眉页脚清理数量。
 8. 每个获批数据表的列角色、宽度、边距、边框、跨页、横向分节及未决视觉 QA。
 9. 每个获批图片的放置类别、原/新显示尺寸、缩放比例、有效 DPI、媒体哈希，以及锚点、容器和对象顺序保护结果；未获批图片及原因。
-10. 冲突、QA 决定、字段刷新后端、目标软件版本、兼容性和其他限制。
-11. 渲染页数、PDF 来源、逐页检查状态和发现的问题。
-12. 最终结论：通过、带限制通过或失败。
+10. 图片可见性统计：嵌入/浮动/表内分类、固定行距或固定行高候选、获批修复、保持原状和阻塞 QA 数，以及显示尺寸未变证明。
+11. 目录来源模式、批准源数量、纯文本 `TC` 来源数量、结果条目数量，以及 `verified_text_only`、`deferred` 或 `rejected` 状态；不得记录标题正文。
+12. 冲突、QA 决定、字段刷新后端、目标软件版本、兼容性和其他限制。
+13. 渲染页数、PDF 来源、逐页检查状态和发现的问题。
+14. 最终结论：通过、带限制通过或失败。
 
 逐表视觉 QA 必须检查短标签、编号、数值与单位是否出现可避免的孤立换行。不得让正文首行缩进泄漏到表格单元格；若短内容因列宽、单元格边距、段落缩进或错误对齐被拆行，应先恢复原有合理对齐并消除非语义缩进，再考虑调整列宽。不得通过改写文字掩盖排版问题。
 
 逐页检查还必须确认书名页无页码、书名与目录分属不同页面、书名符合批准的字体/字号/字重、至少 33 pt 行距、不截字，并在页面内水平和垂直居中；目录题名为批准文字且居中加粗。逐级比较多级列表编号与对应 Heading 样式的中西文字体、字号和字重，并确认 Heading 1-4 首行缩进为 0。检查每个图表后的批准空段落：同页后续内容前必须恰有一个，跨页时新页顶部不得保留。逐表报告底纹、主线/次线磅值、左右外边框、数据行横线，以及多行表头的局部分隔线是否避开纵向合并单元格。
 
 逐图检查必须将原稿与格式稿按锚点逐一对应，确认图片仍在同一段落或单元格、承载表格仍在相同正文对象位置、前后相邻正文顺序未改变、媒体内容与裁剪状态未变化、宽高比未失真且没有溢出或遮挡。同一图版行还要检查显示高度一致。不得把自然分页变化误报为对象移动；对象锚点、容器或顺序无法证明保持时，审计必须失败。
+
+逐图还要检查图片段落是否因固定行距或表格固定行高而裁切。获批修复只能把独立嵌入图片段落改为自动单倍行距，或把证据明确的简单表格行从 `exact` 放宽为 `atLeast`；尺寸、裁剪、锚点、环绕、容器和顺序必须全部不变。逐目录检查不得仅凭“看起来正常”：字段结果必须与批准源逐项匹配，并确认目录区域不含图片、VML、OLE、文本框、表格、外部关系、空项或额外项。
 
 ## V0.2.6 确定性字体与分页证据
 
@@ -69,6 +73,12 @@
 Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; approved, matched, updated, and rejected field counts; discarded backend-difference categories; each read-only layout measurement; core section-start, page-display-offset, and page-top-spacer adjustments; calculation and no-save verification page counts; target PDF; and content/protected-object audit outcomes. Do not include manuscript or field-result text in the status file.
 
 Finalization evidence must also record effective-font integrity before and after refresh. A target-software save is rejected when it reintroduces a conflicting theme font or changes an approved effective font.
+
+When `toc_source` is approved, finalization evidence must record only the source
+mode, source count, approved TC source-field count, result count, and
+`toc_result_status`; do not record heading or TOC text. `verified_text_only`
+requires one matching result per approved source in order and no non-text
+payload. Any mismatch rejects the disposable backend result before writeback.
 
 `deferred` is a limitation, not a refresh success. State who approved it and require the target application to update fields before final visual QA. If the renderer and target software differ, report both and set target layout to unverified until that application is checked.
 

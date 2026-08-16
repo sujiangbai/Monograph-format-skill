@@ -142,6 +142,7 @@ def report_markdown(
     missing_fonts: list[str],
     font_resolutions: list[dict],
     missing_fonts_approved: bool,
+    structure_map: dict | None,
 ) -> str:
     integrity = "PASS" if original_fp == formatted_fp and protected_objects_ok else "FAIL"
     lines = [
@@ -211,6 +212,40 @@ def report_markdown(
             lines.append(f"- `{change['kind']}`：{json.dumps(change, ensure_ascii=False)}")
     else:
         lines.append("- 无。")
+
+    if structure_map:
+        images = structure_map.get("images", [])
+        visibility = [item.get("visibility", {}) for item in images]
+        source = structure_map.get("toc_source", {})
+        maximum = int(source.get("levels", 4))
+        source_count = sum(
+            item.get("approved") and 1 <= int(item.get("level", 0)) <= maximum
+            for item in structure_map.get("headings", [])
+        ) + sum(
+            item.get("approved") and item.get("include_in_toc") is True
+            for item in structure_map.get("appendices", [])
+        )
+        selected_mode = next(
+            (
+                item.get("details", {}).get("mode")
+                for item in derived_changes
+                if item.get("kind") == "structure_toc_source"
+            ),
+            None,
+        )
+        lines.extend(
+            [
+                "",
+                "## V0.3.3 图片与目录完整性",
+                "",
+                f"- 图片对象：{len(images)}；嵌入型：{sum(item.get('object_type') == 'inline' for item in images)}；浮动/未知：{sum(item.get('object_type') != 'inline' for item in images)}；表内：{sum(str(item.get('placement', '')).startswith('table_') for item in images)}。",
+                f"- 固定行距裁切候选：{sum(item.get('fixed_line_clipping_candidate') for item in visibility)}；固定行高裁切候选：{sum(bool(item.get('table_row', {}) and item['table_row'].get('fixed_height_clipping_candidate')) for item in visibility)}。",
+                f"- 已批准可见性修复：{sum(item.get('approved') for item in visibility)}；阻塞 QA：{sum(bool(item.get('blocked_reason')) for item in visibility)}。",
+                f"- 目录来源：{selected_mode or source.get('mode', 'not_approved')}；批准源数量：{source_count if source.get('approved') else 0}；污染候选：{len(source.get('contaminants', []))}。",
+                "- 目录结果状态：等待字段终稿化执行纯文本逐项校验。",
+                "- 本报告不记录标题正文、目录结果文字或图片内容。",
+            ]
+        )
 
     lines.extend(["", "## 人工复核", ""])
     if manual:
@@ -474,6 +509,7 @@ def main() -> int:
                 missing_fonts,
                 font_resolutions,
                 bool(missing_fonts and args.allow_missing_fonts),
+                structure_map,
             ),
             encoding="utf-8",
         )
