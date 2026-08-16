@@ -13,7 +13,8 @@
 | 0.3.0 | 历史 | [v0.3.0-whole-book-reliability-and-portability.md](v0.3.0-whole-book-reliability-and-portability.md) | 整书断点续跑、结构可靠性、限定试排、字段安全回写及跨 Agent 运行清单 |
 | 0.3.1 | 历史 | [v0.3.1-title-heading-normalization.md](v0.3.1-title-heading-normalization.md) | 书名文字块精确居中、标题零缩进、编号覆盖清理及跨 Agent 审计门禁 |
 | 0.3.2 | 历史 | [v0.3.2-selective-field-result-writeback.md](v0.3.2-selective-field-result-writeback.md) | Word 字段结果选择性回写、目录验证、分页一致性及目标软件只读复验 |
-| 0.3.3 | 当前 | [v0.3.3-toc-and-image-integrity.md](v0.3.3-toc-and-image-integrity.md) | 目录纯文本来源、非文字对象拒绝、嵌入图片行距与表内图片可见性 |
+| 0.3.3 | 历史 | [v0.3.3-toc-and-image-integrity.md](v0.3.3-toc-and-image-integrity.md) | 目录纯文本来源、非文字对象拒绝、嵌入图片行距与表内图片可见性 |
+| 0.4.0 | 当前 | [v0.4.0-profile-system-and-long-document-reliability.md](v0.4.0-profile-system-and-long-document-reliability.md) | Profile 分层与扁平化、冻结格式规格、旧规则迁移及长文可靠性总体门禁 |
 
 ## 版本规则
 
