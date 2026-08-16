@@ -38,12 +38,13 @@
 Treat field finalization as an independent capability. `field_finalization=true` means an executable external or LibreOffice/UNO candidate exists; it does not guarantee that the candidate preserves fields or layout for a particular DOCX. `word_automation=true` still requires caller authorization and a successful live run.
 
 - `refreshed`: field instructions remain editable, cached results are present, and final content/object audits pass.
-- `refreshed_target_word`: Microsoft Word repaginated the derivative, updated only approved fields, saved and reopened it, and the core audits passed.
+- `selective_verified`: the core imported only uniquely matched approved field results into its baseline, and target Word reopened the selective output without saving, reproduced the page count, and exported the verification PDF.
+- `refreshed_target_word`: legacy status from earlier implementations; do not use it for a new `final_ready` claim without the V0.3.2 selective and no-save verification evidence.
 - `deferred`: fields are marked dirty and Word-compatible update-on-open is enabled. This state requires explicit caller QA and is not a completed refresh.
 - `code_only` or `stale`: do not deliver as finalized.
 - `absent`: acceptable only when the approved document contains no fields that require refresh.
 
-If a field updater removes field instructions, changes authored content, or changes protected payloads, reject its output. In `auto` mode, an explicitly approved deferred fallback may be used; otherwise stop.
+If a field updater removes field instructions, changes authored content, approved bookmarks, pagination structure, or protected payloads, reject its field results. Discard all backend non-field serialization even after a successful refresh. In `auto` mode, an explicitly approved deferred fallback may be used; otherwise stop.
 
 Before accepting a finalized copy, resolve approved fonts through direct formatting, styles, base styles, document defaults, and the theme font scheme. Reject a backend result that reintroduces a theme-font mismatch even when its field-cache checks pass.
 

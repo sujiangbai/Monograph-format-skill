@@ -233,8 +233,6 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
                 )[0]
                 result.text = "2"
                 return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
-            if name.startswith("word/media/"):
-                return b"target-application-mutated-media"
             return data
 
         rewrite_package(baseline, refreshed, approved_transform)
@@ -259,6 +257,17 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
         with self.assertRaises(Exception):
             controlled_field_result_writeback(baseline, refreshed, rejected)
         self.assertFalse(rejected.exists())
+
+        def protected_transform(name: str, data: bytes) -> bytes:
+            if name.startswith("word/media/"):
+                return b"target-application-mutated-media"
+            return approved_transform(name, data)
+
+        rewrite_package(baseline, refreshed, protected_transform)
+        with self.assertRaises(Exception):
+            controlled_field_result_writeback(
+                baseline, refreshed, self.root / "protected-rejected.docx"
+            )
 
     def test_controlled_writeback_accepts_multi_paragraph_toc_cache(self) -> None:
         baseline = self.root / "toc-baseline.docx"

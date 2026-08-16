@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from lxml import etree
+from docx.enum.section import WD_HEADER_FOOTER
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.parts.hdrftr import FooterPart
 
 from _common import (
     NS,
@@ -46,6 +51,11 @@ from structure_map import (
     validate_structure_map_source,
 )
 from validate_profile import validate
+from field_writeback import (
+    DEFAULT_ALLOWED_FIELD_TYPES,
+    selective_field_result_writeback,
+)
+from docx_pagination import _page_only_footer, _replace_with_page_field
 
 
 def file_sha256(path: Path) -> str:
@@ -56,168 +66,17 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-FIELD_RESULT_PART = re.compile(
-    r"^word/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$"
-)
-
-
-def _normalize_complex_toc_results(root: etree._Element) -> None:
-    """Replace each complete TOC field span with one comparison-only marker."""
-    stack: list[dict[str, Any]] = []
-    toc_fields: list[dict[str, Any]] = []
-    for element in root.iter():
-        if element.tag == qn("w:fldChar"):
-            kind = element.get(qn("w:fldCharType"))
-            if kind == "begin":
-                stack.append({"begin": element, "parts": [], "separate": None})
-            elif kind == "separate" and stack:
-                stack[-1]["separate"] = element
-            elif kind == "end" and stack:
-                field = stack.pop()
-                instruction = " ".join("".join(field["parts"]).split()).upper()
-                if instruction.startswith("TOC ") and field["separate"] is not None:
-                    field.update({"end": element, "instruction": instruction})
-                    toc_fields.append(field)
-        elif element.tag == qn("w:instrText") and stack:
-            if stack[-1]["separate"] is None:
-                stack[-1]["parts"].append(element.text or "")
-
-    bodies = root.xpath("/w:document/w:body", namespaces=NS)
-    if not bodies:
-        return
-    body = bodies[0]
-
-    def body_child(element: etree._Element) -> etree._Element | None:
-        current = element
-        while current.getparent() is not None and current.getparent() is not body:
-            current = current.getparent()
-        return current if current.getparent() is body else None
-
-    spans: list[tuple[int, int, str, dict[str, Any]]] = []
-    for field in toc_fields:
-        start_block = body_child(field["begin"])
-        end_block = body_child(field["end"])
-        if start_block is None or end_block is None:
-            raise FormatMonographError(
-                "TOC field results outside the main document body are unsupported."
-            )
-        start = body.index(start_block)
-        end = body.index(end_block)
-        if start > end:
-            raise FormatMonographError("TOC field boundaries are out of order.")
-
-        inside = False
-        outside_payload = False
-        for block in list(body)[start : end + 1]:
-            for element in block.iter():
-                if element is field["begin"]:
-                    inside = True
-                    continue
-                if element is field["end"]:
-                    inside = False
-                    continue
-                if not inside and element.tag in {
-                    qn("w:t"),
-                    qn("w:delText"),
-                    qn("w:drawing"),
-                    qn("w:object"),
-                    qn("w:pict"),
-                }:
-                    if element.tag not in {qn("w:t"), qn("w:delText")} or (
-                        element.text or ""
-                    ):
-                        outside_payload = True
-                        break
-            if outside_payload:
-                break
-        if outside_payload:
-            raise FormatMonographError(
-                "A TOC field shares its boundary block with authored content."
-            )
-        spans.append((start, end, field["instruction"], field))
-
-    for start, end, instruction, _ in sorted(
-        spans, key=lambda item: item[0], reverse=True
-    ):
-        for index in range(end, start - 1, -1):
-            body.remove(body[index])
-        marker = etree.Element("{urn:format-monograph:audit}field-result")
-        marker.set("instruction", instruction)
-        body.insert(start, marker)
-
-
-def _neutralized_field_result_sha256(data: bytes) -> str:
-    """Hash OOXML while ignoring only cached field-result text."""
-    root = etree.fromstring(data)
-    _normalize_complex_toc_results(root)
-    for field in root.xpath(".//w:fldSimple", namespaces=NS):
-        for element in field.xpath(".//w:t | .//w:delText", namespaces=NS):
-            element.text = ""
-
-    stack: list[bool] = []
-    for element in root.iter():
-        if element.tag == qn("w:fldChar"):
-            kind = element.get(qn("w:fldCharType"))
-            if kind == "begin":
-                stack.append(False)
-            elif kind == "separate" and stack:
-                stack[-1] = True
-            elif kind == "end" and stack:
-                stack.pop()
-                continue
-        if any(stack) and element.tag in {
-            qn("w:t"),
-            qn("w:delText"),
-        }:
-            element.text = ""
-    canonical = etree.tostring(root, method="c14n", exclusive=True)
-    return hashlib.sha256(canonical).hexdigest()
-
-
 def controlled_field_result_writeback(
     baseline_path: Path, refreshed_path: Path, output_path: Path
 ) -> list[str]:
-    """Copy verified field caches into the safe package, never refreshed payloads."""
-    replaced: list[str] = []
-    temp_output = output_path.with_name(
-        f".{output_path.stem}.field-writeback.tmp.docx"
+    """Compatibility wrapper around V0.3.2 selective field-result writeback."""
+    report = selective_field_result_writeback(
+        baseline_path,
+        refreshed_path,
+        output_path,
+        allowed_field_types=DEFAULT_ALLOWED_FIELD_TYPES,
     )
-    temp_output.unlink(missing_ok=True)
-    try:
-        with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(
-            refreshed_path
-        ) as refreshed, zipfile.ZipFile(
-            temp_output, "w", compression=zipfile.ZIP_DEFLATED
-        ) as output:
-            refreshed_names = set(refreshed.namelist())
-            for info in baseline.infolist():
-                data = baseline.read(info.filename)
-                if (
-                    FIELD_RESULT_PART.match(info.filename)
-                    and info.filename in refreshed_names
-                ):
-                    candidate = refreshed.read(info.filename)
-                    if candidate != data:
-                        if _neutralized_field_result_sha256(
-                            data
-                        ) != _neutralized_field_result_sha256(candidate):
-                            raise FormatMonographError(
-                                "Target application changed OOXML outside approved field results: "
-                                + info.filename
-                            )
-                        data = candidate
-                        replaced.append(info.filename)
-                output.writestr(info, data)
-        if protected_payload_manifest(temp_output) != protected_payload_manifest(
-            baseline_path
-        ):
-            raise FormatMonographError(
-                "Controlled field writeback changed a protected payload."
-            )
-        temp_output.replace(output_path)
-    finally:
-        temp_output.unlink(missing_ok=True)
-    return replaced
+    return list(report["patched_parts"])
 
 
 def rewrite_field_flags(path: Path, *, deferred: bool) -> None:
@@ -551,17 +410,21 @@ def external_refresh(
     structure_map_path: Path,
     pdf_output: Path | None,
     target_software: str,
+    *,
+    allowed_field_types: set[str] | frozenset[str] = DEFAULT_ALLOWED_FIELD_TYPES,
 ) -> dict:
     request = {
-        "protocol_version": "1.0",
+        "protocol_version": "1.1",
+        "operation": "refresh_fields",
         "input_path": str(input_path.resolve()),
         "output_path": str(output_path.resolve()),
         "profile_path": str(profile_path.resolve()),
         "structure_map_path": str(structure_map_path.resolve()),
-        "allowed_field_types": ["TOC", "PAGE", "REF", "PAGEREF"],
+        "allowed_field_types": sorted(allowed_field_types),
         "target_software": target_software,
         "pdf_output_path": str(pdf_output.resolve()) if pdf_output else None,
     }
+    input_hash = file_sha256(input_path)
     completed = subprocess.run(
         _external_command(command),
         input=json.dumps(request, ensure_ascii=False),
@@ -570,6 +433,8 @@ def external_refresh(
         timeout=600,
         check=False,
     )
+    if file_sha256(input_path) != input_hash:
+        raise FormatMonographError("External field updater changed its input DOCX.")
     if completed.returncode != 0:
         raise FormatMonographError(
             "External field updater failed. "
@@ -594,6 +459,10 @@ def external_refresh(
         raise FormatMonographError(
             "External field updater did not confirm repagination, save, and cache verification."
         )
+    if response.get("structural_changes_applied") != 0:
+        raise FormatMonographError(
+            "External field updater changed pagination or document structure."
+        )
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise FormatMonographError("External field updater did not create the output DOCX.")
     updated_types = set(response.get("updated_field_types", []))
@@ -602,6 +471,438 @@ def external_refresh(
         raise FormatMonographError(
             "External field updater reported a non-approved field type."
         )
+    response.setdefault("backend", "external")
+    response["command"] = _external_command(command)[0]
+    return response
+
+
+def external_measure(
+    input_path: Path,
+    command: str,
+    profile_path: Path,
+    structure_map_path: Path,
+    target_software: str,
+) -> dict:
+    request = {
+        "protocol_version": "1.1",
+        "operation": "measure_layout",
+        "input_path": str(input_path.resolve()),
+        "profile_path": str(profile_path.resolve()),
+        "structure_map_path": str(structure_map_path.resolve()),
+        "allowed_field_types": sorted(DEFAULT_ALLOWED_FIELD_TYPES),
+        "target_software": target_software,
+        "block_spacer_style_name": "Monograph Figure Table Spacer",
+    }
+    input_hash = file_sha256(input_path)
+    completed = subprocess.run(
+        _external_command(command),
+        input=json.dumps(request, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if file_sha256(input_path) != input_hash:
+        raise FormatMonographError("External layout measurer changed its input DOCX.")
+    if completed.returncode != 0:
+        raise FormatMonographError(
+            "External layout measurement failed. "
+            f"stdout={completed.stdout.strip()} stderr={completed.stderr.strip()}"
+        )
+    try:
+        response = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise FormatMonographError(
+            "External layout measurer did not return one JSON response."
+        ) from exc
+    required = {
+        "status": "success",
+        "operation": "measure_layout",
+        "repaginated": True,
+        "saved": False,
+        "read_only_verified": True,
+        "structural_changes_applied": 0,
+    }
+    if not isinstance(response, dict) or any(
+        response.get(name) != value for name, value in required.items()
+    ):
+        raise FormatMonographError(
+            "External layout measurer did not satisfy the read-only contract."
+        )
+    ordinals = response.get("page_boundary_spacer_ordinals", [])
+    if not isinstance(ordinals, list) or any(
+        not isinstance(value, int) or value < 0 for value in ordinals
+    ):
+        raise FormatMonographError(
+            "External layout measurer returned invalid spacer ordinals."
+        )
+    sections = response.get("sections", [])
+    if not isinstance(sections, list) or any(
+        not isinstance(item, dict) for item in sections
+    ):
+        raise FormatMonographError(
+            "External layout measurer returned invalid section metrics."
+        )
+    page_count = response.get("page_count")
+    if not isinstance(page_count, int) or isinstance(page_count, bool) or page_count < 1:
+        raise FormatMonographError(
+            "External layout measurer returned an invalid page count."
+        )
+    response.setdefault("backend", "external")
+    response["command"] = _external_command(command)[0]
+    return response
+
+
+def approved_front_matter_section_indexes(
+    input_path: Path,
+    structure_map: dict[str, Any],
+) -> set[int]:
+    front_matter = structure_map.get("front_matter", {})
+    pagination = structure_map.get("pagination_sections", {})
+    if not front_matter.get("approved") or not pagination.get("approved"):
+        return set()
+    with zipfile.ZipFile(input_path) as package:
+        root = etree.fromstring(package.read("word/document.xml"))
+    sections = root.xpath(".//w:sectPr", namespaces=NS)
+    restart_indexes = [
+        index
+        for index, section in enumerate(sections)
+        if section.find(qn("w:pgNumType")) is not None
+        and section.find(qn("w:pgNumType")).get(qn("w:start")) is not None
+    ]
+    if len(restart_indexes) != 2 or restart_indexes[1] != restart_indexes[0] + 1:
+        raise FormatMonographError(
+            "Approved title/TOC/body pagination requires exactly two adjacent restarts."
+        )
+    return set(restart_indexes)
+
+
+def approved_front_matter_section_types(
+    section_indexes: set[int],
+    measurement: dict[str, Any],
+    input_path: Path,
+) -> dict[int, str]:
+    if not section_indexes:
+        return {}
+    document = load_document(input_path)
+    metrics = {
+        int(item["section_index"]): item
+        for item in measurement.get("sections", [])
+        if isinstance(item, dict) and "section_index" in item
+    }
+    result = {}
+    for index in sorted(section_indexes):
+        previous = metrics.get(index - 1)
+        if previous is None or previous.get("last_content_page") is None:
+            raise FormatMonographError(
+                "Target layout measurement omitted a front-matter section boundary."
+            )
+        desired_page = int(previous["last_content_page"]) + 1
+        target = "evenPage" if desired_page % 2 == 0 else "oddPage"
+        section_type = document.sections[index]._sectPr.find(qn("w:type"))
+        current = (
+            "nextPage"
+            if section_type is None
+            else section_type.get(qn("w:val"), "nextPage")
+        )
+        if current != target:
+            result[index] = target
+    return result
+
+
+def apply_measured_layout_adjustments(
+    input_path: Path,
+    output_path: Path,
+    ordinals: list[int],
+    section_types: dict[int, str] | None = None,
+) -> int:
+    section_types = section_types or {}
+    if any(value not in {"evenPage", "oddPage"} for value in section_types.values()):
+        raise FormatMonographError("Measured section type is not an approved parity start.")
+    selected = set(ordinals)
+    if len(selected) != len(ordinals):
+        raise FormatMonographError("Measured spacer ordinals must be unique.")
+    with zipfile.ZipFile(input_path) as package:
+        document_data = package.read("word/document.xml")
+        root = etree.fromstring(document_data)
+        sections = root.xpath(".//w:sectPr", namespaces=NS)
+        for index, value in section_types.items():
+            if not 0 <= index < len(sections):
+                raise FormatMonographError(
+                    "Measured section index is outside the DOCX section set."
+                )
+            section_type = sections[index].find(qn("w:type"))
+            if section_type is None:
+                section_type = etree.Element(qn("w:type"))
+                sections[index].insert(0, section_type)
+            section_type.set(qn("w:val"), value)
+        spacers = root.xpath(
+            ".//w:p[w:pPr/w:pStyle[@w:val='MonographFigureTableSpacer']]",
+            namespaces=NS,
+        )
+        if selected and max(selected) >= len(spacers):
+            raise FormatMonographError(
+                "Measured spacer ordinal is outside the approved spacer set."
+            )
+        for ordinal in sorted(selected, reverse=True):
+            spacer = spacers[ordinal]
+            if spacer.xpath(
+                ".//w:t[normalize-space(.) != ''] | .//w:drawing | .//w:object | "
+                ".//w:pict | .//w:fldChar | .//w:instrText | .//w:sectPr",
+                namespaces=NS,
+            ):
+                raise FormatMonographError(
+                    "Measured page-boundary spacer contains authored or structural payload."
+                )
+            parent = spacer.getparent()
+            if parent is None:
+                raise FormatMonographError("Measured spacer has no document parent.")
+            parent.remove(spacer)
+        patched = etree.tostring(
+            root,
+            xml_declaration=True,
+            encoding="UTF-8",
+            standalone=True,
+        )
+        temp = output_path.with_name(f".{output_path.name}.spacers.tmp")
+        temp.unlink(missing_ok=True)
+        try:
+            with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as target:
+                for info in package.infolist():
+                    target.writestr(
+                        info,
+                        patched if info.filename == "word/document.xml" else package.read(info.filename),
+                    )
+            temp.replace(output_path)
+        finally:
+            temp.unlink(missing_ok=True)
+    if protected_payload_manifest(input_path) != protected_payload_manifest(output_path):
+        output_path.unlink(missing_ok=True)
+        raise FormatMonographError(
+            "Core spacer normalization changed a protected payload."
+        )
+    return len(selected) + len(section_types)
+
+
+def remove_measured_block_spacers(
+    input_path: Path,
+    output_path: Path,
+    ordinals: list[int],
+) -> int:
+    return apply_measured_layout_adjustments(
+        input_path,
+        output_path,
+        ordinals,
+    )
+
+
+def _append_page_offset_formula(paragraph: Any, offset: int) -> None:
+    if offset != 1:
+        raise FormatMonographError("Only the approved PAGE-minus-one offset is supported.")
+
+    def marker(kind: str) -> Any:
+        run = OxmlElement("w:r")
+        field = OxmlElement("w:fldChar")
+        field.set(qn("w:fldCharType"), kind)
+        run.append(field)
+        return run
+
+    def instruction(value: str) -> Any:
+        run = OxmlElement("w:r")
+        node = OxmlElement("w:instrText")
+        node.set(qn("xml:space"), "preserve")
+        node.text = value
+        run.append(node)
+        return run
+
+    paragraph._p.append(marker("begin"))
+    paragraph._p.append(instruction(" = "))
+    paragraph._p.append(marker("begin"))
+    paragraph._p.append(instruction(" PAGE "))
+    paragraph._p.append(marker("separate"))
+    inner_result = OxmlElement("w:r")
+    inner_text = OxmlElement("w:t")
+    inner_text.text = "2"
+    inner_result.append(inner_text)
+    paragraph._p.append(inner_result)
+    paragraph._p.append(marker("end"))
+    paragraph._p.append(instruction(" - 1 "))
+    paragraph._p.append(marker("separate"))
+    outer_result = OxmlElement("w:r")
+    outer_text = OxmlElement("w:t")
+    outer_text.text = "1"
+    outer_result.append(outer_text)
+    paragraph._p.append(outer_result)
+    paragraph._p.append(marker("end"))
+
+
+def _isolate_page_footer(
+    document: Any,
+    section: Any,
+    footer_type: WD_HEADER_FOOTER,
+) -> Any:
+    section._sectPr.remove_footerReference(footer_type)
+    footer_part = FooterPart.new(document.part.package)
+    relationship_id = document.part.relate_to(footer_part, RT.FOOTER)
+    section._sectPr.add_footerReference(footer_type, relationship_id)
+    return (
+        section.footer
+        if footer_type == WD_HEADER_FOOTER.PRIMARY
+        else section.even_page_footer
+    )
+
+
+def _drop_unused_footer_relationships(document: Any) -> None:
+    used = {
+        reference.get(qn("r:id"))
+        for section in document.sections
+        for reference in section._sectPr.xpath("./w:footerReference")
+    }
+    for relationship_id, relationship in list(document.part.rels.items()):
+        if relationship.reltype == RT.FOOTER and relationship_id not in used:
+            document.part.drop_rel(relationship_id)
+
+
+def apply_page_display_offsets(
+    input_path: Path,
+    output_path: Path,
+    section_offsets: dict[int, int],
+) -> int:
+    if any(value != 1 for value in section_offsets.values()):
+        raise FormatMonographError("Only a one-page parity offset is supported.")
+    document = load_document(input_path)
+    changed = 0
+    for index, offset in sorted(section_offsets.items()):
+        if not 0 <= index < len(document.sections):
+            raise FormatMonographError("Page display offset section is out of range.")
+        section = document.sections[index]
+        for footer_type, alignment in (
+            (WD_HEADER_FOOTER.PRIMARY, WD_ALIGN_PARAGRAPH.RIGHT),
+            (WD_HEADER_FOOTER.EVEN_PAGE, WD_ALIGN_PARAGRAPH.LEFT),
+        ):
+            footer = (
+                section.footer
+                if footer_type == WD_HEADER_FOOTER.PRIMARY
+                else section.even_page_footer
+            )
+            if not _page_only_footer(footer):
+                raise FormatMonographError(
+                    "Page display offset requires a page-only footer."
+                )
+            if index + 1 < len(document.sections):
+                next_section = document.sections[index + 1]
+                if next_section._sectPr.get_footerReference(footer_type) is None:
+                    next_footer = (
+                        next_section.footer
+                        if footer_type == WD_HEADER_FOOTER.PRIMARY
+                        else next_section.even_page_footer
+                    )
+                    if not _page_only_footer(next_footer):
+                        raise FormatMonographError(
+                            "The following section inherits a non-page footer."
+                        )
+                    next_footer = _isolate_page_footer(
+                        document,
+                        next_section,
+                        footer_type,
+                    )
+                    _replace_with_page_field(next_footer, alignment)
+                    changed += 1
+            footer = _isolate_page_footer(document, section, footer_type)
+            paragraphs = list(footer.paragraphs)
+            paragraph = paragraphs[0] if paragraphs else footer.add_paragraph()
+            for extra in paragraphs[1:]:
+                footer._element.remove(extra._p)
+            for child in list(paragraph._p):
+                if child.tag != qn("w:pPr"):
+                    paragraph._p.remove(child)
+            paragraph.alignment = alignment
+            _append_page_offset_formula(paragraph, offset)
+            changed += 1
+    _drop_unused_footer_relationships(document)
+    document.save(output_path)
+    if protected_payload_manifest(input_path) != protected_payload_manifest(output_path):
+        output_path.unlink(missing_ok=True)
+        raise FormatMonographError(
+            "Core page display offset changed a protected payload."
+        )
+    return changed
+
+
+def external_verify(
+    input_path: Path,
+    command: str,
+    profile_path: Path,
+    structure_map_path: Path,
+    pdf_output: Path,
+    target_software: str,
+    *,
+    expected_page_count: int | None = None,
+    allowed_field_types: set[str] | frozenset[str] = DEFAULT_ALLOWED_FIELD_TYPES,
+) -> dict:
+    request = {
+        "protocol_version": "1.1",
+        "operation": "verify_only",
+        "input_path": str(input_path.resolve()),
+        "profile_path": str(profile_path.resolve()),
+        "structure_map_path": str(structure_map_path.resolve()),
+        "allowed_field_types": sorted(allowed_field_types),
+        "target_software": target_software,
+        "pdf_output_path": str(pdf_output.resolve()),
+        "expected_page_count": expected_page_count,
+    }
+    input_hash = file_sha256(input_path)
+    completed = subprocess.run(
+        _external_command(command),
+        input=json.dumps(request, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if file_sha256(input_path) != input_hash:
+        raise FormatMonographError("External verifier changed its input DOCX.")
+    if completed.returncode != 0:
+        raise FormatMonographError(
+            "External read-only verification failed. "
+            f"stdout={completed.stdout.strip()} stderr={completed.stderr.strip()}"
+        )
+    try:
+        response = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise FormatMonographError(
+            "External verifier did not return one JSON response."
+        ) from exc
+    required = {
+        "status": "success",
+        "operation": "verify_only",
+        "repaginated": True,
+        "saved": False,
+        "read_only_verified": True,
+        "pdf_exported": True,
+    }
+    if not isinstance(response, dict) or any(
+        response.get(name) != value for name, value in required.items()
+    ):
+        raise FormatMonographError(
+            "External verifier did not satisfy the read-only verification contract."
+        )
+    if not pdf_output.is_file() or pdf_output.stat().st_size == 0:
+        raise FormatMonographError("External verifier did not create its target PDF.")
+    actual_page_count = response.get("page_count")
+    if expected_page_count is not None:
+        if (
+            not isinstance(actual_page_count, int)
+            or isinstance(actual_page_count, bool)
+            or actual_page_count < 1
+        ):
+            raise FormatMonographError(
+                "External verifier omitted a valid page count."
+            )
+        if actual_page_count != int(expected_page_count):
+            raise FormatMonographError(
+                "Selective output page count differs from the field calculation session."
+            )
     response.setdefault("backend", "external")
     response["command"] = _external_command(command)[0]
     return response
@@ -696,26 +997,121 @@ def main() -> int:
                 with tempfile.TemporaryDirectory(
                     prefix="format-monograph-external-fields-"
                 ) as refresh_name:
-                    refreshed = Path(refresh_name) / "refreshed.docx"
+                    refresh_root = Path(refresh_name)
+                    refresh_input = args.input
+                    measurements = []
+                    section_adjustments = 0
+                    spacers_removed = 0
+                    pagination_section_indexes = (
+                        approved_front_matter_section_indexes(
+                            args.input,
+                            structure_map,
+                        )
+                    )
+                    remove_boundary_spacers = bool(
+                        structure_map.get("block_spacing", {}).get("approved")
+                        and structure_map.get("block_spacing", {}).get(
+                            "same_page_only"
+                        )
+                    )
+                    for measurement_pass in range(10):
+                        measurement = external_measure(
+                            refresh_input,
+                            args.field_updater_command,
+                            args.profile,
+                            args.structure_map,
+                            args.target_software
+                            or profile["target_applications"][0],
+                        )
+                        measurements.append(measurement)
+                        ordinals = (
+                            measurement.get("page_boundary_spacer_ordinals", [])
+                            if remove_boundary_spacers
+                            else []
+                        )
+                        section_types = approved_front_matter_section_types(
+                            pagination_section_indexes,
+                            measurement,
+                            refresh_input,
+                        )
+                        if not ordinals and not section_types:
+                            break
+                        normalized = refresh_root / (
+                            f"layout-normalized-{measurement_pass + 1}.docx"
+                        )
+                        apply_measured_layout_adjustments(
+                            refresh_input,
+                            normalized,
+                            ordinals,
+                            section_types,
+                        )
+                        section_adjustments += len(section_types)
+                        spacers_removed += len(ordinals)
+                        refresh_input = normalized
+                    else:
+                        raise FormatMonographError(
+                            "Page-boundary spacer normalization did not converge."
+                        )
+                    display_offsets = {}
+                    normalized_document = load_document(refresh_input)
+                    for index in sorted(pagination_section_indexes):
+                        section_type = normalized_document.sections[
+                            index
+                        ]._sectPr.find(qn("w:type"))
+                        if (
+                            section_type is not None
+                            and section_type.get(qn("w:val")) == "evenPage"
+                        ):
+                            display_offsets[index] = 1
+                    allowed_field_types = set(DEFAULT_ALLOWED_FIELD_TYPES)
+                    if display_offsets:
+                        offset_input = refresh_root / "page-display-offsets.docx"
+                        apply_page_display_offsets(
+                            refresh_input,
+                            offset_input,
+                            display_offsets,
+                        )
+                        refresh_input = offset_input
+                        allowed_field_types.add("=")
+                    refreshed = refresh_root / "refreshed.docx"
                     backend = external_refresh(
-                        args.input,
+                        refresh_input,
                         refreshed,
                         args.field_updater_command,
                         args.profile,
                         args.structure_map,
-                        args.pdf_output,
+                        None,
                         args.target_software or profile["target_applications"][0],
+                        allowed_field_types=allowed_field_types,
                     )
-                    backend["controlled_writeback_parts"] = (
-                        controlled_field_result_writeback(
-                            args.input, refreshed, args.output
-                        )
+                    writeback = selective_field_result_writeback(
+                        refresh_input,
+                        refreshed,
+                        args.output,
+                        allowed_field_types=allowed_field_types,
                     )
-                delivery_status = (
-                    "refreshed_target_word"
-                    if "microsoft word" in str(backend.get("software", "")).casefold()
-                    else "refreshed_external"
-                )
+                    backend["layout_measurements"] = measurements
+                    backend["removed_page_boundary_spacers"] = spacers_removed
+                    backend["core_section_start_adjustments"] = section_adjustments
+                    backend["core_page_display_offsets"] = {
+                        str(index): value for index, value in display_offsets.items()
+                    }
+                    backend["selective_writeback"] = writeback
+                    verification_pdf = args.pdf_output or (
+                        Path(refresh_name) / "read-only-verification.pdf"
+                    )
+                    backend["read_only_verification"] = external_verify(
+                        args.output,
+                        args.field_updater_command,
+                        args.profile,
+                        args.structure_map,
+                        verification_pdf,
+                        args.target_software
+                        or profile["target_applications"][0],
+                        expected_page_count=backend.get("page_count"),
+                        allowed_field_types=allowed_field_types,
+                    )
+                delivery_status = "selective_verified"
             except FormatMonographError:
                 if args.field_updater != "auto" or not args.approve_deferred:
                     raise
@@ -752,11 +1148,15 @@ def main() -> int:
                     delivery_status = "deferred"
                 else:
                     try:
-                        backend["controlled_writeback_parts"] = (
-                            controlled_field_result_writeback(
-                                args.input, refreshed, args.output
+                        backend["selective_writeback"] = (
+                            selective_field_result_writeback(
+                                args.input,
+                                refreshed,
+                                args.output,
+                                allowed_field_types=DEFAULT_ALLOWED_FIELD_TYPES,
                             )
                         )
+                        delivery_status = "selective_verified"
                     except FormatMonographError:
                         if args.field_updater != "auto" or not args.approve_deferred:
                             raise
@@ -773,19 +1173,31 @@ def main() -> int:
             "deferred_on_open",
         }
         if strict_backend:
-            delivery_status = output_fields["status"]
-            if backend.get("backend") not in {"libreoffice_uno"}:
-                delivery_status = (
-                    "refreshed_target_word"
-                    if "microsoft word" in str(backend.get("software", "")).casefold()
-                    else "refreshed_external"
-                )
+            selective_ok = (
+                backend.get("selective_writeback", {}).get("status")
+                == "selective_verified"
+            )
+            delivery_status = (
+                "selective_verified" if selective_ok else output_fields["status"]
+            )
             field_contract_ok = field_contract_preserved(input_fields, output_fields)
             refreshed_ok = (
                 not input_fields["main_toc_fields"] or delivery_status == "refreshed"
             )
             if backend.get("backend") not in {"libreoffice_uno"}:
-                refreshed_ok = bool(backend.get("field_cache_verified"))
+                refreshed_ok = bool(
+                    backend.get("field_cache_verified")
+                    and backend.get("read_only_verification", {}).get(
+                        "read_only_verified"
+                    )
+                    and selective_ok
+                    and backend.get("selective_writeback", {}).get(
+                        "unapproved_dirty_fields", 0
+                    )
+                    == 0
+                )
+            elif selective_ok:
+                refreshed_ok = True
         else:
             field_contract_ok = True
             refreshed_ok = True
@@ -836,6 +1248,10 @@ def main() -> int:
             "input_field_cache": input_fields,
             "output_field_cache": output_fields,
             "field_backend": backend,
+            "field_writeback_status": (
+                backend.get("selective_writeback", {}).get("status")
+                or ("deferred" if delivery_status == "deferred" else "not_needed")
+            ),
             "content_integrity": "pass",
             "protected_object_integrity": "pass",
             "effective_font_integrity": "pass",

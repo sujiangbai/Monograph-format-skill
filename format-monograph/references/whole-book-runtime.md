@@ -38,10 +38,39 @@ continue. Their presence keeps the run at `blocked_qa`.
 
 `finalize` requires all critical grouped QA and frozen scopes to be closed. It
 updates approved fields using an external target-application backend or
-LibreOffice UNO. The backend writes a disposable copy. The core compares OOXML
-with cached field-result text neutralized, then writes only verified field-part
-results into the safe baseline package. It never imports refreshed media or
-embeddings. Any non-field authored XML change is rejected.
+LibreOffice UNO. The backend writes a disposable copy. The core parses field
+boundaries, matches main-story fields by semantic instruction and header/footer
+fields by effective section role, and
+patches only scalar result text or the validated TOC result span into the safe
+baseline package. Whole backend XML parts are never imported. Backend
+run splitting, simple-to-complex field conversion, and header/footer part
+renumbering are reported and discarded; changed authored text, field
+instructions, approved bookmarks, pagination sections, media, equations, or
+embeddings rejects the refresh.
+
+Repeated identical field instructions must have unique retained paragraph IDs
+or unique authored paragraph context; otherwise finalization blocks instead of
+pairing them by occurrence order. Every refreshed approved field must be clean,
+and global update-on-open is removed even when clean unapproved fields remain.
+The only allowed formula has one directly nested `PAGE` field and the exact
+core-generated `= PAGE - 1` structure; other formulas and nonnumeric page
+results are rejected.
+
+For a target Word backend, section and footer structure must already pass the
+portable core audit. Word first performs a no-save `measure_layout` pass that
+returns only page counts, section page ranges, and approved spacer ordinals. The
+core iteratively resolves parity section starts and removes only approved empty
+spacers that landed at a page top. When an approved page-1 restart must begin on
+an even physical page, the core creates the editable `{ = { PAGE } - 1 }`
+display field in newly isolated odd/even footer parts so adjacent sections keep
+their own `PAGE` fields; no other formula field receives approval. The adapter
+must open measurement and verification inputs read-only, report a successful
+update for every approved field, and leave the independently checked input hash
+unchanged. After selective
+writeback, Word reopens the selective DOCX,
+repaginates without saving, and exports the PDF used for visual QA. Page count
+must match the field-calculation session. Only `selective_verified` satisfies
+the completed field gate.
 
 Use `--approve-deferred` only after explicit caller QA. Deferred-on-open remains
 `candidate_ready`; it cannot become `final_ready`.

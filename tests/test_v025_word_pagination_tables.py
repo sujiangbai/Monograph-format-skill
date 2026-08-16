@@ -198,7 +198,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
             "shutil.copy2(request['input_path'], request['output_path'])\n"
             "print(json.dumps({'status':'success','backend':'test_word','software':'Microsoft Word',"
             "'repaginated':True,'saved':True,'field_cache_verified':True,"
-            "'updated_field_types':[]}))\n",
+            "'structural_changes_applied':0,'updated_field_types':[]}))\n",
             encoding="utf-8",
         )
         output = self.root / "external.docx"

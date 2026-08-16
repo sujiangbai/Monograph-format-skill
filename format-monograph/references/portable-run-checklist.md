@@ -51,9 +51,14 @@ affected cache. Never copy a `run-state.json` between manuscripts.
 
 ## Finalization and delivery gate
 
-- Target-application updates occur in a disposable copy. Import only verified
-  cached results for approved fields; retain the core-generated package for
-  authored XML, OMML, OLE, media, and relationships.
+- Target-application updates occur in a disposable copy. Parse and uniquely
+  match each approved field, then patch only its result into the core-generated
+  baseline. Never replace an entire backend XML part.
+- Establish sections, visible page-number rules, headers, footers, and field
+  instructions before calling Word. Require the adapter to report zero
+  structural changes.
+- Reopen the selective output in the target application without saving, export
+  the verification PDF, and require the same page count as the calculation run.
 - `deferred`, `stale`, and `code_only` are not completed field refresh states.
 - Inspect every page rendered by the target application. Record the exact page
   count and unresolved issues in a local visual-QA manifest.
