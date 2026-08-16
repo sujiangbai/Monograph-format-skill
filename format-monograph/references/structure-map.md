@@ -27,6 +27,15 @@ appendix in a rebuilt TOC only when the original TOC included appendices.
 Missing, duplicate, or suspicious appendix, figure, table, and equation numbers
 remain report-only until the caller approves an exact change.
 
+V0.3.3 extends schema 1.5 without changing its version. Each image has an
+independently approvable `visibility` block containing paragraph payload class,
+effective line-spacing evidence, image height, optional table-row height
+evidence, supported actions, and a blocking reason. `toc_source` records the
+approved maximum level, `auto`, `heading_styles`, or `tc_plain_text` mode, one
+reserved ASCII TC identifier, source contaminants, and mandatory rejection of
+non-text results. Image visibility approval does not imply resize approval, and
+TOC-source approval does not imply approval of any new heading.
+
 `qa_groups` collect repeated decisions with `decision_scope` set to
 `group_with_exceptions` or `individual`. `frozen_scopes` identify only the
 objects whose uncertain structure must remain unchanged. Independent approved
@@ -121,6 +130,23 @@ Every table and image records `position_policy=preserve_anchor`. Application mus
 
 Each `images` entry records a stable paragraph locator, drawing ordinal, placement class, media hash, source extent, crop/object state, raster metadata, and resize policy. Placement classes are `standalone`, `table_figure_panel`, and `table_embedded_unknown`. Only an uncropped inline standalone image or an image in an approved stationary figure-panel row may be approved automatically. Standalone bounds are 90% text width, 100% for aspect ratio at least 1.6, and 65% usable page height. Figure-panel bounds are 95% of the existing cell width, with a common displayed height within one row. Raster enlargement is capped at 125% and must retain at least 220 effective DPI; unknown or insufficient DPI prevents enlargement. Vector images may fit the approved bounds. Cropped, floating, missing-relationship, or otherwise ambiguous images remain unchanged and report-only.
 
+For `visibility.action`, `auto_single_line_spacing` is valid only for an
+image-only inline paragraph whose effective exact line height is below the
+existing display height. `relax_exact_table_row_height` additionally requires a
+simple, nonfloating, nonmerged row whose exact height is insufficient. The first
+action writes direct automatic single spacing; the second changes only `exact`
+to `atLeast`. Neither action changes image extents, relationships, crop,
+alignment, paragraph spacing, anchor, container, or order. Reapplication must
+produce zero further visibility changes.
+
+`toc_source` creates one ordered source contract from approved headings and
+confirmed appendices only. `auto` keeps a style-based `TOC \\o` instruction only
+when every in-range outline paragraph is an approved, object-free source.
+Otherwise it creates one Word-standard nonprinting complex `TC` field per approved source and
+changes the single TOC instruction to the reserved `TOC \\f` identifier. It
+does not alter the visible heading or move an attached image. Reapplication
+must neither duplicate TC fields nor change their source mapping.
+
 A short centered paragraph directly following a standalone image may be proposed as `figure_caption_unnumbered`. A short text row directly beneath mapped image cells may be proposed as `figure_panel_label`. Both remain unapproved candidates until the caller confirms the role; approval changes style only and never inserts a number or edits wording.
 
 For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered and vertically centered title-page section, an optional `book_title_format`, and insertion of the derived `目    录` heading (four ASCII spaces) before the main TOC. The technical-textbook fallback title uses 22 pt bold text with at least 33 pt line spacing and zero paragraph spacing so wrapped glyphs are not clipped. Legacy approved maps using `目录` remain readable. The `TOC` field does not create its own heading; the skill inserts and maintains the separate derived paragraph. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
@@ -136,6 +162,8 @@ Candidates report visible payload, header/footer references and payload, page-nu
 - `captions`: preserve or style manual identifiers by default; perform only explicitly approved identifier replacement, relocation, or field conversion.
 - `tables`: apply exact approved header, row-split, visual, and landscape controls to data tables.
 - `images`: resize only individually approved inline images inside their original anchors and containers.
+- `images[].visibility`: repair only approved fixed-line or simple fixed-row clipping while preserving the image object and display extent.
+- `toc_source`: authorize the exact text-only TOC source set and its single deterministic source mode.
 - `pagination_groups`: apply only approved `keepNext`/`cantSplit` relationships to figures, captions, and tables.
 - `pagination_sections`: create and audit approved TOC/body numbering sections and odd/even PAGE footers.
 - `front_matter`: separate the whole-book title page from the TOC and insert the approved TOC heading.

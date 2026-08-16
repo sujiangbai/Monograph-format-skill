@@ -39,6 +39,7 @@ from structure_map import (
     audit_caption_identifier_replacements,
     audit_structure_heading_operations,
     audit_structure_image_operations,
+    audit_structure_toc_source_operations,
     audit_structure_table_operations,
     has_semantic_structure_map,
     load_structure_map,
@@ -1006,12 +1007,18 @@ def main() -> int:
             if structure_map
             else []
         )
+        structure_toc_source_failures = (
+            audit_structure_toc_source_operations(document, structure_map)
+            if structure_map
+            else []
+        )
         rules_ok = (
             all(item["status"] != "fail" for item in rule_results)
             and not pagination_failures
             and not structure_heading_failures
             and not structure_table_failures
             and not structure_image_failures
+            and not structure_toc_source_failures
         )
         caption_replacements = (
             audit_caption_identifier_replacements(
@@ -1069,6 +1076,10 @@ def main() -> int:
             "structure_image_operations": {
                 "passed": not structure_image_failures,
                 "failures": structure_image_failures,
+            },
+            "structure_toc_source_operations": {
+                "passed": not structure_toc_source_failures,
+                "failures": structure_toc_source_failures,
             },
             "rules": rule_results,
         }

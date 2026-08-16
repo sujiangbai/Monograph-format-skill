@@ -1099,6 +1099,124 @@ def _drawing_state(paragraph: Any, drawing: Any) -> dict[str, Any]:
     }
 
 
+def _effective_line_spacing(paragraph: Any) -> dict[str, Any]:
+    sources: list[tuple[str, Any]] = [("paragraph", paragraph._p.pPr)]
+    style = paragraph.style
+    while style is not None:
+        sources.append((f"style:{style.style_id}", style.element.pPr))
+        style = style.base_style
+    for source, properties in sources:
+        if properties is None:
+            continue
+        spacing = properties.find(qn("w:spacing"))
+        if spacing is None or spacing.get(qn("w:line")) is None:
+            continue
+        try:
+            line = int(spacing.get(qn("w:line"), "0"))
+        except ValueError:
+            line = 0
+        return {
+            "source": source,
+            "rule": spacing.get(qn("w:lineRule"), "auto"),
+            "line_twips": line,
+        }
+    return {"source": "default", "rule": "auto", "line_twips": 240}
+
+
+def _image_paragraph_payload(paragraph: Any) -> tuple[str, str | None]:
+    if _paragraph_text_without_field_results(paragraph._p).strip():
+        return "mixed_text", "image_shares_paragraph_with_authored_text"
+    if paragraph._p.xpath(".//w:object | .//w:txbxContent"):
+        return "mixed_object", "image_paragraph_contains_another_protected_object"
+    if paragraph._p.xpath(".//w:pict"):
+        return "legacy_picture", "legacy_picture_requires_qa"
+    drawings = paragraph._p.xpath(".//w:drawing")
+    if not drawings:
+        return "unknown", "image_paragraph_has_no_supported_drawing"
+    if any(drawing.xpath("./wp:anchor") for drawing in drawings):
+        return "floating", "floating_image_line_spacing_must_remain_unchanged"
+    if any(len(drawing.xpath("./wp:inline")) != 1 for drawing in drawings):
+        return "unknown", "image_container_is_ambiguous"
+    return "image_only", None
+
+
+def _row_height_state(row: Any) -> dict[str, Any] | None:
+    properties = row._tr.trPr
+    if properties is None:
+        return None
+    heights = properties.findall(qn("w:trHeight"))
+    if not heights:
+        return None
+    height = heights[-1]
+    try:
+        value = int(height.get(qn("w:val"), "0"))
+    except ValueError:
+        value = 0
+    return {
+        "rule": height.get(qn("w:hRule"), "atLeast"),
+        "height_twips": value,
+    }
+
+
+def _image_visibility_candidate(
+    paragraph: Any,
+    state: dict[str, Any],
+    table_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload, blocked_reason = _image_paragraph_payload(paragraph)
+    spacing = _effective_line_spacing(paragraph)
+    image_height_twips = round(int(state["source_extent_emu"].get("cy") or 0) / 635)
+    line_risk = bool(
+        payload == "image_only"
+        and spacing["rule"] == "exact"
+        and spacing["line_twips"] < image_height_twips
+    )
+    actions: list[str] = []
+    if line_risk:
+        actions.append("auto_single_line_spacing")
+
+    row_state = None
+    row_risk = False
+    if table_context is not None:
+        row_state = _row_height_state(table_context["row"])
+        row_risk = bool(
+            row_state
+            and row_state["rule"] == "exact"
+            and row_state["height_twips"] < image_height_twips
+        )
+        if row_risk:
+            if table_context["table_entry"].get("complex_merge"):
+                blocked_reason = blocked_reason or "complex_merged_table_row_requires_qa"
+            elif table_context["table_entry"].get("has_floating_objects"):
+                blocked_reason = blocked_reason or "table_row_contains_floating_objects"
+            elif payload != "image_only":
+                blocked_reason = blocked_reason or "mixed_table_image_paragraph_requires_qa"
+            else:
+                actions.append("relax_exact_table_row_height")
+
+    if not actions and not blocked_reason:
+        blocked_reason = None
+    return {
+        "approved": False,
+        "action": actions,
+        "paragraph_payload": payload,
+        "source_line_spacing": spacing,
+        "image_height_twips": image_height_twips,
+        "fixed_line_clipping_candidate": line_risk,
+        "table_row": (
+            None
+            if table_context is None
+            else {
+                "table": table_context["table_index"],
+                "row": table_context["row_index"],
+                "source_height": row_state,
+                "fixed_height_clipping_candidate": row_risk,
+            }
+        ),
+        "blocked_reason": blocked_reason,
+    }
+
+
 def _candidate_image_entry(
     paragraph: Any,
     locator: dict[str, Any],
@@ -1106,6 +1224,7 @@ def _candidate_image_entry(
     drawing_index: int,
     image_index: int,
     placement: str,
+    table_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = _drawing_state(paragraph, drawing)
     source_extent = state["source_extent_emu"]
@@ -1148,6 +1267,9 @@ def _candidate_image_entry(
             "raster_upscale_max_percent": 100,
             "minimum_effective_dpi": 220,
         },
+        "visibility": _image_visibility_candidate(
+            paragraph, state, table_context
+        ),
         "approval_blocked_reason": reason,
         "approved": False,
     }
@@ -1170,6 +1292,7 @@ def _candidate_images(
                     drawing_index,
                     image_index,
                     "standalone",
+                    None,
                 )
             )
             image_index += 1
@@ -1205,6 +1328,12 @@ def _candidate_images(
                                 drawing_index,
                                 image_index,
                                 placement,
+                                {
+                                    "table_index": table_index,
+                                    "row_index": row_index,
+                                    "row": row,
+                                    "table_entry": table_entry,
+                                },
                             )
                         )
                         image_index += 1
@@ -1457,6 +1586,72 @@ def _apply_images(document: Any, structure_map: dict[str, Any]) -> int:
     return changed
 
 
+def _set_image_paragraph_auto_spacing(paragraph: Any) -> bool:
+    properties = paragraph._p.get_or_add_pPr()
+    spacing = properties.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        properties.append(spacing)
+    before = (spacing.get(qn("w:line")), spacing.get(qn("w:lineRule")))
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+    return before != ("240", "auto")
+
+
+def _relax_exact_row_height(row: Any) -> bool:
+    properties = row._tr.get_or_add_trPr()
+    heights = properties.findall(qn("w:trHeight"))
+    if not heights:
+        return False
+    changed = False
+    for height in heights:
+        if height.get(qn("w:hRule"), "atLeast") == "exact":
+            height.set(qn("w:hRule"), "atLeast")
+            changed = True
+    return changed
+
+
+def _apply_image_visibility(document: Any, structure_map: dict[str, Any]) -> int:
+    changed = 0
+    seen_paragraphs: set[int] = set()
+    seen_rows: set[tuple[int, int]] = set()
+    for entry in structure_map.get("images", []):
+        visibility = entry.get("visibility", {})
+        if not visibility.get("approved"):
+            continue
+        paragraph, drawing = _resolve_image_drawing(document, entry, structure_map)
+        state = _drawing_state(paragraph, drawing)
+        if (
+            state["object_type"] != "inline"
+            or state["media_sha256"] != entry.get("media_sha256")
+        ):
+            raise FormatMonographError(
+                f"Approved image visibility anchor changed: {entry.get('image')}."
+            )
+        actions = set(visibility.get("action", []))
+        paragraph_key = id(paragraph._p)
+        if (
+            "auto_single_line_spacing" in actions
+            and paragraph_key not in seen_paragraphs
+        ):
+            changed += int(_set_image_paragraph_auto_spacing(paragraph))
+            seen_paragraphs.add(paragraph_key)
+        if "relax_exact_table_row_height" in actions:
+            row_info = visibility["table_row"]
+            row_key = (int(row_info["table"]), int(row_info["row"]))
+            if row_key in seen_rows:
+                continue
+            table_index, row_index = row_key
+            if not 0 <= table_index < len(document.tables):
+                raise FormatMonographError("Approved image table is out of range.")
+            table = document.tables[table_index]
+            if not 0 <= row_index < len(table.rows):
+                raise FormatMonographError("Approved image table row is out of range.")
+            changed += int(_relax_exact_row_height(table.rows[row_index]))
+            seen_rows.add(row_key)
+    return changed
+
+
 def audit_structure_image_operations(
     document: Any, structure_map: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -1504,6 +1699,53 @@ def audit_structure_image_operations(
                     "checks": checks,
                     "expected_extent_emu": {"cx": expected_cx, "cy": expected_cy},
                     "actual_extent_emu": {"cx": actual_cx, "cy": actual_cy},
+                }
+            )
+    for entry in structure_map.get("images", []):
+        visibility = entry.get("visibility", {})
+        if not visibility.get("approved"):
+            continue
+        image_id = str(entry["image"])
+        try:
+            paragraph, drawing = _resolve_image_drawing(document, entry, structure_map)
+            state = _drawing_state(paragraph, drawing)
+        except FormatMonographError as exc:
+            failures.append(
+                {"image": image_id, "reason": "visibility_anchor_not_preserved", "detail": str(exc)}
+            )
+            continue
+        actions = set(visibility.get("action", []))
+        checks = {
+            "position_policy_preserved": entry.get("position_policy")
+            == "preserve_anchor",
+            "inline_not_floating": state["object_type"] == "inline",
+            "media_unchanged": state["media_sha256"] == entry.get("media_sha256"),
+            "crop_state_unchanged": state["has_crop"] == entry.get("has_crop"),
+        }
+        if not entry.get("resize", {}).get("approved"):
+            checks["display_extent_unchanged"] = state["source_extent_emu"] == entry.get(
+                "source_extent_emu"
+            )
+        if "auto_single_line_spacing" in actions:
+            spacing = _effective_line_spacing(paragraph)
+            checks["line_spacing_expands_for_image"] = (
+                spacing["source"] == "paragraph"
+                and spacing["rule"] == "auto"
+                and spacing["line_twips"] == 240
+            )
+        if "relax_exact_table_row_height" in actions:
+            row_info = visibility["table_row"]
+            table = document.tables[int(row_info["table"])]
+            row_state = _row_height_state(table.rows[int(row_info["row"])])
+            checks["table_row_not_exact"] = bool(
+                row_state and row_state["rule"] != "exact"
+            )
+        if not all(checks.values()):
+            failures.append(
+                {
+                    "image": image_id,
+                    "reason": "approved_image_visibility_mismatch",
+                    "checks": checks,
                 }
             )
     return failures
@@ -1727,6 +1969,87 @@ def _candidate_trial_selection(
         "table_samples": table_ids,
         "image_samples": image_ids,
         "status": "candidate",
+    }
+
+
+def _effective_outline_level(paragraph: Any) -> int | None:
+    sources = [paragraph._p.pPr]
+    style = paragraph.style
+    while style is not None:
+        sources.append(style.element.pPr)
+        style = style.base_style
+    for properties in sources:
+        if properties is None:
+            continue
+        outline = properties.find(qn("w:outlineLvl"))
+        if outline is None:
+            continue
+        try:
+            return int(outline.get(qn("w:val"), "9"))
+        except ValueError:
+            return None
+    if paragraph.style and paragraph.style.name in {
+        "Heading 1",
+        "Heading 2",
+        "Heading 3",
+        "Heading 4",
+    }:
+        return int(paragraph.style.name[-1]) - 1
+    return None
+
+
+def _toc_object_kinds(paragraph: Any) -> list[str]:
+    checks = (
+        ("drawing", ".//w:drawing"),
+        ("legacy_picture", ".//w:pict"),
+        ("ole_object", ".//w:object"),
+        ("text_box", ".//w:txbxContent"),
+    )
+    return [name for name, expression in checks if paragraph._p.xpath(expression)]
+
+
+def _candidate_toc_source(
+    document: Any,
+    headings: list[dict[str, Any]],
+    appendices: list[dict[str, Any]],
+    body_values: list[str],
+) -> dict[str, Any]:
+    candidate_indexes = {
+        int(entry["locator"]["paragraph"])
+        for entry in [*headings, *appendices]
+        if entry.get("locator", {}).get("kind") == "body_paragraph"
+    }
+    contaminants: list[dict[str, Any]] = []
+    for index, paragraph in enumerate(document.paragraphs):
+        outline_level = _effective_outline_level(paragraph)
+        object_kinds = _toc_object_kinds(paragraph)
+        in_toc_outline = outline_level is not None and 0 <= outline_level <= 3
+        unapproved_outline = in_toc_outline and index not in candidate_indexes
+        object_contamination = bool(object_kinds) and (
+            index in candidate_indexes or in_toc_outline
+        )
+        if not (unapproved_outline or object_contamination):
+            continue
+        contaminants.append(
+            {
+                "locator": _body_locator(index, body_values),
+                "object_kinds": object_kinds,
+                "outline_level": outline_level,
+                "candidate_heading": index in candidate_indexes,
+                "reason": (
+                    "toc_source_unapproved_outline_paragraph"
+                    if unapproved_outline
+                    else "toc_source_contains_non_text_object"
+                ),
+            }
+        )
+    return {
+        "approved": False,
+        "mode": "auto",
+        "levels": 4,
+        "tc_identifier": "M",
+        "reject_non_text_results": True,
+        "contaminants": contaminants,
     }
 
 
@@ -1979,6 +2302,9 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
             "approved": False,
             "anomalies": numbering_anomalies,
         },
+        "toc_source": _candidate_toc_source(
+            document, headings, appendices, body_values
+        ),
         "toc_ranges": [],
         "headings": headings,
         "captions": captions,
@@ -2430,6 +2756,52 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Images cannot be relocated; position_policy must be preserve_anchor."
                     )
+                visibility = image.get("visibility", {})
+                if visibility.get("approved"):
+                    actions = visibility.get("action", [])
+                    if not actions or any(
+                        action not in {
+                            "auto_single_line_spacing",
+                            "relax_exact_table_row_height",
+                        }
+                        for action in actions
+                    ):
+                        raise FormatMonographError(
+                            "Approved image visibility requires a supported action."
+                        )
+                    if visibility.get("paragraph_payload") != "image_only":
+                        raise FormatMonographError(
+                            "Automatic image visibility repair requires an image-only paragraph."
+                        )
+                    if visibility.get("blocked_reason"):
+                        raise FormatMonographError(
+                            "Blocked image visibility candidates cannot be approved."
+                        )
+                    if image.get("object_type") != "inline":
+                        raise FormatMonographError(
+                            "Automatic image visibility repair supports inline drawings only."
+                        )
+                    if "auto_single_line_spacing" in actions and not visibility.get(
+                        "fixed_line_clipping_candidate"
+                    ):
+                        raise FormatMonographError(
+                            "Line-spacing repair requires fixed-line clipping evidence."
+                        )
+                    if "relax_exact_table_row_height" in actions:
+                        row = visibility.get("table_row")
+                        if not isinstance(row, dict) or not row.get(
+                            "fixed_height_clipping_candidate"
+                        ):
+                            raise FormatMonographError(
+                                "Table-row visibility repair requires fixed-height clipping evidence."
+                            )
+                        table = table_entries.get(int(row.get("table", -1)))
+                        if table is None or table.get("complex_merge") or table.get(
+                            "has_floating_objects"
+                        ):
+                            raise FormatMonographError(
+                                "Complex or floating table rows require image visibility QA."
+                            )
                 if not image.get("approved"):
                     continue
                 resize = image.get("resize", {})
@@ -2503,6 +2875,30 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                         "Data-table and unknown embedded images require separate QA and cannot be approved here."
                     )
         if value.get("schema_version") == "1.5":
+            toc_source = value.get("toc_source", {})
+            if toc_source.get("approved"):
+                if toc_source.get("mode") not in {
+                    "auto",
+                    "heading_styles",
+                    "tc_plain_text",
+                }:
+                    raise FormatMonographError(
+                        "Approved TOC source mode must be auto, heading_styles, or tc_plain_text."
+                    )
+                if int(toc_source.get("levels", 0)) not in {1, 2, 3, 4}:
+                    raise FormatMonographError(
+                        "Approved TOC source levels must be between 1 and 4."
+                    )
+                if not re.fullmatch(
+                    r"[A-Za-z]", str(toc_source.get("tc_identifier", ""))
+                ):
+                    raise FormatMonographError(
+                        "Approved TOC TC identifier must be one ASCII letter."
+                    )
+                if toc_source.get("reject_non_text_results") is not True:
+                    raise FormatMonographError(
+                        "Approved TOC sources must reject every non-text result object."
+                    )
             qa_ids: set[str] = set()
             for item in value.get("qa_groups", []):
                 item_id = str(item.get("id", ""))
@@ -2594,9 +2990,14 @@ def validate_structure_map_source(path: Path, structure_map: dict[str, Any]) -> 
         if entry.get("table_text_sha256") and _table_text_hash(document.tables[index]) != entry["table_text_sha256"]:
             raise FormatMonographError(f"Structure-map table hash mismatch: {index}")
     for entry in structure_map.get("images", []):
-        if not entry.get("approved"):
+        if not (
+            entry.get("approved")
+            or entry.get("visibility", {}).get("approved")
+        ):
             continue
-        paragraph, drawing = _resolve_image_drawing(document, entry)
+        paragraph, drawing = _resolve_image_drawing(
+            document, entry, structure_map
+        )
         state = _drawing_state(paragraph, drawing)
         if state["media_sha256"] != entry.get("media_sha256"):
             raise FormatMonographError(
@@ -2758,6 +3159,491 @@ def _apply_toc_ranges(document: Any, structure_map: dict[str, Any]) -> int:
             parent.remove(paragraph._p)
         changed += end - start + 1
     return changed
+
+
+def _approved_toc_sources(
+    document: Any, structure_map: dict[str, Any]
+) -> list[tuple[Any, int, str, dict[str, Any]]]:
+    maximum = int(structure_map.get("toc_source", {}).get("levels", 4))
+    sources: list[tuple[Any, int, str, dict[str, Any]]] = []
+    for entry in structure_map.get("headings", []):
+        level = int(entry.get("level", 0))
+        if not entry.get("approved") or not 1 <= level <= maximum:
+            continue
+        paragraph = (
+            _verified_locator_paragraph(document, entry)
+            if entry.get("locator")
+            else _verified_paragraph(document, entry)
+        )
+        sources.append((paragraph, level, "heading", entry))
+    for entry in structure_map.get("appendices", []):
+        if not entry.get("approved") or entry.get("include_in_toc") is not True:
+            continue
+        sources.append(
+            (_verified_locator_paragraph(document, entry), 1, "appendix", entry)
+        )
+    order = {id(paragraph._p): index for index, paragraph in enumerate(document.paragraphs)}
+    sources.sort(key=lambda item: order.get(id(item[0]._p), 10**9))
+    return sources
+
+
+def toc_result_contract(
+    document: Any, structure_map: dict[str, Any]
+) -> list[dict[str, Any]] | None:
+    toc_source = structure_map.get("toc_source", {})
+    if not toc_source.get("approved"):
+        return None
+    result: list[dict[str, Any]] = []
+    for paragraph, level, kind, entry in _approved_toc_sources(document, structure_map):
+        value = paragraph.text
+        if kind == "heading":
+            match = _heading_prefix_pattern(level).match(value)
+            if match:
+                value = value[match.end() :]
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise FormatMonographError("Approved TOC source has no stable text hash.")
+        result.append(
+            {
+                "level": level,
+                "kind": kind,
+                "text_sha256": text_sha256(normalized),
+            }
+        )
+    if not result:
+        raise FormatMonographError("Approved TOC source contains no approved headings.")
+    return result
+
+
+def _toc_style_mode_is_safe(
+    document: Any,
+    sources: list[tuple[Any, int, str, dict[str, Any]]],
+    maximum: int,
+) -> bool:
+    approved = {id(paragraph._p): level for paragraph, level, _, _ in sources}
+    for paragraph in document.paragraphs:
+        outline = _effective_outline_level(paragraph)
+        if outline is None or not 0 <= outline < maximum:
+            continue
+        expected = approved.get(id(paragraph._p))
+        if expected != outline + 1 or _toc_object_kinds(paragraph):
+            return False
+    return all(
+        _effective_outline_level(paragraph) == level - 1
+        and not _toc_object_kinds(paragraph)
+        for paragraph, level, _, _ in sources
+    )
+
+
+def _field_instruction_identifier(instruction: str) -> str | None:
+    match = re.search(r'\\f\s+"?([A-Za-z])"?', instruction, re.IGNORECASE)
+    return None if match is None else match.group(1).upper()
+
+
+def _managed_tc_field(instruction: str, identifier: str) -> bool:
+    return bool(
+        re.match(r"\s*TC(?:\s|$)", instruction, re.IGNORECASE)
+        and _field_instruction_identifier(instruction) == identifier.upper()
+    )
+
+
+def _field_paragraph(element: Any) -> Any | None:
+    current = element
+    while current is not None and current.tag != qn("w:p"):
+        current = current.getparent()
+    return current
+
+
+def _clear_managed_tc_fields(
+    document: Any,
+    identifier: str,
+    allowed_paragraphs: set[int],
+) -> int:
+    from field_writeback import parse_fields
+
+    changed = 0
+    for record in reversed(parse_fields(document.element)):
+        if record.field_type != "TC" or not _managed_tc_field(
+            record.instruction, identifier
+        ):
+            continue
+        marker = record.simple if record.form == "simple" else record.begin
+        assert marker is not None
+        paragraph = _field_paragraph(marker)
+        if paragraph is None or id(paragraph) not in allowed_paragraphs:
+            raise FormatMonographError(
+                "The reserved TOC TC identifier is already used outside approved headings."
+            )
+        if record.form == "simple":
+            assert record.simple is not None
+            parent = record.simple.getparent()
+            if parent is not None:
+                parent.remove(record.simple)
+                changed += 1
+            continue
+        assert record.begin is not None and record.end is not None
+        start_run, end_run = record.begin.getparent(), record.end.getparent()
+        if (
+            paragraph is None
+            or start_run is None
+            or end_run is None
+            or start_run.getparent() is not paragraph
+            or end_run.getparent() is not paragraph
+        ):
+            raise FormatMonographError(
+                "A managed complex TC field cannot be removed without changing authored content."
+            )
+        start, end = paragraph.index(start_run), paragraph.index(end_run)
+        if start > end:
+            raise FormatMonographError("Managed TC field boundaries are out of order.")
+        for index in range(end, start - 1, -1):
+            paragraph.remove(paragraph[index])
+        changed += 1
+    return changed
+
+
+def _ensure_managed_tc_fields(
+    document: Any,
+    sources: list[tuple[Any, int, str, dict[str, Any]]],
+    identifier: str,
+    numbering_approved: bool,
+) -> int:
+    from field_writeback import parse_fields
+
+    expected = {}
+    source_values = []
+    for ordinal, (paragraph, level, kind, entry) in enumerate(sources, start=1):
+        value = _toc_display_text(
+            paragraph, level, kind, entry, numbering_approved
+        )
+        instruction = _tc_instruction(value, level, identifier)
+        bookmark_name = _tc_bookmark_name(value, level, identifier, ordinal)
+        expected[id(paragraph._p)] = (instruction, bookmark_name)
+        source_values.append((paragraph, level, value, bookmark_name))
+    actual: dict[int, list[tuple[str, str, str | None]]] = {
+        key: [] for key in expected
+    }
+    for record in parse_fields(document.element):
+        if record.field_type != "TC" or not _managed_tc_field(
+            record.instruction, identifier
+        ):
+            continue
+        marker = record.simple if record.form == "simple" else record.begin
+        assert marker is not None
+        paragraph = _field_paragraph(marker)
+        key = None if paragraph is None else id(paragraph)
+        if key not in expected:
+            raise FormatMonographError(
+                "The reserved TOC TC identifier is already used outside approved headings."
+            )
+        actual[key].append(
+            (record.form, record.instruction, _tc_field_bookmark(record))
+        )
+    if all(
+        values == [("complex", *expected[key])]
+        for key, values in actual.items()
+    ):
+        return 0
+    allowed = set(expected)
+    changed = _clear_managed_tc_fields(document, identifier, allowed)
+    used_ids = {
+        int(value)
+        for value in document.element.xpath(
+            ".//w:bookmarkStart/@w:id | .//w:bookmarkEnd/@w:id"
+        )
+        if str(value).isdigit()
+    }
+    next_id = max(used_ids, default=-1) + 1
+    for paragraph, level, value, bookmark_name in source_values:
+        while next_id in used_ids:
+            next_id += 1
+        paragraph._p.extend(
+            _tc_field_runs(
+                value,
+                level,
+                identifier,
+                next_id,
+                bookmark_name,
+            )
+        )
+        used_ids.add(next_id)
+        next_id += 1
+        changed += 1
+    return changed
+
+
+def _toc_display_text(
+    paragraph: Any,
+    level: int,
+    kind: str,
+    entry: dict[str, Any],
+    numbering_approved: bool,
+) -> str:
+    value = paragraph.text.strip()
+    if kind != "heading" or not numbering_approved:
+        return value
+    if _heading_prefix_pattern(level).match(value):
+        return value
+    number = tuple(int(item) for item in entry.get("cached_number", []))
+    if len(number) != level:
+        raise FormatMonographError("Approved TC heading has no complete cached number.")
+    prefix = f"第{number[0]}章" if level == 1 else ".".join(map(str, number))
+    return f"{prefix} {value}".strip()
+
+
+def _tc_bookmark_name(
+    text: str, level: int, identifier: str, ordinal: int
+) -> str:
+    digest = hashlib.sha256(
+        f"{identifier.upper()}:{level}:{text}".encode("utf-8")
+    ).hexdigest()[:8]
+    return f"_Toc{ordinal:06d}{int(digest, 16):010d}"
+
+
+def _tc_field_bookmark(record: Any) -> str | None:
+    if record.form != "complex" or record.begin is None or record.end is None:
+        return None
+    paragraph = _field_paragraph(record.begin)
+    start_run, end_run = record.begin.getparent(), record.end.getparent()
+    if (
+        paragraph is None
+        or start_run is None
+        or end_run is None
+        or start_run.getparent() is not paragraph
+        or end_run.getparent() is not paragraph
+    ):
+        return None
+    start, end = paragraph.index(start_run), paragraph.index(end_run)
+    starts: dict[str, str] = {}
+    ends: set[str] = set()
+    for child in paragraph[start : end + 1]:
+        for element in child.iter():
+            if element.tag == qn("w:bookmarkStart"):
+                identifier = element.get(qn("w:id"))
+                name = element.get(qn("w:name"))
+                if identifier is not None and name:
+                    starts[identifier] = name
+            elif element.tag == qn("w:bookmarkEnd"):
+                identifier = element.get(qn("w:id"))
+                if identifier is not None:
+                    ends.add(identifier)
+    matched = [name for identifier, name in starts.items() if identifier in ends]
+    return matched[0] if len(matched) == 1 else None
+
+
+def _tc_field_runs(
+    text: str,
+    level: int,
+    identifier: str,
+    bookmark_id: int,
+    bookmark_name: str,
+) -> list[Any]:
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    begin_run = OxmlElement("w:r")
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    begin_run.append(begin)
+    instruction_run = OxmlElement("w:r")
+    instruction_text = OxmlElement("w:instrText")
+    instruction_text.set(
+        "{http://www.w3.org/XML/1998/namespace}space", "preserve"
+    )
+    instruction_text.text = ' TC "'
+    instruction_run.append(instruction_text)
+    bookmark_start = OxmlElement("w:bookmarkStart")
+    bookmark_start.set(qn("w:id"), str(bookmark_id))
+    bookmark_start.set(qn("w:name"), bookmark_name)
+    title_run = OxmlElement("w:r")
+    title_text = OxmlElement("w:instrText")
+    title_text.text = escaped
+    title_run.append(title_text)
+    bookmark_end = OxmlElement("w:bookmarkEnd")
+    bookmark_end.set(qn("w:id"), str(bookmark_id))
+    suffix_run = OxmlElement("w:r")
+    suffix_text = OxmlElement("w:instrText")
+    suffix_text.set(
+        "{http://www.w3.org/XML/1998/namespace}space", "preserve"
+    )
+    suffix_text.text = f'" \\f {identifier.upper()} \\l "{level}" '
+    suffix_run.append(suffix_text)
+    end_run = OxmlElement("w:r")
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    end_run.append(end)
+    runs = [
+        begin_run,
+        instruction_run,
+        bookmark_start,
+        title_run,
+        bookmark_end,
+        suffix_run,
+        end_run,
+    ]
+    return runs
+
+
+def _tc_instruction(text: str, level: int, identifier: str) -> str:
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'TC "{escaped}" \\f {identifier.upper()} \\l "{level}"'
+
+
+def _set_single_toc_instruction(document: Any, instruction: str) -> int:
+    from field_writeback import parse_fields
+
+    records = [
+        record for record in parse_fields(document.element) if record.field_type == "TOC"
+    ]
+    if len(records) != 1:
+        raise FormatMonographError(
+            "Approved TOC source strategy requires exactly one TOC field."
+        )
+    record = records[0]
+    if record.instruction == " ".join(instruction.split()):
+        return 0
+    if record.form == "simple":
+        assert record.simple is not None
+        record.simple.set(qn("w:instr"), instruction)
+        record.simple.set(qn("w:dirty"), "true")
+        return 1
+    assert record.begin is not None and record.separate is not None
+    elements = list(document.element.iter())
+    start, end = elements.index(record.begin), elements.index(record.separate)
+    nodes = [
+        element
+        for element in elements[start + 1 : end]
+        if element.tag == qn("w:instrText")
+    ]
+    if not nodes:
+        raise FormatMonographError("TOC field has no instruction text node.")
+    nodes[0].text = f" {instruction} "
+    for node in nodes[1:]:
+        node.text = ""
+    record.begin.set(qn("w:dirty"), "true")
+    return 1
+
+
+def _apply_toc_source_strategy(
+    document: Any, structure_map: dict[str, Any]
+) -> tuple[int, str | None]:
+    toc_source = structure_map.get("toc_source", {})
+    if not toc_source.get("approved"):
+        return 0, None
+    sources = _approved_toc_sources(document, structure_map)
+    if not sources:
+        raise FormatMonographError("Approved TOC source contains no approved headings.")
+    maximum = int(toc_source.get("levels", 4))
+    requested = str(toc_source.get("mode", "auto"))
+    style_safe = _toc_style_mode_is_safe(document, sources, maximum)
+    if requested == "heading_styles" and not style_safe:
+        raise FormatMonographError(
+            "Heading-style TOC sources contain an unapproved or non-text object."
+        )
+    selected = (
+        "heading_styles"
+        if requested == "heading_styles" or requested == "auto" and style_safe
+        else "tc_plain_text"
+    )
+    identifier = str(toc_source.get("tc_identifier", "M")).upper()
+    allowed_paragraphs = {id(paragraph._p) for paragraph, _, _, _ in sources}
+    if selected == "heading_styles":
+        changed = _clear_managed_tc_fields(
+            document, identifier, allowed_paragraphs
+        )
+        changed += _set_single_toc_instruction(
+            document, f'TOC \\o "1-{maximum}" \\h \\z'
+        )
+        return changed, selected
+
+    numbering_approved = bool(structure_map.get("numbering", {}).get("approved"))
+    changed = _ensure_managed_tc_fields(
+        document, sources, identifier, numbering_approved
+    )
+    changed += _set_single_toc_instruction(
+        document, f"TOC \\f {identifier} \\h \\z"
+    )
+    return changed, selected
+
+
+def audit_structure_toc_source_operations(
+    document: Any, structure_map: dict[str, Any]
+) -> list[dict[str, Any]]:
+    toc_source = structure_map.get("toc_source", {})
+    if not toc_source.get("approved"):
+        return []
+    from field_writeback import parse_fields
+
+    try:
+        sources = _approved_toc_sources(document, structure_map)
+        contract = toc_result_contract(document, structure_map)
+        records = parse_fields(document.element)
+        toc_records = [record for record in records if record.field_type == "TOC"]
+        if len(toc_records) != 1 or contract is None:
+            raise FormatMonographError(
+                "Approved TOC source requires exactly one TOC field and a source contract."
+            )
+        instruction = toc_records[0].instruction
+        identifier = _field_instruction_identifier(instruction)
+        maximum = int(toc_source.get("levels", 4))
+        style_mode = bool(re.search(r"\\o\s+", instruction, re.IGNORECASE))
+        if style_mode:
+            if not _toc_style_mode_is_safe(document, sources, maximum):
+                raise FormatMonographError(
+                    "Heading-style TOC contains an unapproved or non-text source."
+                )
+            if any(record.field_type == "TC" for record in records):
+                raise FormatMonographError(
+                    "Heading-style TOC cannot retain managed TC sources."
+                )
+            return []
+        expected_identifier = str(toc_source.get("tc_identifier", "M")).upper()
+        if identifier != expected_identifier:
+            raise FormatMonographError(
+                "Plain-text TOC does not use the approved TC identifier."
+            )
+        expected = {}
+        numbering_approved = bool(
+            structure_map.get("numbering", {}).get("approved")
+        )
+        for ordinal, (paragraph, level, kind, entry) in enumerate(
+            sources, start=1
+        ):
+            value = _toc_display_text(
+                paragraph, level, kind, entry, numbering_approved
+            )
+            expected[id(paragraph._p)] = (
+                _tc_instruction(value, level, expected_identifier),
+                _tc_bookmark_name(
+                    value, level, expected_identifier, ordinal
+                ),
+            )
+        actual: dict[int, list[tuple[str, str, str | None]]] = {
+            key: [] for key in expected
+        }
+        for record in records:
+            if record.field_type != "TC" or not _managed_tc_field(
+                record.instruction, expected_identifier
+            ):
+                continue
+            marker = record.simple if record.form == "simple" else record.begin
+            paragraph = None if marker is None else _field_paragraph(marker)
+            key = None if paragraph is None else id(paragraph)
+            if key not in expected:
+                raise FormatMonographError(
+                    "Managed TC source is outside an approved pure-text heading."
+                )
+            actual[key].append(
+                (record.form, record.instruction, _tc_field_bookmark(record))
+            )
+        if any(
+            values != [("complex", *expected[key])]
+            for key, values in actual.items()
+        ):
+            raise FormatMonographError(
+                "Managed TC sources do not match approved headings one-to-one."
+            )
+        return []
+    except (FormatMonographError, KeyError, TypeError, ValueError) as exc:
+        return [{"reason": "toc_source_contract_mismatch", "detail": str(exc)}]
 
 
 def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
@@ -3500,6 +4386,9 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
     heading_targets = _apply_headings(document, structure_map)
     appendix_targets = _apply_appendices(document, structure_map)
     outline_targets = _apply_outline_cleanup(document, structure_map)
+    toc_source_targets, toc_source_mode = _apply_toc_source_strategy(
+        document, structure_map
+    )
     table_targets = _apply_tables(document, structure_map)
     table_cell_cleanup_targets = _apply_table_cell_cleanups(document, structure_map)
     caption_targets = _apply_captions(document, structure_map)
@@ -3517,6 +4406,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         ),
     )
     image_targets = _apply_images(document, structure_map)
+    image_visibility_targets = _apply_image_visibility(document, structure_map)
     caption_actions: dict[str, int] = {}
     if has_caption_actions_map(structure_map):
         for entry in structure_map.get("captions", []):
@@ -3534,6 +4424,11 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         {"kind": "structure_headings", "targets": heading_targets},
         {"kind": "structure_appendices", "targets": appendix_targets},
         {"kind": "structure_outline_cleanup", "targets": outline_targets},
+        {
+            "kind": "structure_toc_source",
+            "targets": toc_source_targets,
+            "details": {"mode": toc_source_mode},
+        },
         {"kind": "structure_tables", "targets": table_targets},
         {
             "kind": "structure_table_cell_cleanup",
@@ -3546,6 +4441,10 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         },
         {"kind": "structure_pagination", "targets": pagination_targets},
         {"kind": "structure_image_resize", "targets": image_targets},
+        {
+            "kind": "structure_image_visibility",
+            "targets": image_visibility_targets,
+        },
         {"kind": "structure_block_spacing", "targets": spacing_targets},
         {
             "kind": "structure_trailing_sections",
@@ -3561,7 +4460,15 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
             "details": pagination_sections,
         },
     ]
-    return [change for change in changes if change["targets"]]
+    return [
+        change
+        for change in changes
+        if change["targets"]
+        or (
+            change["kind"] == "structure_toc_source"
+            and change.get("details", {}).get("mode") is not None
+        )
+    ]
 
 
 def _indent_conflicts(ind: Any | None) -> dict[str, str]:

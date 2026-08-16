@@ -71,7 +71,7 @@ class FieldRecord:
 def parse_fields(root: etree._Element) -> list[FieldRecord]:
     records: list[FieldRecord] = []
     stack: list[FieldRecord] = []
-    simple_elements = set(root.xpath(".//w:fldSimple", namespaces=NS))
+    simple_elements = set(root.iter(qn("w:fldSimple")))
     for element in root.iter():
         if element in simple_elements:
             instruction = _normalized_instruction(element.get(qn("w:instr"), ""))
@@ -113,7 +113,10 @@ def parse_fields(root: etree._Element) -> list[FieldRecord]:
         raise FormatMonographError("DOCX contains an unterminated complex field.")
     for record in records:
         if record.form == "complex" and (
-            record.begin is None or record.separate is None or record.end is None
+            record.begin is None
+            or record.end is None
+            or record.separate is None
+            and record.field_type != "TC"
         ):
             raise FormatMonographError(
                 "DOCX contains a complex field without begin, separate, and end boundaries."
@@ -152,6 +155,8 @@ def _result_text_nodes(root: etree._Element, record: FieldRecord) -> list[etree.
     if record.form == "simple":
         assert record.simple is not None
         return [item for item in record.simple.iter() if item.tag in FIELD_TEXT_TAGS]
+    if record.field_type == "TC" and record.separate is None:
+        return []
     assert record.separate is not None and record.end is not None
     return [
         item
@@ -164,6 +169,8 @@ def _result_payload(root: etree._Element, record: FieldRecord) -> list[etree._El
     if record.form == "simple":
         assert record.simple is not None
         return list(record.simple.iter())
+    if record.field_type == "TC" and record.separate is None:
+        return []
     assert record.separate is not None and record.end is not None
     return _element_slice(root, record.separate, record.end)
 
@@ -506,17 +513,134 @@ def _unwrap_element(element: etree._Element) -> None:
     parent.remove(element)
 
 
-def _sanitize_toc_blocks(blocks: list[etree._Element]) -> None:
+def _toc_entry_level(paragraph: etree._Element) -> int | None:
+    styles = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
+    if not styles:
+        return None
+    match = re.fullmatch(r"TOC\s*([1-9])", str(styles[-1]), re.IGNORECASE)
+    return None if match is None else int(match.group(1))
+
+
+def _toc_entry_text(paragraph: etree._Element) -> tuple[str, str]:
+    segments: list[list[str]] = [[]]
+    tab_count = 0
+    for element in paragraph.iter():
+        if element.tag == qn("w:tab"):
+            segments.append([])
+            tab_count += 1
+            continue
+        if element.tag not in FIELD_TEXT_TAGS:
+            continue
+        segments[-1].append(element.text or "")
+    values = [" ".join("".join(segment).split()) for segment in segments]
+    values = [value for value in values if value]
+    if len(values) < 2:
+        if values and tab_count:
+            return "", values[0]
+        return (values[0] if values else ""), ""
+    return " ".join(values[:-1]), values[-1]
+
+
+def _toc_contract_text(value: str, level: int, kind: str) -> str:
+    if kind == "heading":
+        if level == 1:
+            pattern = re.compile(
+                r"^\s*第\s*[0-9一二三四五六七八九十百]+\s*章\s*"
+            )
+        else:
+            pattern = re.compile(rf"^\s*\d+(?:[.-]\d+){{{level - 1}}}\s*")
+        match = pattern.match(value)
+        if match:
+            value = value[match.end() :]
+    return " ".join(value.split())
+
+
+def _validate_toc_contract(
+    container: etree._Element,
+    contract: list[dict[str, Any]],
+) -> None:
+    entries: list[dict[str, Any]] = []
+    for paragraph in container.xpath(".//w:p", namespaces=NS):
+        level = _toc_entry_level(paragraph)
+        title, page = _toc_entry_text(paragraph)
+        has_visible_text = bool(title or page)
+        if level is None:
+            if has_visible_text and not paragraph.xpath(
+                ".//w:instrText", namespaces=NS
+            ):
+                raise FormatMonographError(
+                    "Refreshed TOC contains text outside a TOC entry."
+                )
+            continue
+        if not title:
+            raise FormatMonographError("Refreshed TOC contains an empty entry.")
+        if not re.fullmatch(r"[0-9IVXLCDMivxlcdm.\-–—]+", page):
+            raise FormatMonographError(
+                "Refreshed TOC entry has no verifiable page value."
+            )
+        internal_target = bool(
+            paragraph.xpath(".//w:hyperlink[@w:anchor]", namespaces=NS)
+        ) or bool(
+            re.search(
+                r"\bPAGEREF\b",
+                " ".join(
+                    paragraph.xpath(".//w:instrText/text()", namespaces=NS)
+                ),
+                re.IGNORECASE,
+            )
+        )
+        if not internal_target:
+            raise FormatMonographError(
+                "Refreshed TOC entry has no internal target."
+            )
+        entries.append({"level": level, "title": title})
+    if len(entries) != len(contract):
+        raise FormatMonographError(
+            "Refreshed TOC entry count does not match approved sources."
+        )
+    for entry, expected in zip(entries, contract):
+        level = int(expected.get("level", 0))
+        kind = str(expected.get("kind", ""))
+        if entry["level"] != level:
+            raise FormatMonographError(
+                "Refreshed TOC entry level does not match approved sources."
+            )
+        value = _toc_contract_text(entry["title"], level, kind)
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+        if not value or digest != expected.get("text_sha256"):
+            raise FormatMonographError(
+                "Refreshed TOC entry text or order does not match approved sources."
+            )
+
+
+def _sanitize_toc_blocks(
+    blocks: list[etree._Element],
+    toc_contract: list[dict[str, Any]] | None = None,
+) -> None:
     container = etree.Element("container")
     for block in blocks:
         container.append(block)
-    if container.xpath(
-        ".//w:drawing | .//w:object | .//w:pict | .//w:tbl | .//w:altChunk | .//w:sectPr",
-        namespaces=NS,
-    ):
+    prohibited = {
+        "AlternateContent",
+        "altChunk",
+        "control",
+        "drawing",
+        "imagedata",
+        "object",
+        "oleObject",
+        "pict",
+        "sdt",
+        "sectPr",
+        "shape",
+        "tbl",
+        "txbxContent",
+    }
+    if any(etree.QName(element).localname in prohibited for element in container.iter()):
         raise FormatMonographError("Refreshed TOC contains a non-text result payload.")
-    if container.xpath(".//*[@r:id]", namespaces=NS):
+    if container.xpath(".//*[@r:id or @r:embed or @r:link]", namespaces=NS):
         raise FormatMonographError("Refreshed TOC contains an external relationship.")
+    if toc_contract is not None:
+        _validate_toc_contract(container, toc_contract)
     for hyperlink in list(container.xpath(".//w:hyperlink", namespaces=NS)):
         _unwrap_element(hyperlink)
     for bookmark in list(
@@ -555,6 +679,7 @@ def _replace_toc_result(
     baseline: FieldRecord,
     refreshed_root: etree._Element,
     refreshed: FieldRecord,
+    toc_contract: list[dict[str, Any]] | None = None,
 ) -> None:
     baseline_body, baseline_start, baseline_end = _toc_span(baseline_root, baseline)
     refreshed_body, refreshed_start, refreshed_end = _toc_span(refreshed_root, refreshed)
@@ -562,7 +687,7 @@ def _replace_toc_result(
         copy.deepcopy(block)
         for block in list(refreshed_body)[refreshed_start : refreshed_end + 1]
     ]
-    _sanitize_toc_blocks(blocks)
+    _sanitize_toc_blocks(blocks, toc_contract)
     container = etree.Element("container")
     for block in blocks:
         container.append(block)
@@ -618,6 +743,9 @@ def _matched_records(
         if len(baseline_values) == 1:
             matches.append((baseline_values[0], refreshed_values[0]))
             continue
+        if key[0] == "TC" and "TC" in allowed:
+            matches.extend(zip(baseline_values, refreshed_values))
+            continue
         baseline_contexts = {
             _record_context_key(baseline_root, record, baseline, allowed): record
             for record in baseline_values
@@ -656,12 +784,25 @@ def selective_field_result_writeback(
     output_path: Path,
     *,
     allowed_field_types: Iterable[str] = DEFAULT_ALLOWED_FIELD_TYPES,
+    toc_contract: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write only approved field results into a package copied from ``baseline_path``."""
     allowed = {str(value).upper() for value in allowed_field_types}
     if not allowed:
         raise FormatMonographError("Selective field writeback requires approved field types.")
-    unsupported = allowed - (DEFAULT_ALLOWED_FIELD_TYPES | {"=", "SEQ"})
+    if toc_contract is not None and (
+        not isinstance(toc_contract, list)
+        or not toc_contract
+        or any(
+            not isinstance(item, dict)
+            or int(item.get("level", 0)) not in {1, 2, 3, 4}
+            or item.get("kind") not in {"heading", "appendix"}
+            or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("text_sha256", "")))
+            for item in toc_contract
+        )
+    ):
+        raise FormatMonographError("TOC result contract is invalid or empty.")
+    unsupported = allowed - (DEFAULT_ALLOWED_FIELD_TYPES | {"=", "SEQ", "TC"})
     if unsupported:
         raise FormatMonographError(
             "Selective field writeback received unsupported field types: "
@@ -678,6 +819,8 @@ def selective_field_result_writeback(
     discarded_categories: set[str] = set()
     all_field_types: set[str] = set()
     unapproved_dirty_fields = 0
+    approved_source_fields = 0
+    verified_toc_fields = 0
     with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(refreshed_path) as refreshed:
         refreshed_names = set(refreshed.namelist())
         story_sources, story_discarded = _semantic_part_sources(baseline, refreshed)
@@ -756,6 +899,9 @@ def selective_field_result_writeback(
                     continue
                 if baseline_field.field_type == "TOC":
                     continue
+                if baseline_field.field_type == "TC":
+                    approved_source_fields += 1
+                    continue
                 if baseline_field.field_type not in SCALAR_FIELD_TYPES:
                     raise FormatMonographError(
                         f"Field type {baseline_field.field_type} has no selective handler."
@@ -777,8 +923,10 @@ def selective_field_result_writeback(
                     toc_matches[0][0],
                     refreshed_root,
                     toc_matches[0][1],
+                    toc_contract,
                 )
                 updated_fields += 1
+                verified_toc_fields += 1
             candidate = etree.tostring(
                 baseline_root,
                 xml_declaration=True,
@@ -801,6 +949,11 @@ def selective_field_result_writeback(
                     standalone=True,
                 )
 
+    if toc_contract is not None and verified_toc_fields != 1:
+        raise FormatMonographError(
+            "Approved TOC result contract requires exactly one verified TOC field."
+        )
+
     temp_output = output_path.with_name(f".{output_path.stem}.field-writeback.tmp.docx")
     temp_output.unlink(missing_ok=True)
     try:
@@ -820,6 +973,11 @@ def selective_field_result_writeback(
         "allowed_field_types": sorted(allowed),
         "matched_fields": matched_fields,
         "updated_fields": updated_fields,
+        "approved_source_fields": approved_source_fields,
+        "toc_result_status": (
+            "verified_text_only" if toc_contract is not None else "not_requested"
+        ),
+        "toc_source_count": 0 if toc_contract is None else len(toc_contract),
         "unapproved_field_types": sorted(all_field_types - allowed),
         "unapproved_dirty_fields": unapproved_dirty_fields,
         "patched_parts": sorted(patched_parts),
