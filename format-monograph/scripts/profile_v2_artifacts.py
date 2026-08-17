@@ -87,7 +87,9 @@ def load_artifact_schema(artifact_kind: str) -> dict[str, Any]:
     return _load_json(SCHEMA_DIR / filename)
 
 
-def schema_documents() -> dict[str, dict[str, Any]]:
+def schema_documents(
+    schema_overrides: Mapping[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
     documents: dict[str, dict[str, Any]] = {}
     for path in sorted(SCHEMA_DIR.glob("*.schema.json")):
         schema = _load_json(path)
@@ -98,12 +100,21 @@ def schema_documents() -> dict[str, dict[str, Any]]:
         if schema_id in documents:
             raise ArtifactContractError(f"Duplicate schema $id: {schema_id}")
         documents[schema_id] = schema
+    for schema_id, schema in (schema_overrides or {}).items():
+        if schema_id not in documents:
+            raise ArtifactContractError(f"Schema override has no registered target: {schema_id}")
+        if schema.get("$id") != schema_id:
+            raise ArtifactContractError(f"Schema override ID does not match its target: {schema_id}")
+        Draft202012Validator.check_schema(schema)
+        documents[schema_id] = deepcopy(schema)
     return documents
 
 
-def offline_schema_registry() -> Registry:
+def offline_schema_registry(
+    schema_overrides: Mapping[str, dict[str, Any]] | None = None,
+) -> Registry:
     registry = Registry()
-    for schema_id, schema in schema_documents().items():
+    for schema_id, schema in schema_documents(schema_overrides).items():
         registry = registry.with_resource(schema_id, Resource.from_contents(schema))
     return registry
 
@@ -120,12 +131,13 @@ def schema_errors(
     document: dict[str, Any],
     *,
     schema_override: dict[str, Any] | None = None,
+    schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     schema = schema_override or load_artifact_schema(artifact_kind)
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(
         schema,
-        registry=offline_schema_registry(),
+        registry=offline_schema_registry(schema_documents_override),
         format_checker=FormatChecker(),
     )
     return _format_errors(validator, document)
@@ -172,6 +184,17 @@ def artifact_semantic_errors(
     errors: list[str] = []
     properties = property_index(registry)
 
+    seen_input_ids: dict[str, tuple[str, str]] = {}
+    for item in document.get("input_fingerprints", []):
+        input_id = item["input_id"]
+        value = (item["role"], item["fingerprint"])
+        if input_id in seen_input_ids:
+            errors.append(
+                f"Duplicate input_id {input_id} cannot represent multiple fingerprint bindings."
+            )
+        else:
+            seen_input_ids[input_id] = value
+
     def validate_key_and_candidate(
         key: dict[str, Any], candidate: dict[str, Any], context: str
     ) -> None:
@@ -182,6 +205,10 @@ def artifact_semantic_errors(
         entry = properties.get(property_id)
         if entry is None:
             errors.append(f"{context} references unregistered property {property_id}.")
+        elif entry.get("safety_invariant"):
+            errors.append(
+                f"{context} cannot place safety invariant {property_id} in a rule candidate chain."
+            )
         elif key["semantic_object_kind"] not in entry["semantic_object_kinds"]:
             errors.append(
                 f"{context} uses property {property_id} for an unsupported semantic object."
@@ -214,33 +241,109 @@ def artifact_semantic_errors(
             errors.append("V2 final execution profiles cannot be legacy inputs.")
         if document.get("activation") != "disabled":
             errors.append("P1 final execution profiles must remain disabled.")
+
+        inputs_by_role: dict[str, list[str]] = {}
+        for item in document.get("input_fingerprints", []):
+            inputs_by_role.setdefault(item["role"], []).append(item["fingerprint"])
+        bindings = document["bindings"]
+        singleton_bindings = {
+            "source_document": "input_fingerprint",
+            "feature_activation": "feature_activation_fingerprint",
+            "property_registry": "property_registry_fingerprint",
+            "structure": "structure_fingerprint",
+            "conflict_report": "conflict_report_fingerprint",
+        }
+        for role, field in singleton_bindings.items():
+            values = inputs_by_role.get(role, [])
+            if len(values) != 1:
+                errors.append(f"Final profile requires exactly one {role} input binding.")
+            elif values[0] != bindings[field]:
+                errors.append(f"Final profile {role} fingerprint does not match bindings.{field}.")
+        for role, field in (
+            ("profile", "profile_fingerprints"),
+            ("approval", "approval_fingerprints"),
+        ):
+            values = inputs_by_role.get(role, [])
+            if not values:
+                errors.append(f"Final profile requires at least one {role} input binding.")
+            elif len(values) != len(set(values)):
+                errors.append(f"Final profile has duplicate {role} input fingerprints.")
+            elif sorted(values) != sorted(bindings[field]):
+                errors.append(f"Final profile {role} fingerprints do not match bindings.{field}.")
+
+        seen_resolution_ids: set[str] = set()
+        seen_composition_keys: set[str] = set()
         for resolved in document.get("resolved_properties", []):
+            resolution_id = resolved["resolution_id"]
+            if resolution_id in seen_resolution_ids:
+                errors.append(f"Duplicate resolution_id: {resolution_id}.")
+            seen_resolution_ids.add(resolution_id)
             key = resolved["key"]
+            composition_key = json.dumps(key, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            if composition_key in seen_composition_keys:
+                errors.append("Final profile repeats a semantic object/property/scope composition key.")
+            seen_composition_keys.add(composition_key)
             binding = resolved["resolved_binding"]
             if binding["property_id"] != key["property_id"]:
                 errors.append("Resolved property binding does not match its normalized key.")
+            if resolved["execution_mode"] != binding["mode"]:
+                errors.append("Resolved property execution_mode does not match its binding mode.")
+            entry = properties.get(key["property_id"])
+            if entry is not None and entry.get("safety_invariant"):
+                errors.append(
+                    f"Safety invariant {key['property_id']} cannot be a normal resolved property."
+                )
             synthetic_candidate = {
                 "property_binding": binding,
                 "layer_kind": resolved["final_layer_kind"],
             }
             validate_key_and_candidate(key, synthetic_candidate, "Resolved property")
             applicable_ids: set[str] = set()
+            active_ids: set[str] = set()
+            excluded_ids: set[str] = set()
             final_source_matches = False
             for candidate in resolved["candidate_chain"]:
+                candidate_id = candidate["candidate_id"]
+                if candidate_id in active_ids:
+                    errors.append(f"Resolved property repeats active candidate_id {candidate_id}.")
+                active_ids.add(candidate_id)
                 validate_key_and_candidate(key, candidate, "Resolved property")
                 if candidate["scope_status"] == "applicable":
-                    applicable_ids.add(candidate["candidate_id"])
+                    applicable_ids.add(candidate_id)
+                else:
+                    errors.append(
+                        "Active resolved property candidates must be applicable; "
+                        "exclusions are separate."
+                    )
                 if (
                     candidate["source"] == resolved["final_source"]
                     and candidate["layer_kind"] == resolved["final_layer_kind"]
                     and candidate["property_binding"] == binding
                 ):
                     final_source_matches = True
+            for excluded in resolved["excluded_candidates"]:
+                candidate = excluded["candidate"]
+                candidate_id = candidate["candidate_id"]
+                if candidate_id in excluded_ids:
+                    errors.append(f"Resolved property repeats excluded candidate_id {candidate_id}.")
+                excluded_ids.add(candidate_id)
+                validate_key_and_candidate(key, candidate, "Excluded resolved property")
+                if candidate["scope_status"] == "applicable":
+                    errors.append("Excluded resolved candidates cannot be marked applicable.")
+            overlapping_ids = active_ids & excluded_ids
+            if overlapping_ids:
+                errors.append("Resolved property candidate IDs cannot be both active and excluded.")
             if not final_source_matches:
                 errors.append("Resolved property final source is absent from its candidate chain.")
             unknown_override_ids = set(resolved["override_chain"]) - applicable_ids
             if unknown_override_ids:
                 errors.append("Resolved property override chain references non-applicable candidates.")
+            for invariant_id in resolved["safety_check"]["checked_invariant_ids"]:
+                invariant = properties.get(invariant_id)
+                if invariant is None or not invariant.get("safety_invariant"):
+                    errors.append(
+                        f"Safety check references non-safety property {invariant_id}."
+                    )
     elif artifact_kind == "conflict-report":
         for conflict in document.get("conflicts", []):
             key = conflict["key"]
@@ -272,6 +375,7 @@ def validate_artifact(
     features: Mapping[str, Any] | None = None,
     registry: dict[str, Any] | None = None,
     schema_override: dict[str, Any] | None = None,
+    schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
 ) -> ProfileReadResult:
     if not profile_v2_schema_enabled(features):
         raise ProfileV2DisabledError(
@@ -284,7 +388,12 @@ def validate_artifact(
     effective_schema, compatible_minor = schema_for_requested_minor(
         schema, document.get("schema_version")
     )
-    errors = schema_errors(artifact_kind, document, schema_override=effective_schema)
+    errors = schema_errors(
+        artifact_kind,
+        document,
+        schema_override=effective_schema,
+        schema_documents_override=schema_documents_override,
+    )
     registry = registry or load_registry()
     verify_committed_catalog() if registry.get("registry_scope") == "production" else None
     if not errors:

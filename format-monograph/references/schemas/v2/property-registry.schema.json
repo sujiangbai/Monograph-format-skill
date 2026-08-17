@@ -63,17 +63,19 @@
     },
     "executor_capability": {
       "type": "object", "additionalProperties": false,
-      "required": ["capability_id", "description"],
+      "required": ["capability_id", "availability", "description"],
       "properties": {
         "capability_id": {"type": "string", "pattern": "^executor\\.[a-z][a-z0-9-]{1,31}$"},
+        "availability": {"type": "string", "enum": ["unavailable", "reserved", "implemented"]},
         "description": {"$ref": "#/$defs/description"}
       }
     },
     "auditor_capability": {
       "type": "object", "additionalProperties": false,
-      "required": ["capability_id", "description"],
+      "required": ["capability_id", "availability", "description"],
       "properties": {
         "capability_id": {"type": "string", "pattern": "^auditor\\.[a-z][a-z0-9-]{1,31}$"},
+        "availability": {"type": "string", "enum": ["unavailable", "reserved", "implemented"]},
         "description": {"$ref": "#/$defs/description"}
       }
     },

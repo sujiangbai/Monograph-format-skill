@@ -135,7 +135,7 @@
     "layer_kind": {
       "type": "string",
       "enum": [
-        "safety", "task_override", "publisher_template", "module",
+        "task_override", "publisher_template", "module",
         "book_type", "monograph_base", "standard_supplement"
       ]
     },

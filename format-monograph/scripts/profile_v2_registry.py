@@ -101,6 +101,14 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
     data_type_index = {
         item["data_type_id"]: item for item in registry.get("data_types", [])
     }
+    executor_index = {
+        item["capability_id"]: item
+        for item in registry.get("executor_capabilities", [])
+    }
+    auditor_index = {
+        item["capability_id"]: item
+        for item in registry.get("auditor_capabilities", [])
+    }
 
     for collection, values, expected_prefix in (
         ("normalizers", known_normalizers, "normalizer."),
@@ -157,6 +165,18 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
             numeric_range = item.get("value_constraints", {}).get("numeric_range")
             if numeric_range is not None and item["data_type_id"] not in {"integer", "decimal"}:
                 errors.append(f"{property_id} declares a numeric range for a nonnumeric data type.")
+
+        if "automatic" in item.get("modes", []):
+            executor = executor_index.get(item["executor_capability_id"])
+            auditor = auditor_index.get(item["auditor_capability_id"])
+            if executor is None or executor.get("availability") != "implemented":
+                errors.append(
+                    f"{property_id} cannot use automatic mode without an implemented executor."
+                )
+            if auditor is None or auditor.get("availability") != "implemented":
+                errors.append(
+                    f"{property_id} cannot use automatic mode without an implemented auditor."
+                )
 
         canonical_unit = item.get("canonical_unit_id")
         allowed_units = set(item.get("allowed_unit_ids", []))

@@ -16,7 +16,15 @@
     "schema_version": "2.0",
     "artifact_id": "final-execution-profile:test",
     "created_by_tool": {"tool_id": "format-monograph", "version": "0.4.1"},
-    "input_fingerprints": [{"input_id": "input:test", "role": "profile", "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}],
+    "input_fingerprints": [
+      {"input_id": "source:test", "role": "source_document", "fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+      {"input_id": "activation:test", "role": "feature_activation", "fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+      {"input_id": "registry:test", "role": "property_registry", "fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+      {"input_id": "profile:test", "role": "profile", "fingerprint": "sha256:4444444444444444444444444444444444444444444444444444444444444444"},
+      {"input_id": "structure:test", "role": "structure", "fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555"},
+      {"input_id": "approval:test", "role": "approval", "fingerprint": "sha256:6666666666666666666666666666666666666666666666666666666666666666"},
+      {"input_id": "conflict:test", "role": "conflict_report", "fingerprint": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}
+    ],
     "semantic_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
     "task_id": "task:test",
     "legacy_input": false,

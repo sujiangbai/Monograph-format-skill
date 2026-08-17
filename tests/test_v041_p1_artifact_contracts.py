@@ -59,6 +59,15 @@ def resolved_final_profile() -> dict:
     return load_json(FIXTURES / "resolved-final-profile.json")
 
 
+def derived_schema_overrides(registry: dict) -> dict[str, dict]:
+    typed_values = build_typed_value_schema(registry)
+    property_catalog = build_property_catalog_schema(registry)
+    return {
+        typed_values["$id"]: typed_values,
+        property_catalog["$id"]: property_catalog,
+    }
+
+
 def legacy_profile(version: str) -> dict:
     profile = {
         "schema_version": version,
@@ -363,7 +372,10 @@ class RegistryFoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryContractError, "refuses test-only"):
             load_registry(self.test_registry_path)
         registry = load_registry(self.test_registry_path, allow_test=True)
-        self.assertEqual(["test.paragraph-font-size"], [p["property_id"] for p in registry["properties"]])
+        self.assertEqual(
+            ["test.paragraph-font-size", "test.safety-author-content-immutable"],
+            [p["property_id"] for p in registry["properties"]],
+        )
         catalog = build_property_catalog_schema(registry)
         binding = {
             "property_id": "test.paragraph-font-size",
@@ -514,6 +526,25 @@ class RegistryFoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryContractError, "outside its registered data type"):
             validate_registry_document(registry)
 
+    def test_t41_reg_core_005b_automatic_requires_implemented_executor_and_auditor(self) -> None:
+        registry = load_json(self.test_registry_path)
+        validate_registry_document(registry)
+
+        registry["properties"][0]["modes"].append("automatic")
+        with self.assertRaisesRegex(RegistryContractError, "implemented executor"):
+            validate_registry_document(registry)
+
+        registry["executor_capabilities"][0]["availability"] = "implemented"
+        with self.assertRaisesRegex(RegistryContractError, "implemented auditor"):
+            validate_registry_document(registry)
+
+        registry["auditor_capabilities"][0]["availability"] = "unavailable"
+        with self.assertRaisesRegex(RegistryContractError, "implemented auditor"):
+            validate_registry_document(registry)
+
+        registry["auditor_capabilities"][0]["availability"] = "implemented"
+        validate_registry_document(registry)
+
 
 class ResolvedProfileAndConflictContractTests(unittest.TestCase):
     """T41-SCH-005/015 and T41-REG-CORE-002/005 composition data contracts."""
@@ -521,11 +552,33 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = resolved_final_profile()
         self.artifacts = minimal_artifacts()
+        self.registry = load_registry(
+            FIXTURES / "property-registry.test.json", allow_test=True
+        )
+        self.schema_overrides = derived_schema_overrides(self.registry)
+
+    def _schema_errors(self, artifact_kind: str, artifact: dict) -> list[str]:
+        return schema_errors(
+            artifact_kind,
+            artifact,
+            schema_documents_override=self.schema_overrides,
+        )
+
+    def _validate(self, artifact: dict) -> None:
+        validate_artifact(
+            artifact,
+            features={"profile_v2_schema": True},
+            registry=self.registry,
+            schema_documents_override=self.schema_overrides,
+        )
 
     def test_t41_sch_015a_complete_resolved_property_contract_is_valid(self) -> None:
-        self.assertFalse(schema_errors("final-execution-profile", self.profile))
+        self.assertFalse(self._schema_errors("final-execution-profile", self.profile))
         result = validate_artifact(
-            self.profile, features={"profile_v2_schema": True}
+            self.profile,
+            features={"profile_v2_schema": True},
+            registry=self.registry,
+            schema_documents_override=self.schema_overrides,
         )
         self.assertFalse(result.runtime_eligible)
 
@@ -539,40 +592,187 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
             profile = deepcopy(self.profile)
             del profile["bindings"][field]
             with self.subTest(field=field):
-                self.assertTrue(schema_errors("final-execution-profile", profile))
+                self.assertTrue(self._schema_errors("final-execution-profile", profile))
 
         for field in ("profile_fingerprints", "approval_fingerprints"):
             profile = deepcopy(self.profile)
             profile["bindings"][field].append(profile["bindings"][field][0])
             with self.subTest(field=field, condition="duplicate"):
-                self.assertTrue(schema_errors("final-execution-profile", profile))
+                self.assertTrue(self._schema_errors("final-execution-profile", profile))
+
+    def test_t41_sch_015d_final_bindings_match_their_critical_inputs(self) -> None:
+        profile = deepcopy(self.profile)
+        profile["input_fingerprints"] = [
+            item for item in profile["input_fingerprints"]
+            if item["role"] != "feature_activation"
+        ]
+        with self.assertRaisesRegex(ArtifactContractError, "feature_activation"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        registry_input = next(
+            item for item in profile["input_fingerprints"]
+            if item["role"] == "property_registry"
+        )
+        registry_input["fingerprint"] = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        with self.assertRaisesRegex(ArtifactContractError, "property_registry fingerprint"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        duplicate_id = deepcopy(profile["input_fingerprints"][0])
+        duplicate_id["role"] = "profile"
+        duplicate_id["fingerprint"] = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        profile["input_fingerprints"].append(duplicate_id)
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate input_id"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        profile["input_fingerprints"].append(
+            {
+                "input_id": "profile:extra",
+                "role": "profile",
+                "fingerprint": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            }
+        )
+        with self.assertRaisesRegex(ArtifactContractError, "profile fingerprints"):
+            self._validate(profile)
 
     def test_t41_sch_015c_resolved_source_chain_and_nested_fields_are_closed(self) -> None:
         profile = deepcopy(self.profile)
         profile["resolved_properties"][0]["candidate_chain"] = []
-        self.assertTrue(schema_errors("final-execution-profile", profile))
+        self.assertTrue(self._schema_errors("final-execution-profile", profile))
 
         profile = deepcopy(self.profile)
         profile["resolved_properties"][0]["key"]["normalized_scope"]["callable"] = "x.y"
-        self.assertTrue(schema_errors("final-execution-profile", profile))
+        self.assertTrue(self._schema_errors("final-execution-profile", profile))
 
         profile = deepcopy(self.profile)
         profile["resolved_properties"][0]["final_source"]["source_rule_id"] = "OTHER-RULE"
         with self.assertRaisesRegex(ArtifactContractError, "final source"):
-            validate_artifact(profile, features={"profile_v2_schema": True})
+            self._validate(profile)
 
-    def _candidate(self, candidate_id: str, *, layer: str = "safety", scope: str = "applicable") -> dict:
+    def test_t41_sch_015e_final_profile_is_a_flat_unique_execution_input(self) -> None:
+        profile = deepcopy(self.profile)
+        duplicate = deepcopy(profile["resolved_properties"][0])
+        profile["resolved_properties"].append(duplicate)
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate resolution_id"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        duplicate = deepcopy(profile["resolved_properties"][0])
+        duplicate["resolution_id"] = "resolution:second"
+        profile["resolved_properties"].append(duplicate)
+        with self.assertRaisesRegex(ArtifactContractError, "composition key"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        candidate = deepcopy(profile["resolved_properties"][0]["candidate_chain"][0])
+        profile["resolved_properties"][0]["candidate_chain"].append(candidate)
+        with self.assertRaisesRegex(ArtifactContractError, "repeats active candidate_id"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        candidate = deepcopy(profile["resolved_properties"][0]["candidate_chain"][0])
+        candidate["candidate_id"] = "candidate:excluded"
+        candidate["scope_status"] = "out_of_scope"
+        exclusion = {
+            "candidate": candidate,
+            "exclusion_reason": "scope_violation",
+            "reason_code": "SCOPE-EXCLUDED",
+        }
+        profile["resolved_properties"][0]["excluded_candidates"] = [
+            exclusion,
+            deepcopy(exclusion),
+        ]
+        with self.assertRaisesRegex(ArtifactContractError, "repeats excluded candidate_id"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        profile["resolved_properties"][0]["candidate_chain"][0][
+            "scope_status"
+        ] = "out_of_scope"
+        with self.assertRaisesRegex(ArtifactContractError, "must be applicable"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        candidate = deepcopy(profile["resolved_properties"][0]["candidate_chain"][0])
+        candidate["scope_status"] = "out_of_scope"
+        profile["resolved_properties"][0]["excluded_candidates"] = [
+            {
+                "candidate": candidate,
+                "exclusion_reason": "scope_violation",
+                "reason_code": "SCOPE-EXCLUDED",
+            }
+        ]
+        with self.assertRaisesRegex(ArtifactContractError, "both active and excluded"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        profile["resolved_properties"][0]["execution_mode"] = "qa"
+        with self.assertRaisesRegex(ArtifactContractError, "does not match its binding mode"):
+            self._validate(profile)
+
+        profile = deepcopy(self.profile)
+        profile["resolved_properties"][0]["override_chain"] = ["candidate:missing"]
+        with self.assertRaisesRegex(ArtifactContractError, "non-applicable candidates"):
+            self._validate(profile)
+
+    def test_t41_sch_015f_safety_invariants_never_enter_ordinary_candidates(self) -> None:
+        profile = deepcopy(self.profile)
+        resolved = profile["resolved_properties"][0]
+        normalized_scope = deepcopy(resolved["key"]["normalized_scope"])
+        resolved["key"] = {
+            "semantic_object_kind": "document",
+            "property_id": "test.safety-author-content-immutable",
+            "normalized_scope": normalized_scope,
+        }
+        resolved["resolved_binding"] = {
+            "property_id": "test.safety-author-content-immutable",
+            "value": {"type": "boolean", "value": True},
+            "unit_id": None,
+            "mode": "block",
+        }
+        resolved["final_layer_kind"] = "monograph_base"
+        resolved["final_source"] = {
+            "source_artifact_id": "layered-rule-asset:test",
+            "source_rule_id": "RULE-TEST-SAFETY-ILLEGAL",
+        }
+        resolved["candidate_chain"] = [
+            {
+                "candidate_id": "candidate:illegal-safety",
+                "property_binding": deepcopy(resolved["resolved_binding"]),
+                "source": deepcopy(resolved["final_source"]),
+                "layer_kind": "monograph_base",
+                "confidence": "high",
+                "scope_status": "applicable",
+            }
+        ]
+        resolved["override_chain"] = ["candidate:illegal-safety"]
+        resolved["execution_mode"] = "block"
+        resolved["safety_check"]["checked_invariant_ids"] = [
+            "test.safety-author-content-immutable"
+        ]
+        with self.assertRaisesRegex(ArtifactContractError, "Safety invariant"):
+            self._validate(profile)
+
+        profile["resolved_properties"][0]["final_layer_kind"] = "safety"
+        profile["resolved_properties"][0]["candidate_chain"][0]["layer_kind"] = "safety"
+        self.assertTrue(self._schema_errors("final-execution-profile", profile))
+
+    def _candidate(
+        self, candidate_id: str, *, layer: str = "monograph_base", scope: str = "applicable"
+    ) -> dict:
         return {
             "candidate_id": candidate_id,
             "property_binding": {
-                "property_id": "security.author-content-immutable",
-                "value": {"type": "boolean", "value": True},
-                "unit_id": None,
-                "mode": "block",
+                "property_id": "test.paragraph-font-size",
+                "value": {"type": "decimal", "value": "10.50"},
+                "unit_id": "unit.pt",
+                "mode": "report",
             },
             "source": {
-                "source_artifact_id": "layered-rule-asset:safety",
-                "source_rule_id": "SAFETY-AUTHOR-CONTENT",
+                "source_artifact_id": "layered-rule-asset:test",
+                "source_rule_id": "RULE-TEST-FONT-SIZE",
             },
             "layer_kind": layer,
             "confidence": "high",
@@ -601,30 +801,30 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
 
     def test_t41_sch_016a_same_layer_conflict_records_sources_and_bindings(self) -> None:
         artifact = self._conflict()
-        self.assertFalse(schema_errors("conflict-report", artifact))
-        validate_artifact(artifact, features={"profile_v2_schema": True})
+        self.assertFalse(self._schema_errors("conflict-report", artifact))
+        self._validate(artifact)
 
     def test_t41_sch_016b_conflict_rejects_unregistered_property_and_cross_layer_confusion(self) -> None:
         artifact = self._conflict()
         artifact["conflicts"][0]["candidates"] = artifact["conflicts"][0]["candidates"][:1]
         with self.assertRaisesRegex(ArtifactContractError, "at least two"):
-            validate_artifact(artifact, features={"profile_v2_schema": True})
+            self._validate(artifact)
 
         artifact = self._conflict()
         artifact["conflicts"][0]["key"]["property_id"] = "unknown.property"
         with self.assertRaisesRegex(ArtifactContractError, "unregistered property"):
-            validate_artifact(artifact, features={"profile_v2_schema": True})
+            self._validate(artifact)
 
         artifact = self._conflict()
-        artifact["conflicts"][0]["candidates"][1]["layer_kind"] = "monograph_base"
+        artifact["conflicts"][0]["candidates"][1]["layer_kind"] = "publisher_template"
         with self.assertRaisesRegex(ArtifactContractError, "same_layer"):
-            validate_artifact(artifact, features={"profile_v2_schema": True})
+            self._validate(artifact)
 
     def test_t41_sch_016c_scope_violation_requires_a_declarative_exclusion(self) -> None:
         artifact = self._conflict(reason="scope_violation")
         artifact["conflicts"][0]["candidates"] = [self._candidate("candidate:active")]
         with self.assertRaisesRegex(ArtifactContractError, "scope-violation exclusion"):
-            validate_artifact(artifact, features={"profile_v2_schema": True})
+            self._validate(artifact)
 
         artifact["conflicts"][0]["excluded_candidates"] = [
             {
@@ -635,7 +835,7 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
                 "reason_code": "SCOPE-OUTSIDE-SECTION",
             }
         ]
-        validate_artifact(artifact, features={"profile_v2_schema": True})
+        self._validate(artifact)
 
 
 class VersionDispatchAndRegressionTests(unittest.TestCase):

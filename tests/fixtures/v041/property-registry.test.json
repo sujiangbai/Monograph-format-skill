@@ -3,22 +3,25 @@
   "registry_id": "registry:test-v041",
   "registry_scope": "test",
   "data_types": [
+    {"data_type_id": "boolean", "json_type": "boolean"},
     {"data_type_id": "decimal", "json_type": "string", "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"}
   ],
   "units": [
     {"unit_id": "unit.pt", "dimension": "length", "symbol": "pt"}
   ],
   "normalizers": [
+    {"normalizer_id": "normalizer.boolean", "description": "Synthetic boolean normalizer contract."},
     {"normalizer_id": "normalizer.decimal", "description": "Synthetic decimal normalizer contract."}
   ],
   "comparators": [
+    {"comparator_id": "comparator.exact", "description": "Synthetic exact comparator contract."},
     {"comparator_id": "comparator.decimal", "description": "Synthetic decimal comparator contract."}
   ],
   "executor_capabilities": [
-    {"capability_id": "executor.none", "description": "Synthetic non-executing capability."}
+    {"capability_id": "executor.none", "availability": "unavailable", "description": "Synthetic non-executing capability."}
   ],
   "auditor_capabilities": [
-    {"capability_id": "auditor.content-integrity", "description": "Synthetic audit capability."}
+    {"capability_id": "auditor.content-integrity", "availability": "reserved", "description": "Synthetic audit capability."}
   ],
   "constraints": [],
   "properties": [
@@ -52,6 +55,29 @@
       "constraint_ids": [],
       "test_ids": ["T41-REG-CORE-010"],
       "modes": ["report"]
+    },
+    {
+      "property_id": "test.safety-author-content-immutable",
+      "test_only": true,
+      "semantic_object_kinds": ["document"],
+      "allowed_layers": ["safety"],
+      "data_type_id": "boolean",
+      "canonical_unit_id": null,
+      "allowed_unit_ids": [],
+      "comparison_precision": null,
+      "normalizer_id": "normalizer.boolean",
+      "comparator_id": "comparator.exact",
+      "executor_capability_id": "executor.none",
+      "auditor_capability_id": "auditor.content-integrity",
+      "overridable": false,
+      "safety_invariant": true,
+      "qa_required": false,
+      "missing_strategy": "blocked_qa",
+      "unknown_object_strategy": "blocked_qa",
+      "value_constraints": {"enum_values": [true], "numeric_range": null},
+      "constraint_ids": [],
+      "test_ids": ["T41-REG-CORE-010"],
+      "modes": ["block"]
     }
   ]
 }
