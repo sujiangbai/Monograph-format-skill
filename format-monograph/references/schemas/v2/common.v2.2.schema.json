@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.2/common.schema.json",
+  "title": "Format Monograph V2.2 Common Contracts",
+  "x-profile-schema-version": "2.2",
+  "x-registry-contract-version": "2.1",
+  "$defs": {
+    "artifact_id": {"$ref": "../v2.1/common.schema.json#/$defs/artifact_id"},
+    "stable_id": {"$ref": "../v2.1/common.schema.json#/$defs/stable_id"},
+    "property_id": {"$ref": "../v2.1/common.schema.json#/$defs/property_id"},
+    "rule_id": {"$ref": "../v2.1/common.schema.json#/$defs/rule_id"},
+    "semantic_object_kind": {"$ref": "../v2.1/common.schema.json#/$defs/semantic_object_kind"},
+    "semantic_fingerprint": {"$ref": "../v2.1/common.schema.json#/$defs/semantic_fingerprint"},
+    "created_by_tool": {"$ref": "../v2.1/common.schema.json#/$defs/created_by_tool"},
+    "scope_selector": {"$ref": "../v2.1/common.schema.json#/$defs/scope_selector"},
+    "scope_condition": {"$ref": "../v2.1/common.schema.json#/$defs/scope_condition"},
+    "scope_expression": {"$ref": "../v2.1/common.schema.json#/$defs/scope_expression"},
+    "normalized_scope": {"$ref": "../v2.1/common.schema.json#/$defs/normalized_scope"},
+    "property_key": {"$ref": "../v2.1/common.schema.json#/$defs/property_key"},
+    "source_reference": {"$ref": "../v2.1/common.schema.json#/$defs/source_reference"},
+    "safety_check": {"$ref": "../v2.1/common.schema.json#/$defs/safety_check"},
+    "safety_invariants": {"$ref": "../v2.1/common.schema.json#/$defs/safety_invariants"},
+    "layer_kind": {"$ref": "https://schemas.format-monograph.local/contracts/authority/1.0/layer.schema.json"},
+    "input_fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_id", "role", "fingerprint"],
+      "properties": {
+        "input_id": {"$ref": "#/$defs/stable_id"},
+        "role": {
+          "type": "string",
+          "enum": [
+            "source_document", "rule_asset", "property_registry", "feature_activation",
+            "structure", "approval", "conflict_report", "authority_contract", "task"
+          ]
+        },
+        "fingerprint": {"$ref": "#/$defs/semantic_fingerprint"}
+      }
+    },
+    "input_fingerprints": {
+      "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "input_id",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/input_fingerprint"}
+    },
+    "candidate_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "property_binding", "source", "layer_kind", "confidence", "scope_status"],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/stable_id"},
+        "property_binding": {"$ref": "../v2.1/property-catalog.generated.schema.json"},
+        "source": {"$ref": "#/$defs/source_reference"},
+        "layer_kind": {"$ref": "#/$defs/layer_kind"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "scope_status": {"type": "string", "enum": ["applicable", "excluded", "out_of_scope"]}
+      }
+    },
+    "excluded_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate", "exclusion_reason", "reason_code"],
+      "properties": {
+        "candidate": {"$ref": "#/$defs/candidate_record"},
+        "exclusion_reason": {"type": "string", "enum": ["out_of_scope", "module_out_of_scope", "qa_exclusion"]},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"}
+      }
+    },
+    "composition_report_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_fingerprint", "feature_activation_fingerprint", "property_registry_fingerprint",
+        "authority_contract_fingerprint", "rule_asset_fingerprints", "structure_fingerprint"
+      ],
+      "properties": {
+        "input_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "feature_activation_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "property_registry_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "authority_contract_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "rule_asset_fingerprints": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/semantic_fingerprint"}},
+        "structure_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"}
+      }
+    },
+    "final_profile_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_fingerprint", "input_fingerprint", "feature_activation_fingerprint",
+        "property_registry_fingerprint", "authority_contract_fingerprint",
+        "rule_asset_fingerprints", "structure_fingerprint", "approval_fingerprints",
+        "composition_report_fingerprint"
+      ],
+      "properties": {
+        "task_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "input_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "feature_activation_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "property_registry_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "authority_contract_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "rule_asset_fingerprints": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/semantic_fingerprint"}},
+        "structure_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "approval_fingerprints": {"type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true, "items": {"$ref": "#/$defs/semantic_fingerprint"}},
+        "composition_report_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"}
+      }
+    }
+  }
+}

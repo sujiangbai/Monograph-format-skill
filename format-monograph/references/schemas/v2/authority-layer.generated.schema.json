@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/contracts/authority/1.0/layer.schema.json",
+  "title": "Format Monograph Authority Layer 1.0",
+  "type": "string",
+  "enum": [
+    "standard_supplement",
+    "monograph_base",
+    "book_type",
+    "module",
+    "publisher_template",
+    "task_override"
+  ]
+}

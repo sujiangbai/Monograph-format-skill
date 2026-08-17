@@ -1,0 +1,20 @@
+{
+  "contract_id": "format-monograph-canonical-composition-policy",
+  "contract_version": "1.0",
+  "approved_all_of_nodes": [
+    {
+      "policy_id": "CANON-QA-DELEGATION-20",
+      "schema_id": "https://schemas.format-monograph.local/v2/qa-approval-artifact.schema.json",
+      "json_pointer": "#/$defs/approver/allOf",
+      "node_digest": "sha256:fb65705b3cd8945fd46bf3b445aa443a198352d9bf46525c2cfdfcd4cb4adab2",
+      "guard_kind": "qa_delegated_publisher_authorization"
+    },
+    {
+      "policy_id": "CANON-QA-DELEGATION-21",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/qa-approval-artifact.schema.json",
+      "json_pointer": "#/$defs/approver/allOf",
+      "node_digest": "sha256:fb65705b3cd8945fd46bf3b445aa443a198352d9bf46525c2cfdfcd4cb4adab2",
+      "guard_kind": "qa_delegated_publisher_authorization"
+    }
+  ]
+}

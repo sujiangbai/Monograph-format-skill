@@ -19,6 +19,30 @@ SCHEMA_DIR = SKILL / "references" / "schemas" / "v2"
 FIXTURES = REPO / "tests" / "fixtures" / "v041"
 sys.path.insert(0, str(SCRIPTS))
 
+P1_SCHEMA_IDS = frozenset(
+    {
+        "https://schemas.format-monograph.local/v2/capability-snapshot.schema.json",
+        "https://schemas.format-monograph.local/v2/common.schema.json",
+        "https://schemas.format-monograph.local/v2.1/common.schema.json",
+        "https://schemas.format-monograph.local/v2/conflict-report.schema.json",
+        "https://schemas.format-monograph.local/v2.1/conflict-report.schema.json",
+        "https://schemas.format-monograph.local/v2/execution-evidence-artifact.schema.json",
+        "https://schemas.format-monograph.local/v2/feature-activation-manifest.schema.json",
+        "https://schemas.format-monograph.local/v2/final-execution-profile.schema.json",
+        "https://schemas.format-monograph.local/v2.1/final-execution-profile.schema.json",
+        "https://schemas.format-monograph.local/v2/layered-rule-asset.schema.json",
+        "https://schemas.format-monograph.local/v2.1/layered-rule-asset.schema.json",
+        "https://schemas.format-monograph.local/v2/legacy-migration-manifest.schema.json",
+        "https://schemas.format-monograph.local/v2/property-catalog.generated.schema.json",
+        "https://schemas.format-monograph.local/v2.1/property-catalog.generated.schema.json",
+        "https://schemas.format-monograph.local/v2/property-registry.schema.json",
+        "https://schemas.format-monograph.local/v2.1/property-registry.schema.json",
+        "https://schemas.format-monograph.local/v2/qa-approval-artifact.schema.json",
+        "https://schemas.format-monograph.local/v2/typed-value.generated.schema.json",
+        "https://schemas.format-monograph.local/v2.1/typed-value.generated.schema.json",
+    }
+)
+
 from profile_v2_artifacts import (  # noqa: E402
     ARTIFACT_KINDS,
     ArtifactContractError,
@@ -145,7 +169,8 @@ class ArtifactSchemaTests(unittest.TestCase):
 
     def test_t41_sch_002_all_schema_documents_pass_metaschema(self) -> None:
         documents = schema_documents()
-        self.assertEqual(19, len(documents))
+        self.assertEqual(19, len(P1_SCHEMA_IDS))
+        self.assertTrue(P1_SCHEMA_IDS.issubset(documents))
         for schema_id, schema in documents.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)

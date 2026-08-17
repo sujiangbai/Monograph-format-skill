@@ -1,0 +1,13 @@
+{
+  "contract_id": "format-monograph-authority",
+  "contract_version": "1.0",
+  "safety_policy": "independent_non_overridable",
+  "layers": [
+    {"layer_id": "standard_supplement", "rank": 0},
+    {"layer_id": "monograph_base", "rank": 1},
+    {"layer_id": "book_type", "rank": 2},
+    {"layer_id": "module", "rank": 3},
+    {"layer_id": "publisher_template", "rank": 4},
+    {"layer_id": "task_override", "rank": 5}
+  ]
+}
