@@ -1176,9 +1176,13 @@ def artifact_semantic_errors(
         }
         for partition in document.get("scope_partitions", []):
             partition_key = composition_key(partition["key"], "Scope partition")
-            if partition["evidence_status"] == "failed" and partition_key not in blocker_keys:
+            if (
+                partition["evidence_status"] in {"failed", "not_evaluated"}
+                and partition_key not in blocker_keys
+            ):
                 errors.append(
-                    "Failed scope partitions require an unresolvable blocker for the same key."
+                    "Failed or not-evaluated scope partitions require an unresolvable "
+                    "blocker for the same key."
                 )
         fatal = bool(document.get("fatal_diagnostics"))
         unresolvable = bool(document.get("unresolvable_blockers"))
@@ -1250,6 +1254,7 @@ def _validate_artifact_contract(
     *,
     features: Mapping[str, Any] | None,
     registry: dict[str, Any],
+    resolved_schema: dict[str, Any] | None = None,
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
 ) -> ProfileReadResult:
@@ -1260,7 +1265,14 @@ def _validate_artifact_contract(
     artifact_kind = document.get("artifact_kind")
     if artifact_kind not in ARTIFACT_KINDS:
         raise ArtifactContractError(f"Unknown V2 artifact_kind: {artifact_kind}")
-    if schema_override is None:
+    if resolved_schema is not None and schema_override is not None:
+        raise ArtifactContractError(
+            "Resolved production schemas and test-only schema overrides are mutually exclusive."
+        )
+    if resolved_schema is not None:
+        effective_schema = resolved_schema
+        compatible_minor = False
+    elif schema_override is None:
         effective_schema = load_artifact_schema(
             artifact_kind, version=str(document.get("schema_version"))
         )
@@ -1320,11 +1332,12 @@ def validate_artifact(
     """Validate against the committed production registry and schema contracts."""
 
     verify_contract_matrix_alignment()
-    _, _, effective_registry, _ = load_routed_contracts(document)
+    _, effective_schema, effective_registry, _ = load_routed_contracts(document)
     return _validate_artifact_contract(
         document,
         features=features,
         registry=effective_registry,
+        resolved_schema=effective_schema,
     )
 
 

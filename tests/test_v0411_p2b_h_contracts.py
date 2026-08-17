@@ -635,7 +635,7 @@ class P2bHContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ArtifactDagError, "cycle"):
                 _topological_artifact_order({"a": {"b"}, "b": {"a"}})
 
-    def test_v0411_h_reference_integrity_001_022(self) -> None:
+    def test_v0411_h_reference_integrity_001_024(self) -> None:
         with self.subTest(assertion_id="T411-H-REF-001"):
             report = composition_report(self.feature, self.rule, status="awaiting_approval")
             invalid_pairs = (
@@ -687,7 +687,9 @@ class P2bHContractTests(unittest.TestCase):
                 }
             ]
             report = stamp_test(report)
-            with self.assertRaisesRegex(ArtifactContractError, "Failed scope partitions"):
+            with self.assertRaisesRegex(
+                ArtifactContractError, "Failed or not-evaluated scope partitions"
+            ):
                 self.validate_test(report)
 
         with self.subTest(assertion_id="T411-H-REF-005"):
@@ -819,12 +821,10 @@ class P2bHContractTests(unittest.TestCase):
                 }
             ]
             report = stamp_test(report)
-            self.validate_test(report)
-            final = final_profile(report, self.feature, self.rule)
-            with self.assertRaisesRegex(ArtifactDagError, "not-evaluated"):
-                _validate_artifact_dag_for_test(
-                    [final, report, self.feature, self.rule], registry=self.registry
-                )
+            with self.assertRaisesRegex(
+                ArtifactContractError, "Failed or not-evaluated scope partitions"
+            ):
+                self.validate_test(report)
 
         with self.subTest(assertion_id="T411-H-REF-017"):
             old_feature = deepcopy(MINIMAL_ARTIFACTS["feature-activation-manifest"])
@@ -914,6 +914,34 @@ class P2bHContractTests(unittest.TestCase):
             report = stamp_test(report)
             with self.assertRaisesRegex(ArtifactContractError, "complete candidate group"):
                 self.validate_test(report)
+
+        for assertion_id, evidence_status in (
+            ("T411-H-REF-023", "failed"),
+            ("T411-H-REF-024", "not_evaluated"),
+        ):
+            with self.subTest(assertion_id=assertion_id):
+                report = composition_report(
+                    self.feature, self.rule, status="unresolvable"
+                )
+                report["scope_partitions"] = [
+                    {
+                        "partition_id": f"partition:h-{evidence_status}",
+                        "key": property_key(),
+                        "source_scope": document_scope(),
+                        "partition_scopes": [document_scope()],
+                        "evidence_status": evidence_status,
+                    }
+                ]
+                report = stamp_test(report)
+                self.validate_test(report)
+                final = final_profile(report, self.feature, self.rule)
+                with self.assertRaisesRegex(
+                    ArtifactDagError, "unresolvable blockers"
+                ):
+                    _validate_artifact_dag_for_test(
+                        [final, report, self.feature, self.rule],
+                        registry=self.registry,
+                    )
 
     def test_v0411_h_route_001_018(self) -> None:
         matrix = load_artifact_contract_matrix()
@@ -1087,6 +1115,46 @@ class P2bHContractTests(unittest.TestCase):
             duplicate_matrix["routes"].append(duplicate_legacy)
             with self.assertRaisesRegex(ArtifactRouteError, "legacy artifact/version"):
                 _contract_routes_from_matrix(duplicate_matrix)
+
+    def test_v0411_h_route_024_025_exact_schema_validation(self) -> None:
+        document = feature_manifest()
+        route = route_artifact_contract(document)
+        exact_schema = load_artifact_schema(
+            route.artifact_kind,
+            version=route.schema_version,
+            registry_contract_version=route.registry_contract_version,
+            authority_contract_version=route.authority_contract_version,
+        )
+
+        with self.subTest(assertion_id="T411-H-ROUTE-024"):
+            sentinel = object()
+            with mock.patch.object(
+                artifacts,
+                "load_routed_contracts",
+                return_value=(route, exact_schema, self.registry, {}),
+            ), mock.patch.object(
+                artifacts,
+                "_validate_artifact_contract",
+                return_value=sentinel,
+            ) as validator:
+                result = validate_artifact(
+                    document, features={"profile_v2_schema": True}
+                )
+            self.assertIs(sentinel, result)
+            self.assertIs(
+                exact_schema, validator.call_args.kwargs["resolved_schema"]
+            )
+
+        with self.subTest(assertion_id="T411-H-ROUTE-025"):
+            with mock.patch.object(
+                artifacts,
+                "load_artifact_schema",
+                side_effect=AssertionError("pair-only schema lookup was used"),
+            ):
+                result = validate_artifact(
+                    document, features={"profile_v2_schema": True}
+                )
+            self.assertFalse(result.runtime_eligible)
 
     def test_v0411_h_authority_001_012(self) -> None:
         expected = tuple(EXPECTATIONS["authority_layers"])
