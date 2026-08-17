@@ -469,16 +469,11 @@ def validate_artifact(
     document: dict[str, Any],
     *,
     features: Mapping[str, Any] | None = None,
-    registry: dict[str, Any] | None = None,
 ) -> ProfileReadResult:
     """Validate against the committed production registry and schema contracts."""
 
-    effective_registry = registry if registry is not None else load_registry()
+    effective_registry = load_registry()
     validate_registry_document(effective_registry)
-    if effective_registry.get("registry_scope") != "production":
-        raise ArtifactContractError(
-            "Production validation refuses test registries; use the internal test helper."
-        )
     verify_committed_catalog(effective_registry)
     return _validate_artifact_contract(
         document,

@@ -206,38 +206,26 @@ class ArtifactSchemaTests(unittest.TestCase):
         self.assertEqual("disabled", result.activation)
 
     def test_t41_sch_008a_actual_production_registry_must_match_committed_source(self) -> None:
-        artifact = self.artifacts["capability-snapshot"]
         registry = load_registry()
         safety = registry["properties"][0]
         safety["safety_invariant"] = False
         safety["overridable"] = True
         safety["allowed_layers"] = ["monograph_base"]
+        validate_registry_document(registry)
         with self.assertRaisesRegex(RegistryContractError, "committed property registry"):
-            validate_artifact(
-                artifact,
-                features={"profile_v2_schema": True},
-                registry=registry,
-            )
+            verify_committed_catalog(registry)
 
         registry = load_registry()
         registry["properties"][0]["semantic_object_kinds"].append("paragraph")
+        validate_registry_document(registry)
         with self.assertRaisesRegex(RegistryContractError, "committed property registry"):
-            validate_artifact(
-                artifact,
-                features={"profile_v2_schema": True},
-                registry=registry,
-            )
+            verify_committed_catalog(registry)
 
     def test_t41_sch_008b_unvalidated_registry_cannot_reach_artifact_semantics(self) -> None:
-        artifact = self.artifacts["capability-snapshot"]
         registry = load_registry()
         del registry["properties"][0]["allowed_layers"]
         with self.assertRaises(RegistryContractError):
-            validate_artifact(
-                artifact,
-                features={"profile_v2_schema": True},
-                registry=registry,
-            )
+            validate_registry_document(registry)
 
     def test_t41_sch_008c_formal_validation_has_no_schema_override_channel(self) -> None:
         artifact = self.artifacts["capability-snapshot"]
@@ -249,13 +237,17 @@ class ArtifactSchemaTests(unittest.TestCase):
                 artifact,
                 features={"profile_v2_schema": True},
                 registry=registry,
+            )
+        with self.assertRaises(TypeError):
+            validate_artifact(
+                artifact,
+                features={"profile_v2_schema": True},
                 schema_override=schema,
             )
         with self.assertRaises(TypeError):
             validate_artifact(
                 artifact,
                 features={"profile_v2_schema": True},
-                registry=registry,
                 schema_documents_override={},
             )
         with self.assertRaises(TypeError):
@@ -632,7 +624,7 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
         )
         self.assertFalse(result.runtime_eligible)
         self.assertEqual("disabled", result.activation)
-        with self.assertRaisesRegex(ArtifactContractError, "refuses test registries"):
+        with self.assertRaises(TypeError):
             validate_artifact(
                 self.profile,
                 features={"profile_v2_schema": True},
