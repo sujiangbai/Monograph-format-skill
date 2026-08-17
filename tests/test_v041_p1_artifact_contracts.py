@@ -23,6 +23,8 @@ from profile_v2_artifacts import (  # noqa: E402
     ARTIFACT_KINDS,
     ArtifactContractError,
     ProfileV2DisabledError,
+    _schema_errors_for_test,
+    _validate_artifact_for_test,
     load_artifact_schema,
     offline_schema_registry,
     read_profile_document,
@@ -57,15 +59,6 @@ def minimal_artifacts() -> dict[str, dict]:
 
 def resolved_final_profile() -> dict:
     return load_json(FIXTURES / "resolved-final-profile.json")
-
-
-def derived_schema_overrides(registry: dict) -> dict[str, dict]:
-    typed_values = build_typed_value_schema(registry)
-    property_catalog = build_property_catalog_schema(registry)
-    return {
-        typed_values["$id"]: typed_values,
-        property_catalog["$id"]: property_catalog,
-    }
 
 
 def legacy_profile(version: str) -> dict:
@@ -211,6 +204,66 @@ class ArtifactSchemaTests(unittest.TestCase):
         result = validate_artifact(artifact, features={"profile_v2_schema": True})
         self.assertFalse(result.runtime_eligible)
         self.assertEqual("disabled", result.activation)
+
+    def test_t41_sch_008a_actual_production_registry_must_match_committed_source(self) -> None:
+        artifact = self.artifacts["capability-snapshot"]
+        registry = load_registry()
+        safety = registry["properties"][0]
+        safety["safety_invariant"] = False
+        safety["overridable"] = True
+        safety["allowed_layers"] = ["monograph_base"]
+        with self.assertRaisesRegex(RegistryContractError, "committed property registry"):
+            validate_artifact(
+                artifact,
+                features={"profile_v2_schema": True},
+                registry=registry,
+            )
+
+        registry = load_registry()
+        registry["properties"][0]["semantic_object_kinds"].append("paragraph")
+        with self.assertRaisesRegex(RegistryContractError, "committed property registry"):
+            validate_artifact(
+                artifact,
+                features={"profile_v2_schema": True},
+                registry=registry,
+            )
+
+    def test_t41_sch_008b_unvalidated_registry_cannot_reach_artifact_semantics(self) -> None:
+        artifact = self.artifacts["capability-snapshot"]
+        registry = load_registry()
+        del registry["properties"][0]["allowed_layers"]
+        with self.assertRaises(RegistryContractError):
+            validate_artifact(
+                artifact,
+                features={"profile_v2_schema": True},
+                registry=registry,
+            )
+
+    def test_t41_sch_008c_formal_validation_has_no_schema_override_channel(self) -> None:
+        artifact = self.artifacts["capability-snapshot"]
+        registry = load_registry()
+        schema = load_artifact_schema("capability-snapshot")
+        schema["x-read-compatible-minor-versions"] = ["2.1"]
+        with self.assertRaises(TypeError):
+            validate_artifact(
+                artifact,
+                features={"profile_v2_schema": True},
+                registry=registry,
+                schema_override=schema,
+            )
+        with self.assertRaises(TypeError):
+            validate_artifact(
+                artifact,
+                features={"profile_v2_schema": True},
+                registry=registry,
+                schema_documents_override={},
+            )
+        with self.assertRaises(TypeError):
+            read_profile_document(
+                artifact,
+                features={"profile_v2_schema": True},
+                schema_override=schema,
+            )
 
     def test_t41_sch_009_artifact_categories_cannot_be_mixed(self) -> None:
         foreign_fields = {
@@ -466,7 +519,7 @@ class RegistryFoundationTests(unittest.TestCase):
             ["token-string"],
             typed_value_differences(changed_registry, committed)["registry_only"],
         )
-        with self.assertRaisesRegex(RegistryContractError, "data type difference"):
+        with self.assertRaisesRegex(RegistryContractError, "committed property registry"):
             verify_committed_catalog(changed_registry)
 
         changed_schema = deepcopy(committed)
@@ -555,32 +608,42 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
         self.registry = load_registry(
             FIXTURES / "property-registry.test.json", allow_test=True
         )
-        self.schema_overrides = derived_schema_overrides(self.registry)
 
     def _schema_errors(self, artifact_kind: str, artifact: dict) -> list[str]:
-        return schema_errors(
+        return _schema_errors_for_test(
             artifact_kind,
             artifact,
-            schema_documents_override=self.schema_overrides,
+            registry=self.registry,
         )
 
     def _validate(self, artifact: dict) -> None:
-        validate_artifact(
+        _validate_artifact_for_test(
             artifact,
             features={"profile_v2_schema": True},
             registry=self.registry,
-            schema_documents_override=self.schema_overrides,
         )
 
     def test_t41_sch_015a_complete_resolved_property_contract_is_valid(self) -> None:
         self.assertFalse(self._schema_errors("final-execution-profile", self.profile))
-        result = validate_artifact(
+        result = _validate_artifact_for_test(
             self.profile,
             features={"profile_v2_schema": True},
             registry=self.registry,
-            schema_documents_override=self.schema_overrides,
         )
         self.assertFalse(result.runtime_eligible)
+        self.assertEqual("disabled", result.activation)
+        with self.assertRaisesRegex(ArtifactContractError, "refuses test registries"):
+            validate_artifact(
+                self.profile,
+                features={"profile_v2_schema": True},
+                registry=self.registry,
+            )
+        with self.assertRaisesRegex(ArtifactContractError, "requires a validated test registry"):
+            _validate_artifact_for_test(
+                minimal_artifacts()["capability-snapshot"],
+                features={"profile_v2_schema": True},
+                registry=load_registry(),
+            )
 
     def test_t41_sch_015b_final_profile_requires_all_fingerprint_bindings(self) -> None:
         for field in (
@@ -862,24 +925,42 @@ class VersionDispatchAndRegressionTests(unittest.TestCase):
             mutated["schema_version"] = version
             with self.subTest(version=version), self.assertRaises(ArtifactContractError):
                 validate_artifact(mutated, features={"profile_v2_schema": True})
+            with self.subTest(version=version, entry="reader"), self.assertRaises(
+                ArtifactContractError
+            ):
+                read_profile_document(
+                    mutated, features={"profile_v2_schema": True}
+                )
         with self.assertRaises(ArtifactContractError):
             read_profile_document(legacy_profile("1.0") | {"schema_version": "1.2"})
 
     def test_t41_sch_020_declared_minor_is_read_only_and_still_closed(self) -> None:
         artifact = minimal_artifacts()["capability-snapshot"]
         artifact["schema_version"] = "2.1"
+        registry = load_registry(
+            FIXTURES / "property-registry.test.json", allow_test=True
+        )
         schema = load_artifact_schema("capability-snapshot")
         schema["x-read-compatible-minor-versions"] = ["2.1"]
         effective, read_only = schema_for_requested_minor(schema, "2.1")
         self.assertTrue(read_only)
-        result = validate_artifact(
+        result = _validate_artifact_for_test(
             artifact,
             features={"profile_v2_schema": True},
+            registry=registry,
             schema_override=schema,
         )
         self.assertTrue(result.read_only)
+        self.assertFalse(result.runtime_eligible)
         artifact["unknown_minor_field"] = True
-        self.assertTrue(schema_errors("capability-snapshot", artifact, schema_override=effective))
+        self.assertTrue(
+            _schema_errors_for_test(
+                "capability-snapshot",
+                artifact,
+                registry=registry,
+                schema_override=effective,
+            )
+        )
 
     def test_t41_sch_021_legacy_validator_behavior_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

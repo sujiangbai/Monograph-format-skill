@@ -355,6 +355,11 @@ def typed_value_differences(
 
 def verify_committed_catalog(registry: dict[str, Any] | None = None) -> None:
     registry = registry or load_registry()
+    committed_registry = _load_json(CORE_REGISTRY_PATH)
+    if registry != committed_registry:
+        raise RegistryContractError(
+            "Production registry differs from the committed property registry."
+        )
     committed = _load_json(GENERATED_CATALOG_PATH)
     generated = build_property_catalog_schema(registry)
     committed_typed_values = _load_json(GENERATED_TYPED_VALUE_PATH)

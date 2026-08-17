@@ -15,9 +15,12 @@ from referencing import Registry, Resource
 
 from profile_v2_registry import (
     RegistryContractError,
+    build_property_catalog_schema,
+    build_typed_value_schema,
     load_registry,
     property_index,
     validate_binding_for_layer,
+    validate_registry_document,
     verify_committed_catalog,
 )
 
@@ -87,7 +90,7 @@ def load_artifact_schema(artifact_kind: str) -> dict[str, Any]:
     return _load_json(SCHEMA_DIR / filename)
 
 
-def schema_documents(
+def _schema_documents(
     schema_overrides: Mapping[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     documents: dict[str, dict[str, Any]] = {}
@@ -110,13 +113,25 @@ def schema_documents(
     return documents
 
 
-def offline_schema_registry(
+def schema_documents() -> dict[str, dict[str, Any]]:
+    """Return only the repository's committed offline schema set."""
+
+    return _schema_documents()
+
+
+def _offline_schema_registry(
     schema_overrides: Mapping[str, dict[str, Any]] | None = None,
 ) -> Registry:
     registry = Registry()
-    for schema_id, schema in schema_documents(schema_overrides).items():
+    for schema_id, schema in _schema_documents(schema_overrides).items():
         registry = registry.with_resource(schema_id, Resource.from_contents(schema))
     return registry
+
+
+def offline_schema_registry() -> Registry:
+    """Build the production resolver from committed local schemas only."""
+
+    return _offline_schema_registry()
 
 
 def _format_errors(validator: Draft202012Validator, value: Any) -> list[str]:
@@ -126,7 +141,7 @@ def _format_errors(validator: Draft202012Validator, value: Any) -> list[str]:
     ]
 
 
-def schema_errors(
+def _schema_errors(
     artifact_kind: str,
     document: dict[str, Any],
     *,
@@ -137,10 +152,51 @@ def schema_errors(
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(
         schema,
-        registry=offline_schema_registry(schema_documents_override),
+        registry=_offline_schema_registry(schema_documents_override),
         format_checker=FormatChecker(),
     )
     return _format_errors(validator, document)
+
+
+def schema_errors(artifact_kind: str, document: dict[str, Any]) -> list[str]:
+    """Validate shape against committed schemas without accepting overrides."""
+
+    return _schema_errors(artifact_kind, document)
+
+
+def _require_test_registry(registry: dict[str, Any]) -> None:
+    validate_registry_document(registry)
+    if registry.get("registry_scope") != "test":
+        raise ArtifactContractError(
+            "The internal test contract requires a validated test registry."
+        )
+
+
+def _test_schema_overrides(registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    typed_values = build_typed_value_schema(registry)
+    property_catalog = build_property_catalog_schema(registry)
+    return {
+        typed_values["$id"]: typed_values,
+        property_catalog["$id"]: property_catalog,
+    }
+
+
+def _schema_errors_for_test(
+    artifact_kind: str,
+    document: dict[str, Any],
+    *,
+    registry: dict[str, Any],
+    schema_override: dict[str, Any] | None = None,
+) -> list[str]:
+    """Test-only schema path for registry-derived synthetic contracts."""
+
+    _require_test_registry(registry)
+    return _schema_errors(
+        artifact_kind,
+        document,
+        schema_override=schema_override,
+        schema_documents_override=_test_schema_overrides(registry),
+    )
 
 
 def _parse_version(version: Any) -> tuple[int, int]:
@@ -369,11 +425,11 @@ def artifact_semantic_errors(
     return errors
 
 
-def validate_artifact(
+def _validate_artifact_contract(
     document: dict[str, Any],
     *,
-    features: Mapping[str, Any] | None = None,
-    registry: dict[str, Any] | None = None,
+    features: Mapping[str, Any] | None,
+    registry: dict[str, Any],
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
 ) -> ProfileReadResult:
@@ -388,14 +444,12 @@ def validate_artifact(
     effective_schema, compatible_minor = schema_for_requested_minor(
         schema, document.get("schema_version")
     )
-    errors = schema_errors(
+    errors = _schema_errors(
         artifact_kind,
         document,
         schema_override=effective_schema,
         schema_documents_override=schema_documents_override,
     )
-    registry = registry or load_registry()
-    verify_committed_catalog() if registry.get("registry_scope") == "production" else None
     if not errors:
         errors.extend(artifact_semantic_errors(artifact_kind, document, registry))
     if errors:
@@ -408,6 +462,47 @@ def validate_artifact(
         read_only=compatible_minor,
         runtime_eligible=False,
         document=deepcopy(document),
+    )
+
+
+def validate_artifact(
+    document: dict[str, Any],
+    *,
+    features: Mapping[str, Any] | None = None,
+    registry: dict[str, Any] | None = None,
+) -> ProfileReadResult:
+    """Validate against the committed production registry and schema contracts."""
+
+    effective_registry = registry if registry is not None else load_registry()
+    validate_registry_document(effective_registry)
+    if effective_registry.get("registry_scope") != "production":
+        raise ArtifactContractError(
+            "Production validation refuses test registries; use the internal test helper."
+        )
+    verify_committed_catalog(effective_registry)
+    return _validate_artifact_contract(
+        document,
+        features=features,
+        registry=effective_registry,
+    )
+
+
+def _validate_artifact_for_test(
+    document: dict[str, Any],
+    *,
+    registry: dict[str, Any],
+    features: Mapping[str, Any] | None = None,
+    schema_override: dict[str, Any] | None = None,
+) -> ProfileReadResult:
+    """Validate synthetic contracts without making them production-eligible."""
+
+    _require_test_registry(registry)
+    return _validate_artifact_contract(
+        document,
+        features=features,
+        registry=registry,
+        schema_override=schema_override,
+        schema_documents_override=_test_schema_overrides(registry),
     )
 
 
@@ -427,7 +522,6 @@ def read_profile_document(
     document: dict[str, Any],
     *,
     features: Mapping[str, Any] | None = None,
-    schema_override: dict[str, Any] | None = None,
 ) -> ProfileReadResult:
     """Dispatch 1.0/1.1 legacy reads and gated V2 artifact reads explicitly."""
 
@@ -451,7 +545,6 @@ def read_profile_document(
         return validate_artifact(
             document,
             features=features,
-            schema_override=schema_override,
         )
     raise ArtifactContractError(f"Unknown major schema version: {major}.")
 
