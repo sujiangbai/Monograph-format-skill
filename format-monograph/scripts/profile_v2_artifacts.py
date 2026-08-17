@@ -16,6 +16,7 @@ from referencing import Registry, Resource
 from profile_v2_registry import (
     RegistryContractError,
     load_registry,
+    property_index,
     validate_binding_for_layer,
     verify_committed_catalog,
 )
@@ -169,6 +170,27 @@ def artifact_semantic_errors(
     registry: dict[str, Any],
 ) -> list[str]:
     errors: list[str] = []
+    properties = property_index(registry)
+
+    def validate_key_and_candidate(
+        key: dict[str, Any], candidate: dict[str, Any], context: str
+    ) -> None:
+        property_id = key["property_id"]
+        binding = candidate["property_binding"]
+        if binding["property_id"] != property_id:
+            errors.append(f"{context} candidate property does not match its normalized key.")
+        entry = properties.get(property_id)
+        if entry is None:
+            errors.append(f"{context} references unregistered property {property_id}.")
+        elif key["semantic_object_kind"] not in entry["semantic_object_kinds"]:
+            errors.append(
+                f"{context} uses property {property_id} for an unsupported semantic object."
+            )
+        try:
+            validate_binding_for_layer(binding, candidate["layer_kind"], registry)
+        except RegistryContractError as exc:
+            errors.append(str(exc))
+
     if artifact_kind == "layered-rule-asset":
         layer_kind = document["layer_kind"]
         seen_rules: set[str] = set()
@@ -192,6 +214,55 @@ def artifact_semantic_errors(
             errors.append("V2 final execution profiles cannot be legacy inputs.")
         if document.get("activation") != "disabled":
             errors.append("P1 final execution profiles must remain disabled.")
+        for resolved in document.get("resolved_properties", []):
+            key = resolved["key"]
+            binding = resolved["resolved_binding"]
+            if binding["property_id"] != key["property_id"]:
+                errors.append("Resolved property binding does not match its normalized key.")
+            synthetic_candidate = {
+                "property_binding": binding,
+                "layer_kind": resolved["final_layer_kind"],
+            }
+            validate_key_and_candidate(key, synthetic_candidate, "Resolved property")
+            applicable_ids: set[str] = set()
+            final_source_matches = False
+            for candidate in resolved["candidate_chain"]:
+                validate_key_and_candidate(key, candidate, "Resolved property")
+                if candidate["scope_status"] == "applicable":
+                    applicable_ids.add(candidate["candidate_id"])
+                if (
+                    candidate["source"] == resolved["final_source"]
+                    and candidate["layer_kind"] == resolved["final_layer_kind"]
+                    and candidate["property_binding"] == binding
+                ):
+                    final_source_matches = True
+            if not final_source_matches:
+                errors.append("Resolved property final source is absent from its candidate chain.")
+            unknown_override_ids = set(resolved["override_chain"]) - applicable_ids
+            if unknown_override_ids:
+                errors.append("Resolved property override chain references non-applicable candidates.")
+    elif artifact_kind == "conflict-report":
+        for conflict in document.get("conflicts", []):
+            key = conflict["key"]
+            layers: set[str] = set()
+            for candidate in conflict["candidates"]:
+                validate_key_and_candidate(key, candidate, "Conflict")
+                layers.add(candidate["layer_kind"])
+                if candidate["scope_status"] != "applicable":
+                    errors.append("Conflict candidates must be applicable; exclusions are separate.")
+            for excluded in conflict["excluded_candidates"]:
+                candidate = excluded["candidate"]
+                validate_key_and_candidate(key, candidate, "Excluded conflict")
+                if candidate["scope_status"] == "applicable":
+                    errors.append("Excluded conflict candidates cannot be marked applicable.")
+            if conflict["reason"] == "same_layer":
+                if len(conflict["candidates"]) < 2 or len(layers) != 1:
+                    errors.append("same_layer conflicts require at least two candidates in one layer.")
+            if conflict["reason"] == "scope_violation" and not any(
+                item["exclusion_reason"] == "scope_violation"
+                for item in conflict["excluded_candidates"]
+            ):
+                errors.append("scope_violation conflicts require a scope-violation exclusion.")
     return errors
 
 

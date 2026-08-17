@@ -73,7 +73,7 @@
       "required": ["metric_id", "value", "status"],
       "properties": {
         "metric_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}(?:\\.[a-z][a-z0-9-]{1,31})+$"},
-        "value": {"$ref": "common.schema.json#/$defs/typed_value"},
+        "value": {"$ref": "typed-value.generated.schema.json"},
         "unit_id": {
           "oneOf": [
             {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"},

@@ -34,10 +34,13 @@ from profile_v2_artifacts import (  # noqa: E402
 )
 from profile_v2_registry import (  # noqa: E402
     GENERATED_CATALOG_PATH,
+    GENERATED_TYPED_VALUE_PATH,
     RegistryContractError,
     build_property_catalog_schema,
+    build_typed_value_schema,
     catalog_differences,
     load_registry,
+    typed_value_differences,
     validate_registry_document,
     verify_committed_catalog,
 )
@@ -50,6 +53,10 @@ def load_json(path: Path) -> dict:
 
 def minimal_artifacts() -> dict[str, dict]:
     return load_json(FIXTURES / "minimal-artifacts.json")
+
+
+def resolved_final_profile() -> dict:
+    return load_json(FIXTURES / "resolved-final-profile.json")
 
 
 def legacy_profile(version: str) -> dict:
@@ -112,7 +119,7 @@ class ArtifactSchemaTests(unittest.TestCase):
 
     def test_t41_sch_002_all_schema_documents_pass_metaschema(self) -> None:
         documents = schema_documents()
-        self.assertEqual(11, len(documents))
+        self.assertEqual(12, len(documents))
         for schema_id, schema in documents.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)
@@ -167,6 +174,10 @@ class ArtifactSchemaTests(unittest.TestCase):
             artifact[field] = value
             with self.subTest(field=field):
                 self.assertTrue(schema_errors("capability-snapshot", artifact))
+
+        duplicate = deepcopy(self.artifacts["capability-snapshot"])
+        duplicate["input_fingerprints"].append(deepcopy(duplicate["input_fingerprints"][0]))
+        self.assertTrue(schema_errors("capability-snapshot", duplicate))
 
     def test_t41_sch_006_semantic_fingerprint_excludes_nonsemantic_metadata(self) -> None:
         for kind in ARTIFACT_KINDS:
@@ -324,10 +335,16 @@ class RegistryFoundationTests(unittest.TestCase):
     def test_t41_reg_core_002_committed_catalog_is_mechanically_generated(self) -> None:
         registry = load_registry()
         committed = load_json(GENERATED_CATALOG_PATH)
+        committed_typed_values = load_json(GENERATED_TYPED_VALUE_PATH)
         self.assertEqual(build_property_catalog_schema(registry), committed)
+        self.assertEqual(build_typed_value_schema(registry), committed_typed_values)
         self.assertEqual(
             {"registry_only": [], "schema_only": []},
             catalog_differences(registry, committed),
+        )
+        self.assertEqual(
+            {"registry_only": [], "schema_only": []},
+            typed_value_differences(registry, committed_typed_values),
         )
         verify_committed_catalog(registry)
 
@@ -354,7 +371,13 @@ class RegistryFoundationTests(unittest.TestCase):
             "unit_id": "unit.pt",
             "mode": "report",
         }
-        self.assertFalse(list(Draft202012Validator(catalog).iter_errors(binding)))
+        self.assertFalse(
+            list(
+                Draft202012Validator(
+                    catalog, registry=offline_schema_registry()
+                ).iter_errors(binding)
+            )
+        )
 
     def test_t41_reg_core_005_unregistered_references_are_rejected(self) -> None:
         mutations = {
@@ -411,7 +434,208 @@ class RegistryFoundationTests(unittest.TestCase):
             "unit_id": "unit.pt",
             "mode": "report",
         }
-        self.assertTrue(list(Draft202012Validator(schema).iter_errors(binding)))
+        self.assertTrue(
+            list(
+                Draft202012Validator(
+                    schema, registry=offline_schema_registry()
+                ).iter_errors(binding)
+            )
+        )
+
+    def test_t41_reg_core_002a_typed_value_drift_is_detected_both_directions(self) -> None:
+        registry = load_registry()
+        committed = load_json(GENERATED_TYPED_VALUE_PATH)
+
+        changed_registry = deepcopy(registry)
+        changed_registry["data_types"].append(
+            {"data_type_id": "token-string", "json_type": "string", "max_length": 12}
+        )
+        self.assertEqual(
+            ["token-string"],
+            typed_value_differences(changed_registry, committed)["registry_only"],
+        )
+        with self.assertRaisesRegex(RegistryContractError, "data type difference"):
+            verify_committed_catalog(changed_registry)
+
+        changed_schema = deepcopy(committed)
+        changed_schema["$defs"]["rogue-type"] = deepcopy(changed_schema["$defs"]["string"])
+        changed_schema["oneOf"].append({"$ref": "#/$defs/rogue-type"})
+        self.assertEqual(
+            ["rogue-type"],
+            typed_value_differences(registry, changed_schema)["schema_only"],
+        )
+
+    def test_t41_reg_core_009a_property_policy_fields_are_required_and_closed(self) -> None:
+        required_fields = (
+            "missing_strategy",
+            "unknown_object_strategy",
+            "value_constraints",
+            "constraint_ids",
+            "test_ids",
+        )
+        for field in required_fields:
+            registry = load_json(self.test_registry_path)
+            del registry["properties"][0][field]
+            with self.subTest(field=field), self.assertRaises(RegistryContractError):
+                validate_registry_document(registry)
+
+        registry = load_json(self.test_registry_path)
+        registry["properties"][0]["value_constraints"]["callable"] = "module.function"
+        with self.assertRaises(RegistryContractError):
+            validate_registry_document(registry)
+
+    def test_t41_reg_core_005a_constraint_references_and_values_are_typed(self) -> None:
+        registry = load_json(self.test_registry_path)
+        registry["properties"][0]["constraint_ids"] = ["constraint.missing"]
+        with self.assertRaisesRegex(RegistryContractError, "unregistered constraints"):
+            validate_registry_document(registry)
+
+        registry = load_json(self.test_registry_path)
+        second = deepcopy(registry["properties"][0])
+        second["property_id"] = "test.paragraph-line-height"
+        registry["properties"].append(second)
+        registry["constraints"] = [
+            {
+                "constraint_id": "constraint.import-handler",
+                "constraint_kind": "requires",
+                "property_ids": [
+                    "test.paragraph-font-size",
+                    "test.paragraph-line-height",
+                ],
+                "enforcement": "validator",
+                "description": "Synthetic declarative relationship.",
+            }
+        ]
+        with self.assertRaisesRegex(RegistryContractError, "callable-like"):
+            validate_registry_document(registry)
+
+        registry = load_json(self.test_registry_path)
+        registry["properties"][0]["value_constraints"]["enum_values"] = [True]
+        with self.assertRaisesRegex(RegistryContractError, "outside its registered data type"):
+            validate_registry_document(registry)
+
+
+class ResolvedProfileAndConflictContractTests(unittest.TestCase):
+    """T41-SCH-005/015 and T41-REG-CORE-002/005 composition data contracts."""
+
+    def setUp(self) -> None:
+        self.profile = resolved_final_profile()
+        self.artifacts = minimal_artifacts()
+
+    def test_t41_sch_015a_complete_resolved_property_contract_is_valid(self) -> None:
+        self.assertFalse(schema_errors("final-execution-profile", self.profile))
+        result = validate_artifact(
+            self.profile, features={"profile_v2_schema": True}
+        )
+        self.assertFalse(result.runtime_eligible)
+
+    def test_t41_sch_015b_final_profile_requires_all_fingerprint_bindings(self) -> None:
+        for field in (
+            "feature_activation_fingerprint",
+            "property_registry_fingerprint",
+            "profile_fingerprints",
+            "approval_fingerprints",
+        ):
+            profile = deepcopy(self.profile)
+            del profile["bindings"][field]
+            with self.subTest(field=field):
+                self.assertTrue(schema_errors("final-execution-profile", profile))
+
+        for field in ("profile_fingerprints", "approval_fingerprints"):
+            profile = deepcopy(self.profile)
+            profile["bindings"][field].append(profile["bindings"][field][0])
+            with self.subTest(field=field, condition="duplicate"):
+                self.assertTrue(schema_errors("final-execution-profile", profile))
+
+    def test_t41_sch_015c_resolved_source_chain_and_nested_fields_are_closed(self) -> None:
+        profile = deepcopy(self.profile)
+        profile["resolved_properties"][0]["candidate_chain"] = []
+        self.assertTrue(schema_errors("final-execution-profile", profile))
+
+        profile = deepcopy(self.profile)
+        profile["resolved_properties"][0]["key"]["normalized_scope"]["callable"] = "x.y"
+        self.assertTrue(schema_errors("final-execution-profile", profile))
+
+        profile = deepcopy(self.profile)
+        profile["resolved_properties"][0]["final_source"]["source_rule_id"] = "OTHER-RULE"
+        with self.assertRaisesRegex(ArtifactContractError, "final source"):
+            validate_artifact(profile, features={"profile_v2_schema": True})
+
+    def _candidate(self, candidate_id: str, *, layer: str = "safety", scope: str = "applicable") -> dict:
+        return {
+            "candidate_id": candidate_id,
+            "property_binding": {
+                "property_id": "security.author-content-immutable",
+                "value": {"type": "boolean", "value": True},
+                "unit_id": None,
+                "mode": "block",
+            },
+            "source": {
+                "source_artifact_id": "layered-rule-asset:safety",
+                "source_rule_id": "SAFETY-AUTHOR-CONTENT",
+            },
+            "layer_kind": layer,
+            "confidence": "high",
+            "scope_status": scope,
+        }
+
+    def _key(self) -> dict:
+        return deepcopy(self.profile["resolved_properties"][0]["key"])
+
+    def _conflict(self, *, reason: str = "same_layer") -> dict:
+        artifact = deepcopy(self.artifacts["conflict-report"])
+        artifact["conflicts"] = [
+            {
+                "conflict_id": "conflict:test",
+                "key": self._key(),
+                "reason": reason,
+                "status": "blocked_qa",
+                "candidates": [
+                    self._candidate("candidate:first"),
+                    self._candidate("candidate:second"),
+                ],
+                "excluded_candidates": [],
+            }
+        ]
+        return artifact
+
+    def test_t41_sch_016a_same_layer_conflict_records_sources_and_bindings(self) -> None:
+        artifact = self._conflict()
+        self.assertFalse(schema_errors("conflict-report", artifact))
+        validate_artifact(artifact, features={"profile_v2_schema": True})
+
+    def test_t41_sch_016b_conflict_rejects_unregistered_property_and_cross_layer_confusion(self) -> None:
+        artifact = self._conflict()
+        artifact["conflicts"][0]["candidates"] = artifact["conflicts"][0]["candidates"][:1]
+        with self.assertRaisesRegex(ArtifactContractError, "at least two"):
+            validate_artifact(artifact, features={"profile_v2_schema": True})
+
+        artifact = self._conflict()
+        artifact["conflicts"][0]["key"]["property_id"] = "unknown.property"
+        with self.assertRaisesRegex(ArtifactContractError, "unregistered property"):
+            validate_artifact(artifact, features={"profile_v2_schema": True})
+
+        artifact = self._conflict()
+        artifact["conflicts"][0]["candidates"][1]["layer_kind"] = "monograph_base"
+        with self.assertRaisesRegex(ArtifactContractError, "same_layer"):
+            validate_artifact(artifact, features={"profile_v2_schema": True})
+
+    def test_t41_sch_016c_scope_violation_requires_a_declarative_exclusion(self) -> None:
+        artifact = self._conflict(reason="scope_violation")
+        artifact["conflicts"][0]["candidates"] = [self._candidate("candidate:active")]
+        with self.assertRaisesRegex(ArtifactContractError, "scope-violation exclusion"):
+            validate_artifact(artifact, features={"profile_v2_schema": True})
+
+        artifact["conflicts"][0]["excluded_candidates"] = [
+            {
+                "candidate": self._candidate(
+                    "candidate:excluded", scope="out_of_scope"
+                ),
+                "exclusion_reason": "scope_violation",
+                "reason_code": "SCOPE-OUTSIDE-SECTION",
+            }
+        ]
+        validate_artifact(artifact, features={"profile_v2_schema": True})
 
 
 class VersionDispatchAndRegressionTests(unittest.TestCase):
@@ -498,6 +722,7 @@ class VersionDispatchAndRegressionTests(unittest.TestCase):
             SCRIPTS / "profile_v2_artifacts.py",
             FIXTURES / "minimal-artifacts.json",
             FIXTURES / "property-registry.test.json",
+            FIXTURES / "resolved-final-profile.json",
         ]
         forbidden_patterns = (
             re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"),

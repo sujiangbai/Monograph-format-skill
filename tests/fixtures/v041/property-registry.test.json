@@ -20,6 +20,7 @@
   "auditor_capabilities": [
     {"capability_id": "auditor.content-integrity", "description": "Synthetic audit capability."}
   ],
+  "constraints": [],
   "properties": [
     {
       "property_id": "test.paragraph-font-size",
@@ -37,6 +38,19 @@
       "overridable": true,
       "safety_invariant": false,
       "qa_required": false,
+      "missing_strategy": "report",
+      "unknown_object_strategy": "preserve",
+      "value_constraints": {
+        "enum_values": [],
+        "numeric_range": {
+          "minimum": "0",
+          "maximum": "1000",
+          "minimum_inclusive": true,
+          "maximum_inclusive": true
+        }
+      },
+      "constraint_ids": [],
+      "test_ids": ["T41-REG-CORE-010"],
       "modes": ["report"]
     }
   ]

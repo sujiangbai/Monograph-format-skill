@@ -29,6 +29,7 @@
   "auditor_capabilities": [
     {"capability_id": "auditor.content-integrity", "description": "Reserved content-integrity audit capability ID."}
   ],
+  "constraints": [],
   "properties": [
     {
       "property_id": "security.author-content-immutable",
@@ -46,6 +47,11 @@
       "overridable": false,
       "safety_invariant": true,
       "qa_required": false,
+      "missing_strategy": "blocked_qa",
+      "unknown_object_strategy": "blocked_qa",
+      "value_constraints": {"enum_values": [true], "numeric_range": null},
+      "constraint_ids": [],
+      "test_ids": ["T41-REG-CORE-007"],
       "modes": ["block", "report"]
     }
   ]

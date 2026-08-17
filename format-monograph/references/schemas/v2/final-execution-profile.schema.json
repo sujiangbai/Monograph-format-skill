@@ -10,7 +10,7 @@
     "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
     "input_fingerprints", "semantic_fingerprint", "task_id", "legacy_input",
     "activation", "final_ready_eligible", "delivery_allowed", "safety_invariants",
-    "source_artifact_ids", "approval_artifact_ids", "conflict_report_ids", "properties"
+    "bindings", "resolved_properties"
   ],
   "properties": {
     "artifact_kind": {"const": "final-execution-profile"},
@@ -25,21 +25,49 @@
     "final_ready_eligible": {"const": false},
     "delivery_allowed": {"const": false},
     "safety_invariants": {"$ref": "common.schema.json#/$defs/safety_invariants"},
-    "source_artifact_ids": {
-      "type": "array", "uniqueItems": true,
-      "items": {"$ref": "common.schema.json#/$defs/artifact_id"}
-    },
-    "approval_artifact_ids": {
-      "type": "array", "uniqueItems": true,
-      "items": {"$ref": "common.schema.json#/$defs/artifact_id"}
-    },
-    "conflict_report_ids": {
-      "type": "array", "uniqueItems": true,
-      "items": {"$ref": "common.schema.json#/$defs/artifact_id"}
-    },
-    "properties": {
+    "bindings": {"$ref": "common.schema.json#/$defs/final_profile_bindings"},
+    "resolved_properties": {
       "type": "array",
-      "items": {"$ref": "property-catalog.generated.schema.json"}
+      "items": {"$ref": "#/$defs/resolved_property"}
+    }
+  },
+  "$defs": {
+    "resolved_property": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution_id", "key", "resolved_binding", "final_layer_kind", "final_source",
+        "candidate_chain", "override_chain", "excluded_candidates", "confidence",
+        "conflict_id", "qa_decision_id", "safety_check", "execution_mode"
+      ],
+      "properties": {
+        "resolution_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "resolved_binding": {"$ref": "property-catalog.generated.schema.json"},
+        "final_layer_kind": {"$ref": "common.schema.json#/$defs/layer_kind"},
+        "final_source": {"$ref": "common.schema.json#/$defs/source_reference"},
+        "candidate_chain": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "common.schema.json#/$defs/candidate_record"}
+        },
+        "override_chain": {
+          "type": "array", "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+        },
+        "excluded_candidates": {
+          "type": "array",
+          "items": {"$ref": "common.schema.json#/$defs/excluded_candidate"}
+        },
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "conflict_id": {
+          "oneOf": [{"$ref": "common.schema.json#/$defs/stable_id"}, {"type": "null"}]
+        },
+        "qa_decision_id": {
+          "oneOf": [{"$ref": "common.schema.json#/$defs/stable_id"}, {"type": "null"}]
+        },
+        "safety_check": {"$ref": "common.schema.json#/$defs/safety_check"},
+        "execution_mode": {"type": "string", "enum": ["automatic", "preserve", "qa", "report", "block"]}
+      }
     }
   }
 }

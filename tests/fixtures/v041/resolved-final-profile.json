@@ -1,0 +1,90 @@
+{
+  "artifact_kind": "final-execution-profile",
+  "schema_version": "2.0",
+  "artifact_id": "final-execution-profile:resolved-test",
+  "created_by_tool": {"tool_id": "format-monograph", "version": "0.4.1"},
+  "input_fingerprints": [
+    {"input_id": "input:test", "role": "source_document", "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+    {"input_id": "activation:test", "role": "feature_activation", "fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+    {"input_id": "registry:test", "role": "property_registry", "fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+  ],
+  "semantic_fingerprint": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "task_id": "task:resolved-test",
+  "legacy_input": false,
+  "activation": "disabled",
+  "final_ready_eligible": false,
+  "delivery_allowed": false,
+  "safety_invariants": {
+    "overridable": false,
+    "author_content_mutation_allowed": false,
+    "legacy_auto_activation_allowed": false,
+    "delivery_evidence_allowed": false,
+    "final_ready_allowed": false
+  },
+  "bindings": {
+    "task_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "input_fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "feature_activation_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "property_registry_fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "profile_fingerprints": ["sha256:4444444444444444444444444444444444444444444444444444444444444444"],
+    "structure_fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "approval_fingerprints": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"],
+    "conflict_report_fingerprint": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "resolved_properties": [
+    {
+      "resolution_id": "resolution:author-content",
+      "key": {
+        "semantic_object_kind": "document",
+        "property_id": "security.author-content-immutable",
+        "normalized_scope": {
+          "scope_id": "scope:whole-document",
+          "document_scope": "document",
+          "section_ids": [],
+          "semantic_roles": ["document"],
+          "object_exception_ids": [],
+          "mutually_exclusive_conditions": []
+        }
+      },
+      "resolved_binding": {
+        "property_id": "security.author-content-immutable",
+        "value": {"type": "boolean", "value": true},
+        "unit_id": null,
+        "mode": "block"
+      },
+      "final_layer_kind": "safety",
+      "final_source": {
+        "source_artifact_id": "layered-rule-asset:safety",
+        "source_rule_id": "SAFETY-AUTHOR-CONTENT"
+      },
+      "candidate_chain": [
+        {
+          "candidate_id": "candidate:safety",
+          "property_binding": {
+            "property_id": "security.author-content-immutable",
+            "value": {"type": "boolean", "value": true},
+            "unit_id": null,
+            "mode": "block"
+          },
+          "source": {
+            "source_artifact_id": "layered-rule-asset:safety",
+            "source_rule_id": "SAFETY-AUTHOR-CONTENT"
+          },
+          "layer_kind": "safety",
+          "confidence": "high",
+          "scope_status": "applicable"
+        }
+      ],
+      "override_chain": ["candidate:safety"],
+      "excluded_candidates": [],
+      "confidence": "high",
+      "conflict_id": null,
+      "qa_decision_id": null,
+      "safety_check": {
+        "status": "pass",
+        "checked_invariant_ids": ["security.author-content-immutable"]
+      },
+      "execution_mode": "block"
+    }
+  ]
+}

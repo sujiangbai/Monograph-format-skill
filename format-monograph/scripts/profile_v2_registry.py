@@ -14,6 +14,7 @@ SCHEMA_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas" /
 REGISTRY_SCHEMA_PATH = SCHEMA_DIR / "property-registry.schema.json"
 CORE_REGISTRY_PATH = SCHEMA_DIR / "property-registry.core.json"
 GENERATED_CATALOG_PATH = SCHEMA_DIR / "property-catalog.generated.schema.json"
+GENERATED_TYPED_VALUE_PATH = SCHEMA_DIR / "typed-value.generated.schema.json"
 
 CATALOG_COLLECTIONS = {
     "data_types": "data_type_id",
@@ -22,6 +23,7 @@ CATALOG_COLLECTIONS = {
     "comparators": "comparator_id",
     "executor_capabilities": "capability_id",
     "auditor_capabilities": "capability_id",
+    "constraints": "constraint_id",
     "properties": "property_id",
 }
 
@@ -94,6 +96,11 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
     known_comparators = set(_catalog_ids(registry, "comparators"))
     known_executors = set(_catalog_ids(registry, "executor_capabilities"))
     known_auditors = set(_catalog_ids(registry, "auditor_capabilities"))
+    known_constraints = set(_catalog_ids(registry, "constraints"))
+    known_properties = set(_catalog_ids(registry, "properties"))
+    data_type_index = {
+        item["data_type_id"]: item for item in registry.get("data_types", [])
+    }
 
     for collection, values, expected_prefix in (
         ("normalizers", known_normalizers, "normalizer."),
@@ -104,6 +111,17 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
         for value in values:
             if not value.startswith(expected_prefix) or _contains_forbidden_callable_token(value):
                 errors.append(f"{collection} contains a forbidden callable-like ID: {value}.")
+
+    for constraint in registry.get("constraints", []):
+        constraint_id = constraint["constraint_id"]
+        if _contains_forbidden_callable_token(constraint_id):
+            errors.append(f"constraints contains a forbidden callable-like ID: {constraint_id}.")
+        missing_properties = sorted(set(constraint["property_ids"]) - known_properties)
+        if missing_properties:
+            errors.append(
+                f"{constraint_id} references unregistered properties: "
+                f"{', '.join(missing_properties)}."
+            )
 
     scope = registry.get("registry_scope")
     for item in registry.get("properties", []):
@@ -118,6 +136,27 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
             errors.append(f"{property_id} references an unregistered executor capability.")
         if item["auditor_capability_id"] not in known_auditors:
             errors.append(f"{property_id} references an unregistered auditor capability.")
+        missing_constraints = sorted(set(item.get("constraint_ids", [])) - known_constraints)
+        if missing_constraints:
+            errors.append(
+                f"{property_id} references unregistered constraints: "
+                f"{', '.join(missing_constraints)}."
+            )
+
+        data_type = data_type_index.get(item["data_type_id"])
+        if data_type is not None:
+            scalar_schema: dict[str, Any] = {"type": data_type["json_type"]}
+            if "pattern" in data_type:
+                scalar_schema["pattern"] = data_type["pattern"]
+            if "max_length" in data_type:
+                scalar_schema["maxLength"] = data_type["max_length"]
+            scalar_validator = Draft202012Validator(scalar_schema)
+            enum_values = item.get("value_constraints", {}).get("enum_values", [])
+            if any(scalar_validator.is_valid(value) is False for value in enum_values):
+                errors.append(f"{property_id} has enum values outside its registered data type.")
+            numeric_range = item.get("value_constraints", {}).get("numeric_range")
+            if numeric_range is not None and item["data_type_id"] not in {"integer", "decimal"}:
+                errors.append(f"{property_id} declares a numeric range for a nonnumeric data type.")
 
         canonical_unit = item.get("canonical_unit_id")
         allowed_units = set(item.get("allowed_unit_ids", []))
@@ -186,13 +225,36 @@ def _value_schema(data_type: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_typed_value_schema(registry: dict[str, Any]) -> dict[str, Any]:
+    """Generate every typed scalar contract from the registry's data type catalog."""
+
+    validate_registry_document(registry)
+    definitions = {
+        item["data_type_id"]: _value_schema(item)
+        for item in sorted(registry["data_types"], key=lambda value: value["data_type_id"])
+    }
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://schemas.format-monograph.local/v2/typed-value.generated.schema.json",
+        "title": "Generated Format Monograph V2 Typed Values",
+        "description": (
+            "Generated mechanically from property-registry.core.json; "
+            "do not maintain data type contracts here by hand."
+        ),
+        "$defs": definitions,
+        "oneOf": [
+            {"$ref": f"#/$defs/{data_type_id}"}
+            for data_type_id in sorted(definitions)
+        ],
+    }
+    Draft202012Validator.check_schema(schema)
+    return schema
+
+
 def build_property_catalog_schema(registry: dict[str, Any]) -> dict[str, Any]:
     """Generate the property-binding schema only from registry declarations."""
 
     validate_registry_document(registry)
-    data_types = {
-        item["data_type_id"]: item for item in registry["data_types"]
-    }
     variants: list[dict[str, Any]] = []
     for item in sorted(registry["properties"], key=lambda value: value["property_id"]):
         unit_schema: dict[str, Any]
@@ -210,7 +272,12 @@ def build_property_catalog_schema(registry: dict[str, Any]) -> dict[str, Any]:
                 "required": ["property_id", "value", "unit_id", "mode"],
                 "properties": {
                     "property_id": {"const": item["property_id"]},
-                    "value": _value_schema(data_types[item["data_type_id"]]),
+                    "value": {
+                        "$ref": (
+                            "typed-value.generated.schema.json#/$defs/"
+                            f"{item['data_type_id']}"
+                        )
+                    },
                     "unit_id": unit_schema,
                     "mode": {"type": "string", "enum": sorted(item["modes"])},
                 },
@@ -239,6 +306,11 @@ def catalog_property_ids(catalog_schema: dict[str, Any]) -> set[str]:
     return result
 
 
+def typed_value_type_ids(typed_value_schema: dict[str, Any]) -> set[str]:
+    definitions = typed_value_schema.get("$defs", {})
+    return set(definitions) if isinstance(definitions, dict) else set()
+
+
 def catalog_differences(
     registry: dict[str, Any], catalog_schema: dict[str, Any]
 ) -> dict[str, list[str]]:
@@ -250,16 +322,38 @@ def catalog_differences(
     }
 
 
+def typed_value_differences(
+    registry: dict[str, Any], typed_value_schema: dict[str, Any]
+) -> dict[str, list[str]]:
+    registry_ids = set(_catalog_ids(registry, "data_types"))
+    schema_ids = typed_value_type_ids(typed_value_schema)
+    return {
+        "registry_only": sorted(registry_ids - schema_ids),
+        "schema_only": sorted(schema_ids - registry_ids),
+    }
+
+
 def verify_committed_catalog(registry: dict[str, Any] | None = None) -> None:
     registry = registry or load_registry()
     committed = _load_json(GENERATED_CATALOG_PATH)
     generated = build_property_catalog_schema(registry)
+    committed_typed_values = _load_json(GENERATED_TYPED_VALUE_PATH)
+    generated_typed_values = build_typed_value_schema(registry)
     differences = catalog_differences(registry, committed)
     if differences["registry_only"] or differences["schema_only"]:
         raise RegistryContractError(f"Registry/schema property difference is not zero: {differences}")
     if committed != generated:
         raise RegistryContractError(
             "Generated property catalog differs from the registry-derived contract."
+        )
+    type_differences = typed_value_differences(registry, committed_typed_values)
+    if type_differences["registry_only"] or type_differences["schema_only"]:
+        raise RegistryContractError(
+            f"Registry/schema data type difference is not zero: {type_differences}"
+        )
+    if committed_typed_values != generated_typed_values:
+        raise RegistryContractError(
+            "Generated typed-value schema differs from the registry-derived contract."
         )
 
 

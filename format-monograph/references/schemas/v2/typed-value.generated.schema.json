@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2/typed-value.generated.schema.json",
+  "title": "Generated Format Monograph V2 Typed Values",
+  "description": "Generated mechanically from property-registry.core.json; do not maintain data type contracts here by hand.",
+  "$defs": {
+    "boolean": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"const": "boolean"},
+        "value": {"type": "boolean"}
+      }
+    },
+    "decimal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"const": "decimal"},
+        "value": {
+          "type": "string",
+          "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+        }
+      }
+    },
+    "integer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"const": "integer"},
+        "value": {"type": "integer"}
+      }
+    },
+    "string": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"const": "string"},
+        "value": {"type": "string", "maxLength": 1000}
+      }
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/boolean"},
+    {"$ref": "#/$defs/decimal"},
+    {"$ref": "#/$defs/integer"},
+    {"$ref": "#/$defs/string"}
+  ]
+}

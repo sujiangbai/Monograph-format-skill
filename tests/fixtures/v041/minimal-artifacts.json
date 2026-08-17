@@ -30,10 +30,17 @@
       "delivery_evidence_allowed": false,
       "final_ready_allowed": false
     },
-    "source_artifact_ids": [],
-    "approval_artifact_ids": [],
-    "conflict_report_ids": [],
-    "properties": []
+    "bindings": {
+      "task_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "input_fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "feature_activation_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "property_registry_fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "profile_fingerprints": ["sha256:4444444444444444444444444444444444444444444444444444444444444444"],
+      "structure_fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "approval_fingerprints": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"],
+      "conflict_report_fingerprint": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "resolved_properties": []
   },
   "qa-approval-artifact": {
     "artifact_kind": "qa-approval-artifact",
