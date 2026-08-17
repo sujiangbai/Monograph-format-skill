@@ -26,7 +26,9 @@ from profile_v2_artifacts import (  # noqa: E402
     ArtifactContractError,
     ArtifactDagError,
     ArtifactRouteError,
+    _contract_routes_from_matrix,
     _is_obvious_placeholder_fingerprint,
+    _route_artifact_contract_from_routes,
     _schema_documents,
     _test_schema_overrides,
     _topological_artifact_order,
@@ -75,6 +77,7 @@ def load_json(path: Path) -> dict:
 
 
 EXPECTATIONS = load_json(H_FIXTURES / "contract-expectations.json")
+MINIMAL_ARTIFACTS = load_json(FIXTURES / "v041" / "minimal-artifacts.json")
 
 
 def digest(label: str) -> str:
@@ -247,6 +250,7 @@ def composition_report(
     bindings = report_bindings(feature, rule)
     key = property_key()
     item = candidate()
+    has_proposal = status in {"resolvable", "awaiting_approval"}
     has_approval = status == "awaiting_approval"
     fatal = status == "fatal"
     unresolvable = status == "unresolvable"
@@ -270,7 +274,7 @@ def composition_report(
                     "excluded_candidates": [],
                 }
             ]
-            if has_approval
+            if has_proposal
             else []
         ),
         "scope_partitions": [],
@@ -288,7 +292,7 @@ def composition_report(
                     "execution_mode": "report",
                 }
             ]
-            if has_approval
+            if has_proposal
             else []
         ),
         "fatal_diagnostics": (
@@ -363,7 +367,13 @@ def approval(report: dict, *, decision: str = "select_candidate") -> dict:
             "semantic_fingerprint": digest("unstamped-approval"),
             "approval_id": "approval:h-001",
             "approver": {"actor_id": "actor:user", "actor_role": "user"},
-            "decision_type": "conflict_resolution",
+            "decision_type": (
+                "qa_exclusion"
+                if decision == "exclude_candidate"
+                else "keep_original"
+                if decision == "keep_original"
+                else "conflict_resolution"
+            ),
             "decision": decision,
             "reason": "Synthetic approval for contract testing.",
             "created_at": "2026-08-17T00:00:00Z",
@@ -422,6 +432,28 @@ def final_profile(
                 "qa_decision_id": approval_document["approval_id"],
             }
         ]
+    resolved_properties = []
+    for proposal in report["proposed_resolutions"]:
+        resolved_properties.append(
+            {
+                "resolution_id": proposal["proposed_resolution_id"],
+                "key": deepcopy(proposal["key"]),
+                "resolved_binding": deepcopy(proposal["proposed_binding"]),
+                "final_layer_kind": proposal["final_layer_kind"],
+                "final_source": deepcopy(proposal["final_source"]),
+                "candidate_chain": deepcopy(proposal["candidate_chain"]),
+                "override_chain": list(proposal["override_chain"]),
+                "excluded_candidates": [],
+                "confidence": proposal["confidence"],
+                "safety_check": {
+                    "status": "pass",
+                    "checked_invariant_ids": [
+                        "test.safety-author-content-immutable"
+                    ],
+                },
+                "execution_mode": proposal["execution_mode"],
+            }
+        )
     return stamp_test(
         {
             "artifact_kind": "final-execution-profile",
@@ -445,7 +477,7 @@ def final_profile(
                 "final_ready_allowed": False,
             },
             "bindings": bindings,
-            "resolved_properties": [],
+            "resolved_properties": resolved_properties,
             "closure_evidence": closure,
         }
     )
@@ -603,6 +635,286 @@ class P2bHContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ArtifactDagError, "cycle"):
                 _topological_artifact_order({"a": {"b"}, "b": {"a"}})
 
+    def test_v0411_h_reference_integrity_001_022(self) -> None:
+        with self.subTest(assertion_id="T411-H-REF-001"):
+            report = composition_report(self.feature, self.rule, status="awaiting_approval")
+            invalid_pairs = (
+                ("keep_original", "select_candidate"),
+                ("qa_exclusion", "adopt_proposed"),
+                ("conflict_resolution", "keep_original"),
+            )
+            for decision_type, decision in invalid_pairs:
+                qa = approval(report)
+                qa["decision_type"] = decision_type
+                qa["decision"] = decision
+                qa = stamp_test(qa)
+                with self.assertRaisesRegex(ArtifactContractError, "inconsistent"):
+                    self.validate_test(qa)
+
+        with self.subTest(assertion_id="T411-H-REF-002"):
+            report = composition_report(self.feature, self.rule, status="awaiting_approval")
+            report["approval_required_conflicts"][0]["key"] = property_key(
+                document_scope("document:other")
+            )
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "different normalized keys"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-003"):
+            report = composition_report(self.feature, self.rule)
+            excluded = deepcopy(candidate())
+            excluded["candidate_id"] = "candidate:h-excluded"
+            report["candidate_groups"][0]["excluded_candidates"].append(
+                {
+                    "candidate": excluded,
+                    "exclusion_reason": "out_of_scope",
+                    "reason_code": "OUT-OF-SCOPE",
+                }
+            )
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "cannot be applicable"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-004"):
+            report = composition_report(self.feature, self.rule)
+            report["scope_partitions"] = [
+                {
+                    "partition_id": "partition:h-failed",
+                    "key": property_key(),
+                    "source_scope": document_scope(),
+                    "partition_scopes": [document_scope()],
+                    "evidence_status": "failed",
+                }
+            ]
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "Failed scope partitions"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-005"):
+            report = composition_report(self.feature, self.rule)
+            final = final_profile(report, self.feature, self.rule)
+            final["resolved_properties"] = []
+            final = stamp_test(final)
+            with self.assertRaisesRegex(ArtifactDagError, "every and only"):
+                _validate_artifact_dag_for_test(
+                    [final, report, self.feature, self.rule], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-006"):
+            report = composition_report(self.feature, self.rule)
+            duplicate = deepcopy(report["candidate_groups"][0])
+            duplicate["candidate_group_id"] = "candidate-group:h-duplicate"
+            report["candidate_groups"].append(duplicate)
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "candidate_groups repeats"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-007"):
+            report = composition_report(self.feature, self.rule)
+            partition = {
+                "partition_id": "partition:h-001",
+                "key": property_key(),
+                "source_scope": document_scope(),
+                "partition_scopes": [document_scope()],
+                "evidence_status": "verified",
+            }
+            duplicate = deepcopy(partition)
+            duplicate["partition_id"] = "partition:h-002"
+            report["scope_partitions"] = [partition, duplicate]
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "scope_partitions repeats"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-008"):
+            report = composition_report(self.feature, self.rule)
+            duplicate = deepcopy(report["proposed_resolutions"][0])
+            duplicate["proposed_resolution_id"] = "proposed-resolution:h-duplicate"
+            report["proposed_resolutions"].append(duplicate)
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "proposed_resolutions repeats"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-009"):
+            report = composition_report(self.feature, self.rule)
+            report["candidate_groups"] = []
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "no candidate group"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-010"):
+            report = composition_report(self.feature, self.rule)
+            extra = deepcopy(candidate())
+            extra["candidate_id"] = "candidate:h-untracked"
+            report["proposed_resolutions"][0]["candidate_chain"].append(extra)
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "does not exactly reference"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-011"):
+            report = composition_report(self.feature, self.rule)
+            report["proposed_resolutions"][0]["override_chain"].append(
+                "candidate:h-unknown"
+            )
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "non-active"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-012"):
+            report = composition_report(self.feature, self.rule)
+            report["proposed_resolutions"][0]["final_source"] = {
+                "source_artifact_id": "layered-rule-asset:other",
+                "source_rule_id": "RULE-OTHER",
+            }
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "absent from its candidate chain"):
+                self.validate_test(report)
+
+        with self.subTest(assertion_id="T411-H-REF-013"):
+            report = composition_report(self.feature, self.rule)
+            final = final_profile(report, self.feature, self.rule)
+            final["resolved_properties"][0]["key"] = property_key(
+                document_scope("document:other")
+            )
+            final = stamp_test(final)
+            with self.assertRaisesRegex(ArtifactDagError, "key differs"):
+                _validate_artifact_dag_for_test(
+                    [final, report, self.feature, self.rule], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-014"):
+            report = composition_report(self.feature, self.rule)
+            final = final_profile(report, self.feature, self.rule)
+            excluded = deepcopy(candidate())
+            excluded["candidate_id"] = "candidate:h-final-excluded"
+            final["resolved_properties"][0]["excluded_candidates"].append(
+                {
+                    "candidate": excluded,
+                    "exclusion_reason": "out_of_scope",
+                    "reason_code": "OUT-OF-SCOPE",
+                }
+            )
+            final = stamp_test(final)
+            with self.assertRaisesRegex(ArtifactContractError, "cannot be applicable"):
+                self.validate_test(final)
+
+        with self.subTest(assertion_id="T411-H-REF-015"):
+            report = composition_report(self.feature, self.rule)
+            final = final_profile(report, self.feature, self.rule)
+            final["resolved_properties"][0]["override_chain"].append(
+                "candidate:h-unknown"
+            )
+            final = stamp_test(final)
+            with self.assertRaisesRegex(ArtifactContractError, "unknown active"):
+                self.validate_test(final)
+
+        with self.subTest(assertion_id="T411-H-REF-016"):
+            report = composition_report(self.feature, self.rule)
+            report["scope_partitions"] = [
+                {
+                    "partition_id": "partition:h-pending",
+                    "key": property_key(),
+                    "source_scope": document_scope(),
+                    "partition_scopes": [document_scope()],
+                    "evidence_status": "not_evaluated",
+                }
+            ]
+            report = stamp_test(report)
+            self.validate_test(report)
+            final = final_profile(report, self.feature, self.rule)
+            with self.assertRaisesRegex(ArtifactDagError, "not-evaluated"):
+                _validate_artifact_dag_for_test(
+                    [final, report, self.feature, self.rule], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-017"):
+            old_feature = deepcopy(MINIMAL_ARTIFACTS["feature-activation-manifest"])
+            report = composition_report(self.feature, self.rule)
+            report["bindings"]["feature_activation_fingerprint"] = old_feature[
+                "semantic_fingerprint"
+            ]
+            next(
+                item
+                for item in report["input_fingerprints"]
+                if item["role"] == "feature_activation"
+            )["fingerprint"] = old_feature["semantic_fingerprint"]
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactDagError, "schema 2.1"):
+                _validate_artifact_dag_for_test(
+                    [report, old_feature, self.rule], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-018"):
+            disabled_feature = feature_manifest(composer=False)
+            report = composition_report(disabled_feature, self.rule)
+            with self.assertRaisesRegex(ArtifactDagError, "profile_v2_composer=true"):
+                _validate_artifact_dag_for_test(
+                    [report, disabled_feature, self.rule], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-019"):
+            old_rule = deepcopy(MINIMAL_ARTIFACTS["layered-rule-asset"])
+            report = composition_report(self.feature, self.rule)
+            report["bindings"]["rule_asset_fingerprints"] = [
+                old_rule["semantic_fingerprint"]
+            ]
+            next(
+                item
+                for item in report["input_fingerprints"]
+                if item["role"] == "rule_asset"
+            )["fingerprint"] = old_rule["semantic_fingerprint"]
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactDagError, "schema 2.1"):
+                _validate_artifact_dag_for_test(
+                    [report, self.feature, old_rule], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-020"):
+            old_report = deepcopy(MINIMAL_ARTIFACTS["conflict-report"])
+            report = composition_report(self.feature, self.rule, status="awaiting_approval")
+            qa = approval(report)
+            qa["bindings"]["composition_report_fingerprint"] = old_report[
+                "semantic_fingerprint"
+            ]
+            next(
+                item
+                for item in qa["input_fingerprints"]
+                if item["role"] == "conflict_report"
+            )["fingerprint"] = old_report["semantic_fingerprint"]
+            qa = stamp_test(qa)
+            with self.assertRaisesRegex(ArtifactDagError, "schema 2.2"):
+                _validate_artifact_dag_for_test(
+                    [qa, old_report], registry=self.registry
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-021"):
+            report = composition_report(self.feature, self.rule, status="awaiting_approval")
+            qa = approval(report)
+            old_qa = deepcopy(MINIMAL_ARTIFACTS["qa-approval-artifact"])
+            final = final_profile(report, self.feature, self.rule, qa)
+            final["bindings"]["approval_fingerprints"] = [
+                old_qa["semantic_fingerprint"]
+            ]
+            next(
+                item
+                for item in final["input_fingerprints"]
+                if item["role"] == "approval"
+            )["fingerprint"] = old_qa["semantic_fingerprint"]
+            final = stamp_test(final)
+            with self.assertRaisesRegex(ArtifactDagError, "schema 2.1"):
+                _validate_artifact_dag_for_test(
+                    [final, old_qa, report, self.feature, self.rule],
+                    registry=self.registry,
+                )
+
+        with self.subTest(assertion_id="T411-H-REF-022"):
+            report = composition_report(self.feature, self.rule, status="awaiting_approval")
+            incomplete = deepcopy(report["approval_required_conflicts"][0])
+            incomplete["candidates"][0]["candidate_id"] = "candidate:h-other"
+            report["approval_required_conflicts"][0] = incomplete
+            report = stamp_test(report)
+            with self.assertRaisesRegex(ArtifactContractError, "complete candidate group"):
+                self.validate_test(report)
+
     def test_v0411_h_route_001_018(self) -> None:
         matrix = load_artifact_contract_matrix()
         with self.subTest(assertion_id="T411-H-ROUTE-001"):
@@ -629,12 +941,12 @@ class P2bHContractTests(unittest.TestCase):
         with self.subTest(assertion_id="T411-H-ROUTE-005"):
             document = feature_manifest()
             document["registry_contract_version"] = "2.0"
-            with self.assertRaisesRegex(ArtifactRouteError, "registry contract"):
+            with self.assertRaisesRegex(ArtifactRouteError, "four-part"):
                 route_artifact_contract(document)
         with self.subTest(assertion_id="T411-H-ROUTE-006"):
             document = feature_manifest()
             document["authority_contract_version"] = "none"
-            with self.assertRaisesRegex(ArtifactRouteError, "authority contract"):
+            with self.assertRaisesRegex(ArtifactRouteError, "four-part"):
                 route_artifact_contract(document)
         with self.subTest(assertion_id="T411-H-ROUTE-007"):
             legacy = {"artifact_kind": "feature-activation-manifest", "schema_version": "2.0", "registry_contract_version": "2.0"}
@@ -662,12 +974,12 @@ class P2bHContractTests(unittest.TestCase):
             verify_contract_matrix_alignment()
         with self.subTest(assertion_id="T411-H-ROUTE-012"):
             drift = dict(artifacts.ARTIFACT_SCHEMA_FILES)
-            drift[("conflict-report", "2.2")] = "wrong.schema.json"
+            drift[("conflict-report", "2.2", "2.1", "1.0")] = "wrong.schema.json"
             with self.assertRaisesRegex(ArtifactRouteError, "differs"):
                 verify_contract_matrix_alignment(drift)
         with self.subTest(assertion_id="T411-H-ROUTE-013"):
             drift = dict(artifacts.ARTIFACT_SCHEMA_FILES)
-            drift[("capability-snapshot", "2.1")] = "capability-snapshot.schema.json"
+            drift[("capability-snapshot", "2.1", "2.1", "none")] = "capability-snapshot.schema.json"
             with self.assertRaisesRegex(ArtifactRouteError, "differs"):
                 verify_contract_matrix_alignment(drift)
         with self.subTest(assertion_id="T411-H-ROUTE-014"):
@@ -685,7 +997,9 @@ class P2bHContractTests(unittest.TestCase):
             final = final_profile(report, self.feature, self.rule)
             new_documents = [feature_manifest(), qa, report, final]
             rejected = 0
-            offline = artifacts.offline_schema_registry()
+            offline = artifacts._offline_schema_registry(
+                _test_schema_overrides(self.registry)
+            )
             for source in new_documents:
                 for target in new_documents:
                     target_schema = load_artifact_schema(
@@ -722,6 +1036,57 @@ class P2bHContractTests(unittest.TestCase):
             legacy_routes = [item for item in matrix["routes"] if item["version_source"] == "legacy_matrix"]
             self.assertTrue(legacy_routes)
             self.assertTrue(all(item["authority_contract_version"] == "none" for item in legacy_routes))
+
+    def test_v0411_h_route_019_023_four_part_identity(self) -> None:
+        matrix = load_artifact_contract_matrix()
+        alternate = deepcopy(
+            next(
+                item
+                for item in matrix["routes"]
+                if item["artifact_kind"] == "feature-activation-manifest"
+                and item["schema_version"] == "2.1"
+            )
+        )
+        alternate["route_id"] = "route:feature-activation-manifest:2.1:registry-2.0"
+        alternate["registry_contract_version"] = "2.0"
+        matrix["routes"].append(alternate)
+        routes = _contract_routes_from_matrix(matrix)
+        with self.subTest(assertion_id="T411-H-ROUTE-019"):
+            document = feature_manifest()
+            document["registry_contract_version"] = "2.0"
+            selected = _route_artifact_contract_from_routes(document, routes)
+            self.assertEqual(alternate["route_id"], selected.route_id)
+        with self.subTest(assertion_id="T411-H-ROUTE-020"):
+            document = feature_manifest()
+            document["registry_contract_version"] = "2.0"
+            document["authority_contract_version"] = "none"
+            with self.assertRaisesRegex(ArtifactRouteError, "four-part"):
+                _route_artifact_contract_from_routes(document, routes)
+        with self.subTest(assertion_id="T411-H-ROUTE-021"):
+            document = feature_manifest()
+            del document["registry_contract_version"]
+            with self.assertRaisesRegex(ArtifactRouteError, "explicit"):
+                _route_artifact_contract_from_routes(document, routes)
+        with self.subTest(assertion_id="T411-H-ROUTE-022"):
+            document = feature_manifest()
+            document["registry_contract_version"] = "9.9"
+            with self.assertRaisesRegex(ArtifactRouteError, "four-part"):
+                _route_artifact_contract_from_routes(document, routes)
+        with self.subTest(assertion_id="T411-H-ROUTE-023"):
+            duplicate_legacy = deepcopy(
+                next(
+                    item
+                    for item in matrix["routes"]
+                    if item["artifact_kind"] == "capability-snapshot"
+                    and item["schema_version"] == "2.0"
+                )
+            )
+            duplicate_legacy["route_id"] = "route:capability-snapshot:2.0:duplicate"
+            duplicate_legacy["registry_contract_version"] = "2.1"
+            duplicate_matrix = deepcopy(matrix)
+            duplicate_matrix["routes"].append(duplicate_legacy)
+            with self.assertRaisesRegex(ArtifactRouteError, "legacy artifact/version"):
+                _contract_routes_from_matrix(duplicate_matrix)
 
     def test_v0411_h_authority_001_012(self) -> None:
         expected = tuple(EXPECTATIONS["authority_layers"])
@@ -880,6 +1245,53 @@ class P2bHContractTests(unittest.TestCase):
         with self.subTest(assertion_id="T411-H-CAN-024"):
             signature = inspect.signature(compute_semantic_fingerprint)
             self.assertEqual(["document"], list(signature.parameters))
+
+    def test_v0411_h_canonical_025_030_real_qa_branches(self) -> None:
+        schema = load_artifact_schema("qa-approval-artifact", version="2.1")
+        validator = Draft202012Validator(
+            schema, registry=artifacts.offline_schema_registry()
+        )
+        report = composition_report(self.feature, self.rule, status="awaiting_approval")
+
+        with self.subTest(assertion_id="T411-H-CAN-025"):
+            qa = approval(report)
+            qa["previous_approval_id"] = None
+            self.assertTrue(validator.is_valid(qa))
+        with self.subTest(assertion_id="T411-H-CAN-026"):
+            qa = approval(report)
+            qa["previous_approval_id"] = "approval:previous"
+            qa = stamp_test(qa)
+            self.assertTrue(validator.is_valid(qa))
+        with self.subTest(assertion_id="T411-H-CAN-027"):
+            qa = approval(report)
+            qa["previous_approval_id"] = False
+            self.assertFalse(validator.is_valid(qa))
+        with self.subTest(assertion_id="T411-H-CAN-028"):
+            qa = approval(report)
+            qa["approver"] = {"actor_id": "actor:user", "actor_role": "user"}
+            qa = stamp_test(qa)
+            self.assertTrue(validator.is_valid(qa))
+        with self.subTest(assertion_id="T411-H-CAN-029"):
+            qa = approval(report)
+            qa["approver"] = {
+                "actor_id": "actor:publisher",
+                "actor_role": "delegated_publisher",
+                "authorization_reference": {
+                    "authorization_id": "authorization:h-001",
+                    "granted_by_actor_id": "actor:user",
+                    "authority_scope": document_scope(),
+                    "issued_at": "2026-08-18T00:00:00Z",
+                },
+            }
+            qa = stamp_test(qa)
+            self.assertTrue(validator.is_valid(qa))
+        with self.subTest(assertion_id="T411-H-CAN-030"):
+            qa = approval(report)
+            qa["approver"] = {
+                "actor_id": "actor:publisher",
+                "actor_role": "delegated_publisher",
+            }
+            self.assertFalse(validator.is_valid(qa))
 
     def test_v0411_h_feature_001_008(self) -> None:
         with self.subTest(assertion_id="T411-H-FEAT-001"):
