@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.format-monograph.local/v2/property-registry.schema.json",
-  "title": "Format Monograph V2 Property Registry",
+  "$id": "https://schemas.format-monograph.local/v2.1/property-registry.schema.json",
+  "title": "Format Monograph V2.1 Property Registry",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,7 +10,7 @@
     "constraints", "properties"
   ],
   "properties": {
-    "schema_version": {"const": "2.0"},
+    "schema_version": {"const": "2.1"},
     "registry_id": {"type": "string", "pattern": "^registry:[a-z][a-z0-9-]{2,63}$"},
     "registry_scope": {"type": "string", "enum": ["production", "test"]},
     "data_types": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "data_type_id", "minItems": 1, "items": {"$ref": "#/$defs/data_type"}},
@@ -38,11 +38,17 @@
     },
     "unit": {
       "type": "object", "additionalProperties": false,
-      "required": ["unit_id", "dimension", "symbol"],
+      "required": [
+        "unit_id", "dimension", "symbol", "canonical_unit_id",
+        "to_canonical_numerator", "to_canonical_denominator"
+      ],
       "properties": {
         "unit_id": {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"},
         "dimension": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
-        "symbol": {"type": ["string", "null"], "maxLength": 16}
+        "symbol": {"type": ["string", "null"], "maxLength": 16},
+        "canonical_unit_id": {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"},
+        "to_canonical_numerator": {"type": "integer", "minimum": 1},
+        "to_canonical_denominator": {"type": "integer", "minimum": 1}
       }
     },
     "normalizer": {
@@ -102,8 +108,7 @@
       "required": ["enum_values", "numeric_range"],
       "properties": {
         "enum_values": {
-          "type": "array", "uniqueItems": true,
-          "x-semantic-array": "set_by_scalar",
+          "type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true,
           "items": {"oneOf": [{"type": "boolean"}, {"type": "string", "maxLength": 1000}, {"type": "integer"}]}
         },
         "numeric_range": {"oneOf": [{"$ref": "#/$defs/numeric_range"}, {"type": "null"}]}
@@ -133,11 +138,7 @@
         "property_id": {"$ref": "#/$defs/property_id"},
         "test_only": {"type": "boolean"},
         "semantic_object_kinds": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$"}},
-        "allowed_layers": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "x-semantic-array": "set_by_scalar",
-          "items": {"type": "string", "enum": ["safety", "task_override", "publisher_template", "module", "book_type", "monograph_base", "standard_supplement"]}
-        },
+        "allowed_layers": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["safety", "task_override", "publisher_template", "module", "book_type", "monograph_base", "standard_supplement"]}},
         "data_type_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
         "canonical_unit_id": {"oneOf": [{"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"}, {"type": "null"}]},
         "allowed_unit_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true, "items": {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"}},

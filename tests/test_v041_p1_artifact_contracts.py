@@ -24,6 +24,8 @@ from profile_v2_artifacts import (  # noqa: E402
     ArtifactContractError,
     ProfileV2DisabledError,
     _schema_errors_for_test,
+    _schema_documents,
+    _test_schema_overrides,
     _validate_artifact_for_test,
     load_artifact_schema,
     offline_schema_registry,
@@ -33,6 +35,10 @@ from profile_v2_artifacts import (  # noqa: E402
     schema_errors,
     schema_for_requested_minor,
     validate_artifact,
+)
+from profile_v2_canonical import (  # noqa: E402
+    _stamp_semantic_fingerprint_for_test,
+    stamp_semantic_fingerprint,
 )
 from profile_v2_registry import (  # noqa: E402
     GENERATED_CATALOG_PATH,
@@ -59,6 +65,24 @@ def minimal_artifacts() -> dict[str, dict]:
 
 def resolved_final_profile() -> dict:
     return load_json(FIXTURES / "resolved-final-profile.json")
+
+
+def stamp_test_artifact(
+    artifact: dict,
+    registry: dict,
+    *,
+    schema_override: dict | None = None,
+) -> dict:
+    schema = schema_override or load_artifact_schema(
+        artifact["artifact_kind"], version="2.0"
+    )
+    documents = _schema_documents(_test_schema_overrides(registry))
+    return _stamp_semantic_fingerprint_for_test(
+        artifact,
+        schema=schema,
+        documents=documents,
+        registry=registry,
+    )
 
 
 def legacy_profile(version: str) -> dict:
@@ -121,7 +145,7 @@ class ArtifactSchemaTests(unittest.TestCase):
 
     def test_t41_sch_002_all_schema_documents_pass_metaschema(self) -> None:
         documents = schema_documents()
-        self.assertEqual(12, len(documents))
+        self.assertEqual(19, len(documents))
         for schema_id, schema in documents.items():
             with self.subTest(schema_id=schema_id):
                 Draft202012Validator.check_schema(schema)
@@ -184,8 +208,36 @@ class ArtifactSchemaTests(unittest.TestCase):
     def test_t41_sch_006_semantic_fingerprint_excludes_nonsemantic_metadata(self) -> None:
         for kind in ARTIFACT_KINDS:
             schema = load_artifact_schema(kind)
-            excluded = set(schema["x-semantic-fingerprint-excludes"])
-            self.assertTrue({"created_at", "display_name", "absolute_path"} <= excluded)
+            self.assertEqual(
+                "exclude",
+                schema["properties"]["semantic_fingerprint"][
+                    "x-semantic-fingerprint"
+                ],
+            )
+
+        timestamp_fields = {"created_at", "generated_at", "captured_at", "issued_at"}
+        seen_timestamps: set[str] = set()
+
+        def inspect(value: object) -> None:
+            if isinstance(value, dict):
+                properties = value.get("properties", {})
+                if isinstance(properties, dict):
+                    for name, contract in properties.items():
+                        if name in timestamp_fields:
+                            seen_timestamps.add(name)
+                            self.assertEqual(
+                                "exclude", contract.get("x-semantic-fingerprint")
+                            )
+                        self.assertNotIn(name, {"display_name", "absolute_path"})
+                for child in value.values():
+                    inspect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    inspect(child)
+
+        for schema in schema_documents().values():
+            inspect(schema)
+        self.assertEqual(timestamp_fields, seen_timestamps)
 
     def test_t41_sch_007_local_ref_closure_is_offline(self) -> None:
         with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network access")):
@@ -383,6 +435,10 @@ class ArtifactKeyedCollectionTests(unittest.TestCase):
         self.features = {"profile_v2_schema": True}
 
     def _validate(self, artifact: dict) -> None:
+        try:
+            artifact = stamp_semantic_fingerprint(artifact)
+        except ValueError:
+            pass
         validate_artifact(artifact, features=self.features)
 
     def _assert_exact_and_divergent_rejected(
@@ -802,6 +858,10 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
         )
 
     def _validate(self, artifact: dict) -> None:
+        try:
+            artifact = stamp_test_artifact(artifact, self.registry)
+        except ValueError:
+            pass
         _validate_artifact_for_test(
             artifact,
             features={"profile_v2_schema": True},
@@ -833,6 +893,10 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
         return artifact
 
     def _validate_with_registry(self, artifact: dict, registry: dict) -> None:
+        try:
+            artifact = stamp_test_artifact(artifact, registry)
+        except ValueError:
+            pass
         _validate_artifact_for_test(
             artifact,
             features={"profile_v2_schema": True},
@@ -1312,6 +1376,9 @@ class VersionDispatchAndRegressionTests(unittest.TestCase):
         schema["x-read-compatible-minor-versions"] = ["2.1"]
         effective, read_only = schema_for_requested_minor(schema, "2.1")
         self.assertTrue(read_only)
+        artifact = stamp_test_artifact(
+            artifact, registry, schema_override=effective
+        )
         result = _validate_artifact_for_test(
             artifact,
             features={"profile_v2_schema": True},
@@ -1366,13 +1433,11 @@ class VersionDispatchAndRegressionTests(unittest.TestCase):
                 self.assertTrue(schema_errors("feature-activation-manifest", mutated))
 
     def test_t41_sch_024_p1_files_contain_no_private_paths_or_manuscript_markers(self) -> None:
-        files = list(SCHEMA_DIR.glob("*")) + [
-            SCRIPTS / "profile_v2_registry.py",
-            SCRIPTS / "profile_v2_artifacts.py",
-            FIXTURES / "minimal-artifacts.json",
-            FIXTURES / "property-registry.test.json",
-            FIXTURES / "resolved-final-profile.json",
-        ]
+        files = (
+            list(SCHEMA_DIR.glob("*"))
+            + list(SCRIPTS.glob("profile_v2_*.py"))
+            + list(FIXTURES.glob("*"))
+        )
         forbidden_patterns = (
             re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"),
             re.compile(r"/Users/|/home/"),

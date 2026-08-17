@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.1/layered-rule-asset.schema.json",
+  "title": "Format Monograph V2.1 Layered Rule Asset",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifact_kind", "schema_version", "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint", "layer_kind", "can_override_safety_invariants", "activation", "asset_scope", "allowed_semantic_object_kinds", "rules"],
+  "properties": {
+    "artifact_kind": {"const": "layered-rule-asset"},
+    "schema_version": {"const": "2.1"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "layer_kind": {"$ref": "common.schema.json#/$defs/layer_kind"},
+    "can_override_safety_invariants": {"const": false},
+    "activation": {"type": "string", "enum": ["draft", "approved", "disabled"]},
+    "public_source_summary": {"type": "string", "maxLength": 1000},
+    "asset_scope": {"$ref": "common.schema.json#/$defs/scope_expression"},
+    "allowed_semantic_object_kinds": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/semantic_object_kind"}},
+    "rules": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "rule_id", "items": {"$ref": "#/$defs/rule"}}
+  },
+  "$defs": {
+    "rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rule_id", "semantic_object_kind", "scope", "confidence", "status", "properties"],
+      "properties": {
+        "rule_id": {"type": "string", "pattern": "^RULE-[A-Z0-9-]{3,80}$"},
+        "semantic_object_kind": {"$ref": "common.schema.json#/$defs/semantic_object_kind"},
+        "scope": {"$ref": "common.schema.json#/$defs/scope_expression"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "status": {"type": "string", "enum": ["draft", "approved", "rejected"]},
+        "properties": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "property_id", "minItems": 1, "items": {"$ref": "property-catalog.generated.schema.json"}}
+      }
+    }
+  }
+}

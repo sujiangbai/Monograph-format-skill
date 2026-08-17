@@ -5,7 +5,6 @@
   "type": "object",
   "additionalProperties": false,
   "x-read-compatible-minor-versions": [],
-  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
   "required": [
     "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
     "input_fingerprints", "semantic_fingerprint", "generated_at", "conflicts"
@@ -16,10 +15,18 @@
     "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
     "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
     "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
-    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
-    "generated_at": {"type": "string", "format": "date-time"},
+    "semantic_fingerprint": {
+      "$ref": "common.schema.json#/$defs/semantic_fingerprint",
+      "x-semantic-fingerprint": "exclude"
+    },
+    "generated_at": {
+      "type": "string", "format": "date-time",
+      "x-semantic-fingerprint": "exclude"
+    },
     "conflicts": {
       "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "conflict_id",
       "items": {"$ref": "#/$defs/conflict"}
     }
   },
@@ -37,10 +44,14 @@
         "status": {"type": "string", "enum": ["open", "blocked_qa", "resolved"]},
         "candidates": {
           "type": "array", "minItems": 1,
+          "x-semantic-array": "set_by_key",
+          "x-semantic-key": "candidate_id",
           "items": {"$ref": "common.schema.json#/$defs/candidate_record"}
         },
         "excluded_candidates": {
           "type": "array",
+          "x-semantic-array": "set_by_key",
+          "x-semantic-key": "candidate.candidate_id",
           "items": {"$ref": "common.schema.json#/$defs/excluded_candidate"}
         },
         "review_note": {"type": "string", "maxLength": 1000}

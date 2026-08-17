@@ -4,24 +4,30 @@
   "registry_scope": "test",
   "data_types": [
     {"data_type_id": "boolean", "json_type": "boolean"},
+    {"data_type_id": "string", "json_type": "string", "max_length": 1000},
+    {"data_type_id": "integer", "json_type": "integer"},
     {"data_type_id": "decimal", "json_type": "string", "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"}
   ],
   "units": [
-    {"unit_id": "unit.pt", "dimension": "length", "symbol": "pt"}
+    {"unit_id": "unit.none", "dimension": "none", "symbol": null},
+    {"unit_id": "unit.pt", "dimension": "length", "symbol": "pt"},
+    {"unit_id": "unit.mm", "dimension": "length", "symbol": "mm"},
+    {"unit_id": "unit.percent", "dimension": "ratio", "symbol": "%"},
+    {"unit_id": "unit.char", "dimension": "character", "symbol": "char"}
   ],
   "normalizers": [
-    {"normalizer_id": "normalizer.boolean", "description": "Synthetic boolean normalizer contract."},
-    {"normalizer_id": "normalizer.decimal", "description": "Synthetic decimal normalizer contract."}
+    {"normalizer_id": "normalizer.identity", "description": "Preserve the declared scalar value."},
+    {"normalizer_id": "normalizer.decimal", "description": "Reserved stable ID for P2 decimal normalization."}
   ],
   "comparators": [
-    {"comparator_id": "comparator.exact", "description": "Synthetic exact comparator contract."},
-    {"comparator_id": "comparator.decimal", "description": "Synthetic decimal comparator contract."}
+    {"comparator_id": "comparator.exact", "description": "Compare already typed scalar values exactly."},
+    {"comparator_id": "comparator.decimal", "description": "Reserved stable ID for P2 precision-aware comparison."}
   ],
   "executor_capabilities": [
-    {"capability_id": "executor.none", "availability": "unavailable", "description": "Synthetic non-executing capability."}
+    {"capability_id": "executor.none", "availability": "unavailable", "description": "No automatic execution capability is available in P1."}
   ],
   "auditor_capabilities": [
-    {"capability_id": "auditor.content-integrity", "availability": "reserved", "description": "Synthetic audit capability."}
+    {"capability_id": "auditor.content-integrity", "availability": "reserved", "description": "Reserved content-integrity audit capability ID."}
   ],
   "constraints": [],
   "properties": [
@@ -65,7 +71,7 @@
       "canonical_unit_id": null,
       "allowed_unit_ids": [],
       "comparison_precision": null,
-      "normalizer_id": "normalizer.boolean",
+      "normalizer_id": "normalizer.identity",
       "comparator_id": "comparator.exact",
       "executor_capability_id": "executor.none",
       "auditor_capability_id": "auditor.content-integrity",

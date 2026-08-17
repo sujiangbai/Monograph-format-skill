@@ -5,7 +5,6 @@
   "type": "object",
   "additionalProperties": false,
   "x-read-compatible-minor-versions": [],
-  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
   "required": [
     "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
     "input_fingerprints", "semantic_fingerprint", "evidence_id", "evidence_class",
@@ -19,7 +18,10 @@
     "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
     "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
     "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
-    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "semantic_fingerprint": {
+      "$ref": "common.schema.json#/$defs/semantic_fingerprint",
+      "x-semantic-fingerprint": "exclude"
+    },
     "evidence_id": {"$ref": "common.schema.json#/$defs/stable_id"},
     "evidence_class": {"type": "string", "enum": ["diagnostic", "implementation_exit"]},
     "non_delivery": {"const": true},
@@ -29,22 +31,31 @@
     "contract_schema_version": {"const": "2.0"},
     "capability_versions": {
       "type": "array", "uniqueItems": true,
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "capability_id",
       "items": {"$ref": "#/$defs/capability_version"}
     },
     "bindings": {"$ref": "common.schema.json#/$defs/artifact_bindings"},
     "measured_results": {
       "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "metric_id",
       "items": {"$ref": "#/$defs/measured_result"}
     },
     "outcome": {"type": "string", "enum": ["pass", "fail"]},
-    "created_at": {"type": "string", "format": "date-time"},
+    "created_at": {
+      "type": "string", "format": "date-time",
+      "x-semantic-fingerprint": "exclude"
+    },
     "supersedes": {
       "type": "array", "uniqueItems": true,
+      "x-semantic-array": "set_by_scalar",
       "items": {"$ref": "common.schema.json#/$defs/stable_id"}
     },
     "final_ready_eligible": {"const": false},
     "history": {
       "type": "array", "minItems": 1,
+      "x-semantic-array": "ordered",
       "items": {"$ref": "common.schema.json#/$defs/history_entry"}
     }
   },
