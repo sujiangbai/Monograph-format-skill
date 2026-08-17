@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.format-monograph.local/v2/property-catalog.generated.schema.json",
+  "$id": "https://schemas.format-monograph.local/v2.1/property-catalog.generated.schema.json",
   "title": "Generated Format Monograph V2 Property Bindings",
   "description": "Generated mechanically from property-registry.core.json; do not maintain property IDs here by hand.",
   "oneOf": [
@@ -11,10 +11,7 @@
       "required": ["property_id", "value", "unit_id", "mode"],
       "properties": {
         "property_id": {"const": "security.author-content-immutable"},
-        "value": {
-          "$ref": "typed-value.generated.schema.json#/$defs/boolean",
-          "properties": {"value": {"enum": [true]}}
-        },
+        "value": {"$ref": "typed-value.generated.schema.json#/$defs/boolean", "properties": {"value": {"enum": [true]}}},
         "unit_id": {"type": "null"},
         "mode": {"type": "string", "enum": ["block", "report"]}
       }

@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.1/common.schema.json",
+  "title": "Format Monograph V2.1 Common Contracts",
+  "$defs": {
+    "artifact_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}:[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"},
+    "stable_id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,127}$"},
+    "property_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}(?:\\.[a-z][a-z0-9-]{1,31})+$"},
+    "rule_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"},
+    "semantic_object_kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$"},
+    "semantic_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "created_by_tool": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tool_id", "version"],
+      "properties": {
+        "tool_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-+][A-Za-z0-9.-]+)?$"}
+      }
+    },
+    "input_fingerprint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_id", "role", "fingerprint"],
+      "properties": {
+        "input_id": {"$ref": "#/$defs/stable_id"},
+        "role": {"type": "string", "enum": ["source_document", "rule_asset", "profile", "property_registry", "feature_activation", "structure", "approval", "conflict_report", "capability", "ledger", "word_environment"]},
+        "fingerprint": {"$ref": "#/$defs/semantic_fingerprint"}
+      }
+    },
+    "input_fingerprints": {
+      "type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "input_id",
+      "minItems": 1, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/input_fingerprint"}
+    },
+    "scope_selector": {
+      "type": "object", "additionalProperties": false,
+      "required": ["selector_kind", "selector_ids"],
+      "properties": {
+        "selector_kind": {"type": "string", "enum": ["document", "section", "chapter", "semantic_role", "object", "property", "rule", "conflict"]},
+        "selector_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}}
+      }
+    },
+    "scope_condition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["condition_id", "condition_kind", "target"],
+      "properties": {
+        "condition_id": {"$ref": "#/$defs/stable_id"},
+        "condition_kind": {"type": "string", "enum": ["requires_selector", "excludes_selector", "mutually_exclusive"]},
+        "target": {"$ref": "#/$defs/scope_selector"}
+      }
+    },
+    "scope_expression": {
+      "type": "object", "additionalProperties": false,
+      "required": ["selectors", "exclusions", "mutually_exclusive_conditions"],
+      "properties": {
+        "selectors": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "selector_kind", "minItems": 1, "items": {"$ref": "#/$defs/scope_selector"}},
+        "exclusions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "selector_kind", "items": {"$ref": "#/$defs/scope_selector"}},
+        "mutually_exclusive_conditions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "condition_id", "items": {"$ref": "#/$defs/scope_condition"}}
+      }
+    },
+    "normalized_scope": {
+      "type": "object", "additionalProperties": false,
+      "x-normalized-scope": true,
+      "required": ["scope_id", "selectors", "exclusions", "mutually_exclusive_conditions"],
+      "properties": {
+        "scope_id": {"type": "string", "pattern": "^scope:[0-9a-f]{64}$"},
+        "selectors": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "selector_kind", "minItems": 1, "items": {"$ref": "#/$defs/scope_selector"}},
+        "exclusions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "selector_kind", "items": {"$ref": "#/$defs/scope_selector"}},
+        "mutually_exclusive_conditions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "condition_id", "items": {"$ref": "#/$defs/scope_condition"}}
+      }
+    },
+    "property_key": {
+      "type": "object", "additionalProperties": false,
+      "required": ["semantic_object_kind", "property_id", "normalized_scope"],
+      "properties": {
+        "semantic_object_kind": {"$ref": "#/$defs/semantic_object_kind"},
+        "property_id": {"$ref": "#/$defs/property_id"},
+        "normalized_scope": {"$ref": "#/$defs/normalized_scope"}
+      }
+    },
+    "layer_kind": {"type": "string", "enum": ["task_override", "publisher_template", "module", "book_type", "monograph_base", "standard_supplement"]},
+    "source_reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_artifact_id", "source_rule_id"],
+      "properties": {
+        "source_artifact_id": {"$ref": "#/$defs/artifact_id"},
+        "source_rule_id": {"$ref": "#/$defs/rule_id"}
+      }
+    },
+    "candidate_record": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate_id", "property_binding", "source", "layer_kind", "confidence", "scope_status"],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/stable_id"},
+        "property_binding": {"$ref": "property-catalog.generated.schema.json"},
+        "source": {"$ref": "#/$defs/source_reference"},
+        "layer_kind": {"$ref": "#/$defs/layer_kind"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "scope_status": {"type": "string", "enum": ["applicable", "excluded", "out_of_scope"]}
+      }
+    },
+    "excluded_candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate", "exclusion_reason", "reason_code"],
+      "properties": {
+        "candidate": {"$ref": "#/$defs/candidate_record"},
+        "exclusion_reason": {"type": "string", "enum": ["scope_violation", "module_out_of_scope", "lower_precedence", "invalid_binding", "qa_exclusion"]},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"}
+      }
+    },
+    "safety_check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "checked_invariant_ids"],
+      "properties": {
+        "status": {"type": "string", "enum": ["pass", "blocked"]},
+        "checked_invariant_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/property_id"}},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"}
+      }
+    },
+    "safety_invariants": {
+      "type": "object", "additionalProperties": false,
+      "required": ["overridable", "author_content_mutation_allowed", "legacy_auto_activation_allowed", "delivery_evidence_allowed", "final_ready_allowed"],
+      "properties": {
+        "overridable": {"const": false},
+        "author_content_mutation_allowed": {"const": false},
+        "legacy_auto_activation_allowed": {"const": false},
+        "delivery_evidence_allowed": {"const": false},
+        "final_ready_allowed": {"const": false}
+      }
+    },
+    "final_profile_bindings": {
+      "type": "object", "additionalProperties": false,
+      "required": ["task_fingerprint", "input_fingerprint", "feature_activation_fingerprint", "property_registry_fingerprint", "profile_fingerprints", "structure_fingerprint", "approval_fingerprints", "conflict_report_fingerprint"],
+      "properties": {
+        "task_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "input_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "feature_activation_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "property_registry_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "profile_fingerprints": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/semantic_fingerprint"}},
+        "structure_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
+        "approval_fingerprints": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/semantic_fingerprint"}},
+        "conflict_report_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"}
+      }
+    }
+  }
+}

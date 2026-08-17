@@ -12,7 +12,7 @@
     {"input_id": "approval:test", "role": "approval", "fingerprint": "sha256:6666666666666666666666666666666666666666666666666666666666666666"},
     {"input_id": "conflict:test", "role": "conflict_report", "fingerprint": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}
   ],
-  "semantic_fingerprint": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "semantic_fingerprint": "sha256:214ee996ceb62d1d8ec66571be131f2af028a341a8e839cb581c56d60d561f48",
   "task_id": "task:resolved-test",
   "legacy_input": false,
   "activation": "disabled",

@@ -55,6 +55,8 @@
     },
     "input_fingerprints": {
       "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "input_id",
       "minItems": 1,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/input_fingerprint"}
@@ -70,6 +72,7 @@
         },
         "scope_ids": {
           "type": "array",
+          "x-semantic-array": "set_by_scalar",
           "minItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/stable_id"}
@@ -88,6 +91,7 @@
         },
         "target_ids": {
           "type": "array",
+          "x-semantic-array": "set_by_scalar",
           "minItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/stable_id"}
@@ -106,18 +110,23 @@
         "document_scope": {"type": "string", "enum": ["document", "selected"]},
         "section_ids": {
           "type": "array", "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "#/$defs/stable_id"}
         },
         "semantic_roles": {
           "type": "array", "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$"}
         },
         "object_exception_ids": {
           "type": "array", "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "#/$defs/stable_id"}
         },
         "mutually_exclusive_conditions": {
           "type": "array",
+          "x-semantic-array": "set_by_key",
+          "x-semantic-key": "condition_id",
           "items": {"$ref": "#/$defs/scope_condition"}
         }
       }
@@ -185,6 +194,7 @@
         "status": {"type": "string", "enum": ["pass", "blocked"]},
         "checked_invariant_ids": {
           "type": "array", "minItems": 1, "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "#/$defs/property_id"}
         },
         "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"}
@@ -220,6 +230,7 @@
         "structure_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
         "approval_fingerprints": {
           "type": "array", "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "#/$defs/semantic_fingerprint"}
         },
         "ledger_fingerprint": {
@@ -245,11 +256,13 @@
         "property_registry_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
         "profile_fingerprints": {
           "type": "array", "minItems": 1, "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "#/$defs/semantic_fingerprint"}
         },
         "structure_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"},
         "approval_fingerprints": {
           "type": "array", "minItems": 1, "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "#/$defs/semantic_fingerprint"}
         },
         "conflict_report_fingerprint": {"$ref": "#/$defs/semantic_fingerprint"}
@@ -262,7 +275,10 @@
       "properties": {
         "entry_id": {"$ref": "#/$defs/stable_id"},
         "event_type": {"type": "string", "enum": ["created", "measured", "reviewed", "superseded"]},
-        "created_at": {"type": "string", "format": "date-time"},
+        "created_at": {
+          "type": "string", "format": "date-time",
+          "x-semantic-fingerprint": "exclude"
+        },
         "reason": {"type": "string", "minLength": 1, "maxLength": 500}
       }
     }

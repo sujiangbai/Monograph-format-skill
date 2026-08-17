@@ -5,7 +5,6 @@
   "type": "object",
   "additionalProperties": false,
   "x-read-compatible-minor-versions": [],
-  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
   "required": [
     "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
     "input_fingerprints", "semantic_fingerprint", "legacy_input",
@@ -17,15 +16,21 @@
     "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
     "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
     "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
-    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "semantic_fingerprint": {
+      "$ref": "common.schema.json#/$defs/semantic_fingerprint",
+      "x-semantic-fingerprint": "exclude"
+    },
     "legacy_input": {"const": true},
     "activation": {"const": "disabled"},
     "source_schema_versions": {
       "type": "array", "minItems": 1, "uniqueItems": true,
+      "x-semantic-array": "set_by_scalar",
       "items": {"type": "string", "enum": ["1.0", "1.1"]}
     },
     "mappings": {
       "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "source_rule_id",
       "items": {"$ref": "#/$defs/mapping"}
     }
   },
@@ -39,6 +44,7 @@
         "disposition": {"type": "string", "enum": ["preserve", "modify", "move_layer", "split", "retire"]},
         "target_rule_ids": {
           "type": "array", "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
           "items": {"$ref": "common.schema.json#/$defs/stable_id"}
         },
         "rationale": {"type": "string", "minLength": 1, "maxLength": 1000}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.1/final-execution-profile.schema.json",
+  "title": "Format Monograph V2.1 Final Execution Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifact_kind", "schema_version", "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint", "task_id", "legacy_input", "activation", "final_ready_eligible", "delivery_allowed", "safety_invariants", "bindings", "resolved_properties"],
+  "properties": {
+    "artifact_kind": {"const": "final-execution-profile"},
+    "schema_version": {"const": "2.1"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "task_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "legacy_input": {"const": false},
+    "activation": {"const": "disabled"},
+    "final_ready_eligible": {"const": false},
+    "delivery_allowed": {"const": false},
+    "safety_invariants": {"$ref": "common.schema.json#/$defs/safety_invariants"},
+    "bindings": {"$ref": "common.schema.json#/$defs/final_profile_bindings"},
+    "resolved_properties": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "resolution_id", "items": {"$ref": "#/$defs/resolved_property"}}
+  },
+  "$defs": {
+    "resolved_property": {
+      "type": "object", "additionalProperties": false,
+      "required": ["resolution_id", "key", "resolved_binding", "final_layer_kind", "final_source", "candidate_chain", "override_chain", "excluded_candidates", "confidence", "conflict_id", "qa_decision_id", "safety_check", "execution_mode"],
+      "properties": {
+        "resolution_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "resolved_binding": {"$ref": "property-catalog.generated.schema.json"},
+        "final_layer_kind": {"$ref": "common.schema.json#/$defs/layer_kind"},
+        "final_source": {"$ref": "common.schema.json#/$defs/source_reference"},
+        "candidate_chain": {"type": "array", "x-semantic-array": "ordered", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/candidate_record"}},
+        "override_chain": {"type": "array", "x-semantic-array": "ordered", "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/stable_id"}},
+        "excluded_candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate.candidate_id", "items": {"$ref": "common.schema.json#/$defs/excluded_candidate"}},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "conflict_id": {"oneOf": [{"$ref": "common.schema.json#/$defs/stable_id"}, {"type": "null"}]},
+        "qa_decision_id": {"oneOf": [{"$ref": "common.schema.json#/$defs/stable_id"}, {"type": "null"}]},
+        "safety_check": {"$ref": "common.schema.json#/$defs/safety_check"},
+        "execution_mode": {"type": "string", "enum": ["automatic", "preserve", "qa", "report", "block"]}
+      }
+    }
+  }
+}

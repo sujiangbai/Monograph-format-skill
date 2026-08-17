@@ -5,7 +5,6 @@
   "type": "object",
   "additionalProperties": false,
   "x-read-compatible-minor-versions": [],
-  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
   "required": [
     "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
     "input_fingerprints", "semantic_fingerprint", "features"
@@ -16,7 +15,10 @@
     "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
     "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
     "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
-    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "semantic_fingerprint": {
+      "$ref": "common.schema.json#/$defs/semantic_fingerprint",
+      "x-semantic-fingerprint": "exclude"
+    },
     "features": {
       "type": "object",
       "additionalProperties": false,

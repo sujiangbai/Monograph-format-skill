@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.1/conflict-report.schema.json",
+  "title": "Format Monograph V2.1 Conflict Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifact_kind", "schema_version", "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint", "generated_at", "conflicts"],
+  "properties": {
+    "artifact_kind": {"const": "conflict-report"},
+    "schema_version": {"const": "2.1"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "generated_at": {"type": "string", "format": "date-time", "x-semantic-fingerprint": "exclude"},
+    "conflicts": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "conflict_id", "items": {"$ref": "#/$defs/conflict"}}
+  },
+  "$defs": {
+    "conflict": {
+      "type": "object", "additionalProperties": false,
+      "required": ["conflict_id", "key", "reason", "status", "candidates", "excluded_candidates"],
+      "properties": {
+        "conflict_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "reason": {"type": "string", "enum": ["same_layer", "missing", "low_confidence", "scope_violation", "unclassified"]},
+        "status": {"type": "string", "enum": ["open", "blocked_qa", "resolved"]},
+        "candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate_id", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/candidate_record"}},
+        "excluded_candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate.candidate_id", "items": {"$ref": "common.schema.json#/$defs/excluded_candidate"}},
+        "review_note": {"type": "string", "maxLength": 1000}
+      }
+    }
+  }
+}

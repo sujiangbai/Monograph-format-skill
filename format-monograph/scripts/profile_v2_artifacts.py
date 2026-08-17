@@ -42,7 +42,10 @@ ARTIFACT_KINDS = (
 )
 
 ARTIFACT_SCHEMA_FILES = {
-    kind: f"{kind}.schema.json" for kind in ARTIFACT_KINDS
+    **{(kind, "2.0"): f"{kind}.schema.json" for kind in ARTIFACT_KINDS},
+    ("layered-rule-asset", "2.1"): "layered-rule-asset.v2.1.schema.json",
+    ("conflict-report", "2.1"): "conflict-report.v2.1.schema.json",
+    ("final-execution-profile", "2.1"): "final-execution-profile.v2.1.schema.json",
 }
 VERSION_PATTERN = re.compile(r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)$")
 
@@ -82,11 +85,15 @@ def profile_v2_schema_enabled(features: Mapping[str, Any] | None) -> bool:
     return bool(features and features.get("profile_v2_schema") is True)
 
 
-def load_artifact_schema(artifact_kind: str) -> dict[str, Any]:
+def load_artifact_schema(
+    artifact_kind: str, *, version: str = "2.0"
+) -> dict[str, Any]:
     try:
-        filename = ARTIFACT_SCHEMA_FILES[artifact_kind]
+        filename = ARTIFACT_SCHEMA_FILES[(artifact_kind, version)]
     except KeyError as exc:
-        raise ArtifactContractError(f"Unknown V2 artifact_kind: {artifact_kind}") from exc
+        raise ArtifactContractError(
+            f"Unsupported V2 artifact contract: {artifact_kind}@{version}"
+        ) from exc
     return _load_json(SCHEMA_DIR / filename)
 
 
@@ -148,7 +155,12 @@ def _schema_errors(
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[str]:
-    schema = schema_override or load_artifact_schema(artifact_kind)
+    try:
+        schema = schema_override or load_artifact_schema(
+            artifact_kind, version=str(document.get("schema_version"))
+        )
+    except ArtifactContractError as exc:
+        return [str(exc)]
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(
         schema,
@@ -170,6 +182,12 @@ def _require_test_registry(registry: dict[str, Any]) -> None:
         raise ArtifactContractError(
             "The internal test contract requires a validated test registry."
         )
+    production = load_registry(version=registry["schema_version"])
+    for collection in ("data_types", "units", "normalizers", "comparators"):
+        if registry.get(collection) != production.get(collection):
+            raise ArtifactContractError(
+                f"Test registry must reuse the production {collection} catalog exactly."
+            )
 
 
 def _test_schema_overrides(registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -294,6 +312,13 @@ def artifact_semantic_errors(
     def validate_key_and_candidate(
         key: dict[str, Any], candidate: dict[str, Any], context: str
     ) -> None:
+        if registry.get("schema_version") == "2.1":
+            try:
+                from profile_v2_scope import normalize_scope
+
+                normalize_scope(key["normalized_scope"])
+            except ValueError as exc:
+                errors.append(f"{context} has invalid normalized scope: {exc}")
         property_id = key["property_id"]
         binding = candidate["property_binding"]
         if binding["property_id"] != property_id:
@@ -331,6 +356,16 @@ def artifact_semantic_errors(
                     validate_binding_for_layer(binding, layer_kind, registry)
                 except RegistryContractError as exc:
                     errors.append(str(exc))
+        if registry.get("schema_version") == "2.1":
+            try:
+                from profile_v2_scope import normalize_rule_scope, validate_module_asset_scope
+
+                normalize_rule_scope(document["asset_scope"])
+                for rule in document.get("rules", []):
+                    normalize_rule_scope(rule["scope"])
+                validate_module_asset_scope(document)
+            except ValueError as exc:
+                errors.append(str(exc))
     elif artifact_kind == "final-execution-profile":
         if document.get("legacy_input") is not False:
             errors.append("V2 final execution profiles cannot be legacy inputs.")
@@ -510,10 +545,15 @@ def _validate_artifact_contract(
     artifact_kind = document.get("artifact_kind")
     if artifact_kind not in ARTIFACT_KINDS:
         raise ArtifactContractError(f"Unknown V2 artifact_kind: {artifact_kind}")
-    schema = schema_override or load_artifact_schema(artifact_kind)
-    effective_schema, compatible_minor = schema_for_requested_minor(
-        schema, document.get("schema_version")
-    )
+    if schema_override is None:
+        effective_schema = load_artifact_schema(
+            artifact_kind, version=str(document.get("schema_version"))
+        )
+        compatible_minor = False
+    else:
+        effective_schema, compatible_minor = schema_for_requested_minor(
+            schema_override, document.get("schema_version")
+        )
     errors = _schema_errors(
         artifact_kind,
         document,
@@ -522,6 +562,28 @@ def _validate_artifact_contract(
     )
     if not errors:
         errors.extend(artifact_semantic_errors(artifact_kind, document, registry))
+    if not errors:
+        try:
+            if registry.get("registry_scope") == "test":
+                from profile_v2_canonical import _compute_semantic_fingerprint_for_test
+
+                documents = _schema_documents(schema_documents_override)
+                expected = _compute_semantic_fingerprint_for_test(
+                    document,
+                    schema=effective_schema,
+                    documents=documents,
+                    registry=registry,
+                )
+                if document.get("semantic_fingerprint") != expected:
+                    errors.append(
+                        "semantic_fingerprint does not match canonical test semantics."
+                    )
+            else:
+                from profile_v2_canonical import verify_semantic_fingerprint
+
+                verify_semantic_fingerprint(document)
+        except ValueError as exc:
+            errors.append(str(exc))
     if errors:
         raise ArtifactContractError("Invalid V2 artifact: " + " | ".join(errors))
     return ProfileReadResult(
@@ -542,9 +604,13 @@ def validate_artifact(
 ) -> ProfileReadResult:
     """Validate against the committed production registry and schema contracts."""
 
-    effective_registry = load_registry()
-    validate_registry_document(effective_registry)
-    verify_committed_catalog(effective_registry)
+    version = str(document.get("schema_version"))
+    try:
+        effective_registry = load_registry(version=version)
+        validate_registry_document(effective_registry)
+        verify_committed_catalog(effective_registry, version=version)
+    except RegistryContractError as exc:
+        raise ArtifactContractError(str(exc)) from exc
     return _validate_artifact_contract(
         document,
         features=features,
