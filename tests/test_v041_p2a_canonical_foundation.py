@@ -5,6 +5,7 @@ import random
 import re
 import sys
 import unittest
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urldefrag, urljoin
@@ -258,6 +259,75 @@ def _schema_example(
             )
         return result
     raise AssertionError(f"Unsupported schema example type {value_type!r} at {schema_id}")
+
+
+def _field_validator(field_path: str, *, registry=None):
+    """Validate through the committed resource and exact JSON Pointer."""
+
+    return Draft202012Validator(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$ref": field_path,
+        },
+        registry=registry or offline_schema_registry(),
+        format_checker=FormatChecker(),
+    )
+
+
+def _valid_schema_example(
+    node: dict,
+    *,
+    field_path: str,
+    schema_id: str,
+    documents: dict[str, dict],
+    validator=None,
+) -> object:
+    """Choose a deterministic example that satisfies the real field schema."""
+
+    validator = validator or _field_validator(field_path)
+    last_errors = []
+    for variant in range(32):
+        candidate = _schema_example(
+            node,
+            schema_id=schema_id,
+            documents=documents,
+            variant=variant,
+        )
+        last_errors = list(validator.iter_errors(candidate))
+        if not last_errors:
+            return candidate
+    messages = "; ".join(error.message for error in last_errors[:3])
+    raise AssertionError(
+        f"No Schema-valid deterministic example for {field_path}: {messages}"
+    )
+
+
+def _effective_ref_schema_for_test(
+    node: dict, schema_id: str, documents: dict[str, dict]
+) -> dict:
+    current = deepcopy(node)
+    current_base = schema_id
+    seen = set()
+    while "$ref" in current:
+        reference = urljoin(current_base, current.pop("$ref"))
+        if reference in seen:
+            raise AssertionError(f"Cyclic test reference: {reference}")
+        seen.add(reference)
+        target_uri, fragment = urldefrag(reference)
+        target = fingerprint_field_node(documents, f"{target_uri}#{fragment}")
+        current = _merge_schema(target, current)
+        current_base = target_uri
+    return current
+
+
+def _effective_type_feature_for_test(node: dict) -> str:
+    value_type = node.get("type")
+    declared_types = set(value_type) if isinstance(value_type, list) else {value_type}
+    if declared_types == {"array"}:
+        return "array"
+    if declared_types == {"object"} or "properties" in node:
+        return "object"
+    return "scalar"
 
 
 def _set_pointer(document: dict, pointer: str, value: object) -> None:
@@ -632,6 +702,11 @@ class CanonicalFingerprintTests(unittest.TestCase):
                     record["classification"] == classification for record in actual
                 ),
             )
+        self.assertEqual(
+            expected["counts"]["schema_valid_projected_excluded_samples"],
+            expected["counts"]["semantic_projected"]
+            + expected["counts"]["fingerprint_excluded"],
+        )
 
         for record in actual:
             with self.subTest(field_path=record["field_path"]):
@@ -645,6 +720,33 @@ class CanonicalFingerprintTests(unittest.TestCase):
                     .replace("~1", "/")
                     .replace("~0", "~"),
                 )
+
+        ref_types = Counter()
+        corrected_ref_types = Counter()
+        for record in actual:
+            if "ref" not in record["schema_features"]:
+                continue
+            schema_id, _ = urldefrag(record["field_path"])
+            raw_node = fingerprint_field_node(documents, record["field_path"])
+            effective = _effective_ref_schema_for_test(raw_node, schema_id, documents)
+            expected_type = _effective_type_feature_for_test(effective)
+            raw_type = _effective_type_feature_for_test(raw_node)
+            actual_types = {
+                feature
+                for feature in record["schema_features"]
+                if feature in {"array", "object", "scalar"}
+            }
+            with self.subTest(field_path=record["field_path"], expected=expected_type):
+                self.assertEqual({expected_type}, actual_types)
+            ref_types[expected_type] += 1
+            if raw_type != expected_type:
+                corrected_ref_types[expected_type] += 1
+        self.assertEqual(43, corrected_ref_types["object"])
+        self.assertEqual(11, corrected_ref_types["array"])
+        self.assertEqual(54, sum(corrected_ref_types.values()))
+        self.assertEqual(
+            {"array": 11, "object": 45, "scalar": 96}, dict(ref_types)
+        )
 
         bad_path = deepcopy(actual[0])
         bad_path["field_path"] += "/missing"
@@ -670,6 +772,8 @@ class CanonicalFingerprintTests(unittest.TestCase):
     def test_t41_p2a_can_009_actual_included_nodes_project_their_field(self) -> None:
         documents = schema_documents()
         inventory = fingerprint_field_inventory(documents)
+        schema_registry = offline_schema_registry()
+        valid_samples = 0
         for record in inventory:
             if record["classification"] != "semantic_projected":
                 continue
@@ -681,9 +785,18 @@ class CanonicalFingerprintTests(unittest.TestCase):
                 container["$schema"] = "https://json-schema.org/draft/2020-12/schema"
                 container["$id"] = schema_id
                 node = fingerprint_field_node(documents, record["field_path"])
-                sample = _schema_example(
-                    node, schema_id=schema_id, documents=documents
+                validator = _field_validator(
+                    record["field_path"], registry=schema_registry
                 )
+                sample = _valid_schema_example(
+                    node,
+                    field_path=record["field_path"],
+                    schema_id=schema_id,
+                    documents=documents,
+                    validator=validator,
+                )
+                self.assertTrue(validator.is_valid(sample))
+                valid_samples += 1
                 registry = load_registry(version=record["schema_version"])
                 first = _semantic_projection(
                     {}, schema=container, documents=documents, registry=registry
@@ -696,6 +809,13 @@ class CanonicalFingerprintTests(unittest.TestCase):
                 )
                 self.assertNotEqual(first, second)
                 self.assertIn(record["field_name"], second)
+        self.assertEqual(
+            sum(
+                record["classification"] == "semantic_projected"
+                for record in inventory
+            ),
+            valid_samples,
+        )
 
     def test_t41_p2a_can_010_guarded_nodes_use_their_real_schema_constraint(self) -> None:
         documents = schema_documents()
@@ -758,14 +878,40 @@ class CanonicalFingerprintTests(unittest.TestCase):
         self.assertTrue(validator.is_valid(approval))
         self.assertFalse(validator.is_valid(delegated_without_authorization))
 
+        approver_record = next(
+            record
+            for record in inventory
+            if record["field_path"].endswith(
+                "/qa-approval-artifact.schema.json#/properties/approver"
+            )
+        )
+        approver_node = fingerprint_field_node(
+            documents, approver_record["field_path"]
+        )
+        approver_validator = _field_validator(
+            approver_record["field_path"], registry=registry
+        )
+        approver_sample = _valid_schema_example(
+            approver_node,
+            field_path=approver_record["field_path"],
+            schema_id=urldefrag(approver_record["field_path"])[0],
+            documents=documents,
+            validator=approver_validator,
+        )
+        self.assertTrue(approver_validator.is_valid(approver_sample))
+        if approver_sample["actor_role"] == "delegated_publisher":
+            self.assertIn("authorization_reference", approver_sample)
+
     def test_t41_p2a_can_011_actual_excluded_nodes_do_not_project_their_field(self) -> None:
         documents = schema_documents()
         inventory = fingerprint_field_inventory(documents)
+        schema_registry = offline_schema_registry()
         excluded = [
             record
             for record in inventory
             if record["classification"] == "fingerprint_excluded"
         ]
+        valid_samples = 0
         for record in excluded:
             with self.subTest(field_path=record["field_path"]):
                 schema_id, _ = urldefrag(record["field_path"])
@@ -775,9 +921,18 @@ class CanonicalFingerprintTests(unittest.TestCase):
                 container["$schema"] = "https://json-schema.org/draft/2020-12/schema"
                 container["$id"] = schema_id
                 node = fingerprint_field_node(documents, record["field_path"])
-                sample = _schema_example(
-                    node, schema_id=schema_id, documents=documents
+                validator = _field_validator(
+                    record["field_path"], registry=schema_registry
                 )
+                sample = _valid_schema_example(
+                    node,
+                    field_path=record["field_path"],
+                    schema_id=schema_id,
+                    documents=documents,
+                    validator=validator,
+                )
+                self.assertTrue(validator.is_valid(sample))
+                valid_samples += 1
                 registry = load_registry(version=record["schema_version"])
                 first = _semantic_projection(
                     {}, schema=container, documents=documents, registry=registry
@@ -789,6 +944,7 @@ class CanonicalFingerprintTests(unittest.TestCase):
                     registry=registry,
                 )
                 self.assertEqual(first, second)
+        self.assertEqual(len(excluded), valid_samples)
 
     def test_t41_p2a_can_012_projection_mechanisms_are_real_and_closed(self) -> None:
         expected = load_json(FIXTURES / "semantic-fingerprint-field-inventory.json")
@@ -804,13 +960,43 @@ class CanonicalFingerprintTests(unittest.TestCase):
         self.assertTrue(
             any("generated_schema" in record["schema_features"] for record in inventory)
         )
-        unsupported = deepcopy(schema_documents())
+        all_of_guards = [
+            record for record in inventory if "all_of_guard" in record["schema_features"]
+        ]
+        self.assertEqual(1, len(all_of_guards))
+        self.assertTrue(
+            all_of_guards[0]["field_path"].endswith(
+                "/qa-approval-artifact.schema.json#/properties/approver"
+            )
+        )
         root_id = "https://schemas.format-monograph.local/v2/capability-snapshot.schema.json"
-        unsupported[root_id]["properties"]["unsupported_composition"] = {
-            "anyOf": [{"type": "string"}]
+        mutations = {
+            "root": lambda schema: schema.update(
+                {"anyOf": [{"type": "object"}]}
+            ),
+            "defs": lambda schema: schema.setdefault("$defs", {}).update(
+                {"unsupported": {"anyOf": [{"type": "string"}]}}
+            ),
+            "property_child": lambda schema: schema["properties"].update(
+                {"unsupported_composition": {"anyOf": [{"type": "string"}]}}
+            ),
+            "array_branch": lambda schema: schema["properties"].update(
+                {
+                    "unsupported_array": {
+                        "type": "array",
+                        "x-semantic-array": "ordered",
+                        "items": {"anyOf": [{"type": "string"}]},
+                    }
+                }
+            ),
         }
-        with self.assertRaisesRegex(CanonicalizationError, "does not support"):
-            fingerprint_field_inventory(unsupported)
+        for location, mutate in mutations.items():
+            unsupported = deepcopy(schema_documents())
+            mutate(unsupported[root_id])
+            with self.subTest(location=location), self.assertRaisesRegex(
+                CanonicalizationError, "does not support schema composition anyOf"
+            ):
+                fingerprint_field_inventory(unsupported)
 
     def test_t41_p2a_can_013_key_artifact_end_to_end_mutations_are_real(self) -> None:
         evidence = load_json(FIXTURES / "semantic-fingerprint-field-inventory.json")
