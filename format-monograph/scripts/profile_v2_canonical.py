@@ -21,6 +21,11 @@ from profile_v2_values import ValueNormalizationError, normalize_property_bindin
 
 FINGERPRINT_PATTERN_PREFIX = "sha256:"
 ARRAY_SEMANTICS = {"set_by_scalar", "set_by_key", "ordered"}
+FIELD_EVIDENCE_MODES = {
+    "semantic_direct",
+    "semantic_guarded_combination",
+    "fingerprint_excluded",
+}
 
 
 class CanonicalizationError(ValueError):
@@ -321,6 +326,45 @@ def unclassified_array_paths(
     for schema_id, schema in sorted(documents.items()):
         visit(schema, schema_id)
     return missing
+
+
+def fingerprint_field_inventory(
+    documents: Mapping[str, dict[str, Any]],
+) -> dict[str, list[str]]:
+    """List every schema property node by its machine-tested fingerprint evidence mode."""
+
+    inventory = {mode: [] for mode in sorted(FIELD_EVIDENCE_MODES)}
+
+    def escape_pointer(value: str) -> str:
+        return value.replace("~", "~0").replace("/", "~1")
+
+    def visit(value: Any, path: str, schema_id: str) -> None:
+        if isinstance(value, dict):
+            properties = value.get("properties")
+            if isinstance(properties, dict) and all(
+                isinstance(child, dict) for child in properties.values()
+            ):
+                for name, child in properties.items():
+                    child_path = f"{path}/properties/{escape_pointer(name)}"
+                    if child.get("x-semantic-fingerprint") == "exclude":
+                        mode = "fingerprint_excluded"
+                    elif "const" in child or (
+                        isinstance(child.get("enum"), list)
+                        and len(child["enum"]) == 1
+                    ):
+                        mode = "semantic_guarded_combination"
+                    else:
+                        mode = "semantic_direct"
+                    inventory[mode].append(f"{schema_id}#{child_path}")
+            for key, child in value.items():
+                visit(child, f"{path}/{escape_pointer(str(key))}", schema_id)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}/{index}", schema_id)
+
+    for schema_id, schema in sorted(documents.items()):
+        visit(schema, "", schema_id)
+    return {mode: sorted(paths) for mode, paths in sorted(inventory.items())}
 
 
 def canonical_file_bytes(path: Path) -> bytes:

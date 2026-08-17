@@ -48,6 +48,15 @@ ARTIFACT_SCHEMA_FILES = {
     ("final-execution-profile", "2.1"): "final-execution-profile.v2.1.schema.json",
 }
 VERSION_PATTERN = re.compile(r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)$")
+TEST_REGISTRY_SHARED_CATALOGS = (
+    "data_types",
+    "units",
+    "normalizers",
+    "comparators",
+    "executor_capabilities",
+    "auditor_capabilities",
+    "constraints",
+)
 
 
 class ArtifactContractError(ValueError):
@@ -183,7 +192,7 @@ def _require_test_registry(registry: dict[str, Any]) -> None:
             "The internal test contract requires a validated test registry."
         )
     production = load_registry(version=registry["schema_version"])
-    for collection in ("data_types", "units", "normalizers", "comparators"):
+    for collection in TEST_REGISTRY_SHARED_CATALOGS:
         if registry.get(collection) != production.get(collection):
             raise ArtifactContractError(
                 f"Test registry must reuse the production {collection} catalog exactly."
@@ -339,6 +348,21 @@ def artifact_semantic_errors(
         except RegistryContractError as exc:
             errors.append(str(exc))
 
+    def composition_key(
+        key: dict[str, Any], context: str
+    ) -> tuple[str, str, str] | None:
+        try:
+            from profile_v2_scope import normalized_property_scope_key
+
+            return normalized_property_scope_key(
+                key["semantic_object_kind"],
+                key["property_id"],
+                key["normalized_scope"],
+            )
+        except (KeyError, ValueError) as exc:
+            errors.append(f"{context} has no valid normalized composition key: {exc}")
+            return None
+
     if artifact_kind == "layered-rule-asset":
         layer_kind = document["layer_kind"]
         _keyed_collection_ids(
@@ -407,14 +431,15 @@ def artifact_semantic_errors(
             "final resolved properties",
             errors,
         )
-        seen_composition_keys: set[str] = set()
+        seen_composition_keys: set[tuple[str, str, str]] = set()
         for resolved in document.get("resolved_properties", []):
             resolution_id = resolved["resolution_id"]
             key = resolved["key"]
-            composition_key = json.dumps(key, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-            if composition_key in seen_composition_keys:
+            resolved_key = composition_key(key, "Resolved property")
+            if resolved_key is not None and resolved_key in seen_composition_keys:
                 errors.append("Final profile repeats a semantic object/property/scope composition key.")
-            seen_composition_keys.add(composition_key)
+            if resolved_key is not None:
+                seen_composition_keys.add(resolved_key)
             binding = resolved["resolved_binding"]
             if binding["property_id"] != key["property_id"]:
                 errors.append("Resolved property binding does not match its normalized key.")
@@ -488,9 +513,17 @@ def artifact_semantic_errors(
             "conflict report",
             errors,
         )
+        seen_conflict_keys: set[tuple[str, str, str]] = set()
         for conflict in document.get("conflicts", []):
             key = conflict["key"]
             conflict_id = conflict["conflict_id"]
+            conflict_key = composition_key(key, f"Conflict {conflict_id}")
+            if conflict_key is not None and conflict_key in seen_conflict_keys:
+                errors.append(
+                    "Conflict report repeats a semantic object/property/scope composition key."
+                )
+            if conflict_key is not None:
+                seen_conflict_keys.add(conflict_key)
             active_ids = _keyed_collection_ids(
                 conflict["candidates"],
                 "candidate_id",

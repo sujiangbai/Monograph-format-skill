@@ -24,10 +24,10 @@
     {"comparator_id": "comparator.decimal", "description": "Reserved stable ID for P2 precision-aware comparison."}
   ],
   "executor_capabilities": [
-    {"capability_id": "executor.none", "availability": "unavailable", "description": "Synthetic non-executing capability."}
+    {"capability_id": "executor.none", "availability": "unavailable", "description": "No automatic execution capability is available in P1."}
   ],
   "auditor_capabilities": [
-    {"capability_id": "auditor.content-integrity", "availability": "reserved", "description": "Synthetic audit capability."}
+    {"capability_id": "auditor.content-integrity", "availability": "reserved", "description": "Reserved content-integrity audit capability ID."}
   ],
   "constraints": [],
   "properties": [

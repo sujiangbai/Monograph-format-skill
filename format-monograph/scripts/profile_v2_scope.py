@@ -121,6 +121,27 @@ def normalize_scope(scope: dict[str, Any]) -> dict[str, Any]:
     return {"scope_id": derived, **payload}
 
 
+def normalized_property_scope_key(
+    semantic_object_kind: str,
+    property_id: str,
+    scope: dict[str, Any],
+) -> tuple[str, str, str]:
+    """Return the sole semantic identity key for a resolved property or conflict."""
+
+    if not isinstance(semantic_object_kind, str) or not semantic_object_kind:
+        raise ScopeContractError("A composition key requires semantic_object_kind.")
+    if not isinstance(property_id, str) or not property_id:
+        raise ScopeContractError("A composition key requires property_id.")
+    if "selectors" in scope:
+        scope_id = normalize_scope(scope)["scope_id"]
+    else:
+        scope_id = scope.get("scope_id")
+        if not isinstance(scope_id, str) or not scope_id:
+            raise ScopeContractError("A legacy composition key requires scope_id.")
+        scope_id = _nfc(scope_id)
+    return (_nfc(semantic_object_kind), _nfc(property_id), scope_id)
+
+
 def _selector_map(scope: dict[str, Any], field: str) -> dict[str, set[str]]:
     normalized = normalize_scope(scope)
     return {

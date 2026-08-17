@@ -7,6 +7,8 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO / "format-monograph" / "scripts"
@@ -17,6 +19,7 @@ import profile_v2_artifacts as artifacts  # noqa: E402
 from profile_v2_artifacts import (  # noqa: E402
     ArtifactContractError,
     _validate_artifact_for_test,
+    artifact_semantic_errors,
     load_artifact_schema,
     read_profile_document,
     schema_documents,
@@ -24,9 +27,11 @@ from profile_v2_artifacts import (  # noqa: E402
 )
 from profile_v2_canonical import (  # noqa: E402
     CanonicalizationError,
+    _semantic_projection,
     _stamp_semantic_fingerprint_for_test,
     canonical_semantic_bytes,
     compute_semantic_fingerprint,
+    fingerprint_field_inventory,
     semantic_projection,
     stamp_semantic_fingerprint,
     unclassified_array_paths,
@@ -43,6 +48,7 @@ from profile_v2_registry import (  # noqa: E402
 from profile_v2_scope import (  # noqa: E402
     ScopeContractError,
     normalize_scope,
+    normalized_property_scope_key,
     scope_disjoint,
     scope_equal,
     scope_overlap_state,
@@ -240,6 +246,12 @@ class VersionedContractTests(unittest.TestCase):
         self.assertFalse(result21.runtime_eligible)
         self.assertEqual("disabled", result21.activation)
 
+    def test_t41_p2a_ver_003_p1_placeholder_fingerprint_is_not_readable(self) -> None:
+        artifact = deepcopy(minimal_artifacts()["capability-snapshot"])
+        artifact["semantic_fingerprint"] = "sha256:" + ("0" * 64)
+        with self.assertRaisesRegex(ArtifactContractError, "semantic_fingerprint"):
+            read_profile_document(artifact, features={"profile_v2_schema": True})
+
     def test_t41_p2a_sch_001_every_supported_array_is_classified(self) -> None:
         self.assertEqual([], unclassified_array_paths(schema_documents()))
 
@@ -254,6 +266,46 @@ class VersionedContractTests(unittest.TestCase):
             "https://schemas.format-monograph.local/v2.1/typed-value.generated.schema.json",
             build_typed_value_schema(load_registry(version="2.1"))["$id"],
         )
+
+
+class TestRegistryIsolationTests(unittest.TestCase):
+    def test_t41_p2a_reg_002_test_registry_reuses_every_nonproperty_catalog(self) -> None:
+        registry = test_registry()
+        document = stamp_test(layered_v21(), registry)
+        mutations = []
+
+        executor_drift = deepcopy(registry)
+        executor_drift["executor_capabilities"][0]["description"] = "Test drift."
+        mutations.append(("executor_capabilities", executor_drift))
+
+        auditor_drift = deepcopy(registry)
+        auditor_drift["auditor_capabilities"][0]["description"] = "Test drift."
+        mutations.append(("auditor_capabilities", auditor_drift))
+
+        constraint_drift = deepcopy(registry)
+        constraint_drift["constraints"].append(
+            {
+                "constraint_id": "constraint.test-drift",
+                "constraint_kind": "requires",
+                "property_ids": [
+                    "test.paragraph-font-size",
+                    "test.table-column-count",
+                ],
+                "enforcement": "qa",
+                "description": "Synthetic catalog drift.",
+            }
+        )
+        mutations.append(("constraints", constraint_drift))
+
+        for collection, mutated in mutations:
+            with self.subTest(collection=collection), self.assertRaisesRegex(
+                ArtifactContractError, f"production {collection} catalog exactly"
+            ):
+                _validate_artifact_for_test(
+                    document,
+                    registry=mutated,
+                    features={"profile_v2_schema": True},
+                )
 
 
 class CanonicalFingerprintTests(unittest.TestCase):
@@ -418,6 +470,116 @@ class CanonicalFingerprintTests(unittest.TestCase):
         artifact["capabilities"][0]["available"] = 1.0
         with self.assertRaisesRegex(CanonicalizationError, "floating-point"):
             compute_semantic_fingerprint(artifact)
+
+    def test_t41_p2a_can_008_schema_field_inventory_is_machine_locked(self) -> None:
+        expected = load_json(FIXTURES / "semantic-fingerprint-field-inventory.json")
+        self.assertEqual("1.0", expected["schema_version"])
+        self.assertEqual(
+            {
+                "semantic_direct": "T41-P2A-CAN-009",
+                "semantic_guarded_combination": "T41-P2A-CAN-010",
+                "fingerprint_excluded": "T41-P2A-CAN-011",
+            },
+            expected["evidence_tests"],
+        )
+        self.assertEqual(
+            expected["inventory"], fingerprint_field_inventory(schema_documents())
+        )
+
+    def test_t41_p2a_can_009_every_direct_field_has_mutation_evidence(self) -> None:
+        inventory = fingerprint_field_inventory(schema_documents())
+        schema_id = "https://schemas.format-monograph.local/test/direct-field.json"
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": schema_id,
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["target"],
+            "properties": {"target": {"type": "string"}},
+        }
+        for field_path in inventory["semantic_direct"]:
+            with self.subTest(field_path=field_path):
+                first = _semantic_projection(
+                    {"target": "alpha"},
+                    schema=schema,
+                    documents={schema_id: schema},
+                    registry=test_registry(),
+                )
+                second = _semantic_projection(
+                    {"target": "beta"},
+                    schema=schema,
+                    documents={schema_id: schema},
+                    registry=test_registry(),
+                )
+                self.assertNotEqual(first, second)
+
+    def test_t41_p2a_can_010_guarded_fields_map_to_combination_evidence(self) -> None:
+        inventory = fingerprint_field_inventory(schema_documents())
+        schema_id = "https://schemas.format-monograph.local/test/guarded-field.json"
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": schema_id,
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["target", "peer"],
+            "properties": {
+                "target": {"const": "fixed"},
+                "peer": {"type": "string"},
+            },
+        }
+        validator = Draft202012Validator(schema)
+        for field_path in inventory["semantic_guarded_combination"]:
+            with self.subTest(field_path=field_path):
+                baseline = {"target": "fixed", "peer": "alpha"}
+                combined = {"target": "changed", "peer": "beta"}
+                self.assertTrue(validator.is_valid(baseline))
+                self.assertFalse(validator.is_valid(combined))
+                first = _semantic_projection(
+                    baseline,
+                    schema=schema,
+                    documents={schema_id: schema},
+                    registry=test_registry(),
+                )
+                second = _semantic_projection(
+                    combined,
+                    schema=schema,
+                    documents={schema_id: schema},
+                    registry=test_registry(),
+                )
+                self.assertNotEqual(first, second)
+
+    def test_t41_p2a_can_011_every_excluded_field_has_mutation_evidence(self) -> None:
+        inventory = fingerprint_field_inventory(schema_documents())
+        schema_id = "https://schemas.format-monograph.local/test/excluded-field.json"
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": schema_id,
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["target", "peer"],
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "x-semantic-fingerprint": "exclude",
+                },
+                "peer": {"type": "string"},
+            },
+        }
+        for field_path in inventory["fingerprint_excluded"]:
+            with self.subTest(field_path=field_path):
+                first = _semantic_projection(
+                    {"target": "alpha", "peer": "fixed"},
+                    schema=schema,
+                    documents={schema_id: schema},
+                    registry=test_registry(),
+                )
+                second = _semantic_projection(
+                    {"target": "beta", "peer": "fixed"},
+                    schema=schema,
+                    documents={schema_id: schema},
+                    registry=test_registry(),
+                )
+                self.assertEqual(first, second)
 
 
 class ExactUnitTests(unittest.TestCase):
@@ -687,6 +849,115 @@ class ScopeContractTests(unittest.TestCase):
         first = stamp_test(first)
         second = stamp_test(second)
         self.assertNotEqual(first["semantic_fingerprint"], second["semantic_fingerprint"])
+
+
+class NormalizedCompositionKeyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.registry = test_registry()
+        self.scope = normalize_scope(
+            {
+                "selectors": [
+                    {
+                        "selector_kind": "document",
+                        "selector_ids": ["document:alpha", "document:beta"],
+                    },
+                    {
+                        "selector_kind": "section",
+                        "selector_ids": ["section:alpha", "section:beta"],
+                    },
+                ],
+                "exclusions": [],
+                "mutually_exclusive_conditions": [],
+            }
+        )
+
+    def _profile_with_duplicate(self, scope: dict) -> dict:
+        profile = final_profile_v21()
+        profile["resolved_properties"][0]["key"]["normalized_scope"] = deepcopy(
+            self.scope
+        )
+        duplicate = deepcopy(profile["resolved_properties"][0])
+        duplicate["resolution_id"] = "resolution:p2a-font-size-duplicate"
+        duplicate["key"]["normalized_scope"] = deepcopy(scope)
+        profile["resolved_properties"].append(duplicate)
+        return profile
+
+    def _conflicts_with_duplicate(self, scope: dict) -> dict:
+        report = conflict_v21()
+        report["conflicts"][0]["key"]["normalized_scope"] = deepcopy(self.scope)
+        duplicate = deepcopy(report["conflicts"][0])
+        duplicate["conflict_id"] = "conflict:p2a-font-size-duplicate"
+        duplicate["key"]["normalized_scope"] = deepcopy(scope)
+        report["conflicts"].append(duplicate)
+        return report
+
+    def _assert_duplicate_rejected(self, document: dict) -> None:
+        document = stamp_test(document, self.registry)
+        with self.assertRaisesRegex(ArtifactContractError, "composition key"):
+            _validate_artifact_for_test(
+                document,
+                registry=self.registry,
+                features={"profile_v2_schema": True},
+            )
+
+    def test_t41_p2a_scope_008_selector_order_cannot_split_composition_key(self) -> None:
+        reordered = deepcopy(self.scope)
+        reordered["selectors"].reverse()
+        self._assert_duplicate_rejected(self._profile_with_duplicate(reordered))
+        self._assert_duplicate_rejected(self._conflicts_with_duplicate(reordered))
+
+    def test_t41_p2a_scope_009_selector_id_order_cannot_split_composition_key(self) -> None:
+        reordered = deepcopy(self.scope)
+        for selector in reordered["selectors"]:
+            selector["selector_ids"].reverse()
+        self._assert_duplicate_rejected(self._profile_with_duplicate(reordered))
+        self._assert_duplicate_rejected(self._conflicts_with_duplicate(reordered))
+
+    def test_t41_p2a_scope_010_nfc_equivalence_cannot_split_composition_key(self) -> None:
+        composed = normalize_scope(document_scope("document:Caf\u00e9"))
+        decomposed = {
+            **deepcopy(composed),
+            "selectors": [
+                {
+                    "selector_kind": "document",
+                    "selector_ids": ["document:Cafe\u0301"],
+                }
+            ],
+        }
+        self.assertEqual(
+            normalized_property_scope_key(
+                "paragraph", "test.paragraph-font-size", composed
+            ),
+            normalized_property_scope_key(
+                "paragraph", "test.paragraph-font-size", decomposed
+            ),
+        )
+        for kind, document in (
+            ("final-execution-profile", self._profile_with_duplicate(decomposed)),
+            ("conflict-report", self._conflicts_with_duplicate(decomposed)),
+        ):
+            if kind == "final-execution-profile":
+                document["resolved_properties"][0]["key"]["normalized_scope"] = composed
+            else:
+                document["conflicts"][0]["key"]["normalized_scope"] = composed
+            with self.subTest(kind=kind):
+                errors = artifact_semantic_errors(kind, document, self.registry)
+                self.assertTrue(any("composition key" in error for error in errors))
+
+    def test_t41_p2a_scope_011_different_real_scopes_can_coexist(self) -> None:
+        other = normalize_scope(document_scope("document:other"))
+        profile = stamp_test(self._profile_with_duplicate(other), self.registry)
+        _validate_artifact_for_test(
+            profile,
+            registry=self.registry,
+            features={"profile_v2_schema": True},
+        )
+        report = stamp_test(self._conflicts_with_duplicate(other), self.registry)
+        _validate_artifact_for_test(
+            report,
+            registry=self.registry,
+            features={"profile_v2_schema": True},
+        )
 
 
 class V21ArtifactIntegrationTests(unittest.TestCase):
