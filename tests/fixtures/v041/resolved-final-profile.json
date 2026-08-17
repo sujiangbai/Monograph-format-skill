@@ -1,0 +1,94 @@
+{
+  "artifact_kind": "final-execution-profile",
+  "schema_version": "2.0",
+  "artifact_id": "final-execution-profile:resolved-test",
+  "created_by_tool": {"tool_id": "format-monograph", "version": "0.4.1"},
+  "input_fingerprints": [
+    {"input_id": "source:test", "role": "source_document", "fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+    {"input_id": "activation:test", "role": "feature_activation", "fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+    {"input_id": "registry:test", "role": "property_registry", "fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+    {"input_id": "profile:test", "role": "profile", "fingerprint": "sha256:4444444444444444444444444444444444444444444444444444444444444444"},
+    {"input_id": "structure:test", "role": "structure", "fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555"},
+    {"input_id": "approval:test", "role": "approval", "fingerprint": "sha256:6666666666666666666666666666666666666666666666666666666666666666"},
+    {"input_id": "conflict:test", "role": "conflict_report", "fingerprint": "sha256:7777777777777777777777777777777777777777777777777777777777777777"}
+  ],
+  "semantic_fingerprint": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "task_id": "task:resolved-test",
+  "legacy_input": false,
+  "activation": "disabled",
+  "final_ready_eligible": false,
+  "delivery_allowed": false,
+  "safety_invariants": {
+    "overridable": false,
+    "author_content_mutation_allowed": false,
+    "legacy_auto_activation_allowed": false,
+    "delivery_evidence_allowed": false,
+    "final_ready_allowed": false
+  },
+  "bindings": {
+    "task_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "input_fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "feature_activation_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "property_registry_fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "profile_fingerprints": ["sha256:4444444444444444444444444444444444444444444444444444444444444444"],
+    "structure_fingerprint": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "approval_fingerprints": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"],
+    "conflict_report_fingerprint": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "resolved_properties": [
+    {
+      "resolution_id": "resolution:test-font-size",
+      "key": {
+        "semantic_object_kind": "paragraph",
+        "property_id": "test.paragraph-font-size",
+        "normalized_scope": {
+          "scope_id": "scope:whole-document",
+          "document_scope": "document",
+          "section_ids": [],
+          "semantic_roles": ["body"],
+          "object_exception_ids": [],
+          "mutually_exclusive_conditions": []
+        }
+      },
+      "resolved_binding": {
+        "property_id": "test.paragraph-font-size",
+        "value": {"type": "decimal", "value": "10.50"},
+        "unit_id": "unit.pt",
+        "mode": "report"
+      },
+      "final_layer_kind": "monograph_base",
+      "final_source": {
+        "source_artifact_id": "layered-rule-asset:test",
+        "source_rule_id": "RULE-TEST-FONT-SIZE"
+      },
+      "candidate_chain": [
+        {
+          "candidate_id": "candidate:test-font-size",
+          "property_binding": {
+            "property_id": "test.paragraph-font-size",
+            "value": {"type": "decimal", "value": "10.50"},
+            "unit_id": "unit.pt",
+            "mode": "report"
+          },
+          "source": {
+            "source_artifact_id": "layered-rule-asset:test",
+            "source_rule_id": "RULE-TEST-FONT-SIZE"
+          },
+          "layer_kind": "monograph_base",
+          "confidence": "high",
+          "scope_status": "applicable"
+        }
+      ],
+      "override_chain": ["candidate:test-font-size"],
+      "excluded_candidates": [],
+      "confidence": "high",
+      "conflict_id": null,
+      "qa_decision_id": null,
+      "safety_check": {
+        "status": "pass",
+      "checked_invariant_ids": ["test.safety-author-content-immutable"]
+      },
+      "execution_mode": "report"
+    }
+  ]
+}
