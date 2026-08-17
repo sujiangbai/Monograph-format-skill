@@ -352,6 +352,49 @@ def schema_node_fingerprint(node: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _effective_schema_for_inventory(
+    node: dict[str, Any],
+    base_uri: str,
+    documents: Mapping[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Resolve only the reference chain needed to describe a field's real type."""
+
+    current = deepcopy(node)
+    current_base = base_uri
+    seen_references: set[str] = set()
+    while "$ref" in current:
+        reference = urljoin(current_base, current.pop("$ref"))
+        if reference in seen_references:
+            raise CanonicalizationError(
+                f"Fingerprint evidence encountered a cyclic $ref: {reference}"
+            )
+        seen_references.add(reference)
+        target_uri, fragment = urldefrag(reference)
+        target_document = documents.get(target_uri)
+        if target_document is None:
+            raise CanonicalizationError(
+                f"Inventory field has an unresolved $ref: {reference}"
+            )
+        target = _pointer(target_document, fragment)
+        if not isinstance(target, dict):
+            raise CanonicalizationError(
+                f"Inventory field $ref is not a schema object: {reference}"
+            )
+        current = _merge_schema(target, current)
+        current_base = target_uri
+    return current
+
+
+def _schema_type_feature(node: dict[str, Any]) -> str:
+    value_type = node.get("type")
+    declared_types = set(value_type) if isinstance(value_type, list) else {value_type}
+    if declared_types == {"array"}:
+        return "array"
+    if declared_types == {"object"} or "properties" in node:
+        return "object"
+    return "scalar"
+
+
 def fingerprint_field_inventory(
     documents: Mapping[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -410,6 +453,11 @@ def fingerprint_field_inventory(
         inherited_guards: tuple[str, ...] = (),
     ) -> None:
         if isinstance(value, dict):
+            if "anyOf" in value:
+                raise CanonicalizationError(
+                    "Fingerprint evidence does not support schema composition "
+                    f"anyOf: {schema_id}#{path or '/'}"
+                )
             context_guards = set(inherited_guards)
             if value.get("x-normalized-scope") is True:
                 context_guards.add("normalized_scope_context")
@@ -421,6 +469,9 @@ def fingerprint_field_inventory(
             ):
                 for name, child in properties.items():
                     child_path = f"{path}/properties/{escape_pointer(name)}"
+                    effective_child = _effective_schema_for_inventory(
+                        child, schema_id, documents
+                    )
                     child_guards = set(context_guards)
                     child_guards.update(context_guards_for_schema(child, schema_id))
                     if "const" in child:
@@ -460,26 +511,14 @@ def fingerprint_field_inventory(
                             f"Unsupported fingerprint evidence classification: {classification}"
                         )
 
-                    unsupported = sorted(keyword for keyword in ("anyOf",) if keyword in child)
-                    if unsupported:
-                        raise CanonicalizationError(
-                            "Fingerprint evidence does not support schema property "
-                            f"composition {unsupported}: {schema_id}#{child_path}"
-                        )
-
                     features: list[str] = []
                     if "$ref" in child:
                         features.append("ref")
-                    if "oneOf" in child:
+                    if "oneOf" in child or "oneOf" in effective_child:
                         features.append("one_of")
-                    if "allOf" in child:
+                    if "allOf" in child or "allOf" in effective_child:
                         features.append("all_of_guard")
-                    if child.get("type") == "array":
-                        features.append("array")
-                    elif child.get("type") == "object" or "properties" in child:
-                        features.append("object")
-                    else:
-                        features.append("scalar")
+                    features.append(_schema_type_feature(effective_child))
                     if "generated.schema.json" in schema_id:
                         features.append("generated_schema")
                     features.extend(child_guards)
