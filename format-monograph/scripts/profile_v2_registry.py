@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,7 @@ FORBIDDEN_CALLABLE_TOKENS = {
     "setattr",
     "system",
 }
+NUMERIC_DATA_TYPES = {"integer", "decimal"}
 
 
 class RegistryContractError(ValueError):
@@ -84,6 +86,69 @@ def _contains_forbidden_callable_token(value: str) -> bool:
     normalized = value.lower().replace("-", ".").replace("_", ".")
     parts = {part for part in normalized.split(".") if part}
     return bool(parts & FORBIDDEN_CALLABLE_TOKENS)
+
+
+def _as_decimal(value: Any) -> Decimal:
+    return Decimal(str(value))
+
+
+def _range_contains(value: Decimal, numeric_range: dict[str, Any]) -> bool:
+    minimum = numeric_range.get("minimum")
+    maximum = numeric_range.get("maximum")
+    if minimum is not None:
+        lower = _as_decimal(minimum)
+        if value < lower or (
+            value == lower and numeric_range["minimum_inclusive"] is False
+        ):
+            return False
+    if maximum is not None:
+        upper = _as_decimal(maximum)
+        if value > upper or (
+            value == upper and numeric_range["maximum_inclusive"] is False
+        ):
+            return False
+    return True
+
+
+def _numeric_range_errors(
+    property_id: str,
+    data_type_id: str,
+    numeric_range: dict[str, Any] | None,
+    enum_values: list[Any],
+) -> list[str]:
+    errors: list[str] = []
+    if numeric_range is None:
+        return errors
+    if data_type_id not in NUMERIC_DATA_TYPES:
+        return [f"{property_id} declares a numeric range for a nonnumeric data type."]
+
+    minimum = numeric_range.get("minimum")
+    maximum = numeric_range.get("maximum")
+    if data_type_id == "integer":
+        for label, endpoint in (("minimum", minimum), ("maximum", maximum)):
+            if endpoint is not None and _as_decimal(endpoint) != _as_decimal(
+                endpoint
+            ).to_integral_value():
+                errors.append(
+                    f"{property_id} integer range {label} must be an integer endpoint."
+                )
+    if minimum is not None and maximum is not None:
+        lower = _as_decimal(minimum)
+        upper = _as_decimal(maximum)
+        if lower > upper:
+            errors.append(f"{property_id} numeric range minimum exceeds maximum.")
+        elif lower == upper and (
+            numeric_range["minimum_inclusive"] is False
+            or numeric_range["maximum_inclusive"] is False
+        ):
+            errors.append(f"{property_id} numeric range is empty.")
+
+    for enum_value in enum_values:
+        if not _range_contains(_as_decimal(enum_value), numeric_range):
+            errors.append(
+                f"{property_id} has an enum value outside its numeric range."
+            )
+    return errors
 
 
 def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
@@ -160,11 +225,28 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
                 scalar_schema["maxLength"] = data_type["max_length"]
             scalar_validator = Draft202012Validator(scalar_schema)
             enum_values = item.get("value_constraints", {}).get("enum_values", [])
-            if any(scalar_validator.is_valid(value) is False for value in enum_values):
+            valid_enum_values = [
+                value for value in enum_values if scalar_validator.is_valid(value)
+            ]
+            if len(valid_enum_values) != len(enum_values):
                 errors.append(f"{property_id} has enum values outside its registered data type.")
             numeric_range = item.get("value_constraints", {}).get("numeric_range")
-            if numeric_range is not None and item["data_type_id"] not in {"integer", "decimal"}:
-                errors.append(f"{property_id} declares a numeric range for a nonnumeric data type.")
+            errors.extend(
+                _numeric_range_errors(
+                    property_id,
+                    item["data_type_id"],
+                    numeric_range,
+                    valid_enum_values,
+                )
+            )
+
+        if (
+            item.get("comparison_precision") is not None
+            and item["data_type_id"] not in NUMERIC_DATA_TYPES
+        ):
+            errors.append(
+                f"{property_id} declares decimal comparison precision for a nonnumeric data type."
+            )
 
         if "automatic" in item.get("modes", []):
             executor = executor_index.get(item["executor_capability_id"])
@@ -285,6 +367,15 @@ def build_property_catalog_schema(registry: dict[str, Any]) -> dict[str, Any]:
                 "type": "string",
                 "enum": sorted(item["allowed_unit_ids"]),
             }
+        value_schema: dict[str, Any] = {
+            "$ref": (
+                "typed-value.generated.schema.json#/$defs/"
+                f"{item['data_type_id']}"
+            )
+        }
+        enum_values = item.get("value_constraints", {}).get("enum_values", [])
+        if enum_values:
+            value_schema["properties"] = {"value": {"enum": enum_values}}
         variants.append(
             {
                 "type": "object",
@@ -292,12 +383,7 @@ def build_property_catalog_schema(registry: dict[str, Any]) -> dict[str, Any]:
                 "required": ["property_id", "value", "unit_id", "mode"],
                 "properties": {
                     "property_id": {"const": item["property_id"]},
-                    "value": {
-                        "$ref": (
-                            "typed-value.generated.schema.json#/$defs/"
-                            f"{item['data_type_id']}"
-                        )
-                    },
+                    "value": value_schema,
                     "unit_id": unit_schema,
                     "mode": {"type": "string", "enum": sorted(item["modes"])},
                 },
@@ -400,3 +486,22 @@ def validate_binding_for_layer(
         raise RegistryContractError(
             f"Ordinary rules cannot declare safety invariant {entry['property_id']}."
         )
+    typed_value = binding.get("value", {})
+    if typed_value.get("type") != entry["data_type_id"]:
+        raise RegistryContractError(
+            f"Property {entry['property_id']} binding uses the wrong data type."
+        )
+    raw_value = typed_value.get("value")
+    constraints = entry.get("value_constraints", {})
+    enum_values = constraints.get("enum_values", [])
+    if enum_values and raw_value not in enum_values:
+        raise RegistryContractError(
+            f"Property {entry['property_id']} binding value is outside its enum constraint."
+        )
+    numeric_range = constraints.get("numeric_range")
+    if numeric_range is not None:
+        numeric_value = _as_decimal(raw_value)
+        if not _range_contains(numeric_value, numeric_range):
+            raise RegistryContractError(
+                f"Property {entry['property_id']} binding value is outside its numeric range."
+            )

@@ -232,6 +232,26 @@ def schema_for_requested_minor(
     return result, True
 
 
+def _keyed_collection_ids(
+    items: list[dict[str, Any]],
+    key_field: str,
+    context: str,
+    errors: list[str],
+    *,
+    nested_object_field: str | None = None,
+) -> set[str]:
+    """Collect stable IDs and reject duplicate keys regardless of payload equality."""
+
+    seen: set[str] = set()
+    for item in items:
+        source = item[nested_object_field] if nested_object_field else item
+        value = source[key_field]
+        if value in seen:
+            errors.append(f"Duplicate {key_field} {value} in {context}.")
+        seen.add(value)
+    return seen
+
+
 def artifact_semantic_errors(
     artifact_kind: str,
     document: dict[str, Any],
@@ -240,16 +260,36 @@ def artifact_semantic_errors(
     errors: list[str] = []
     properties = property_index(registry)
 
-    seen_input_ids: dict[str, tuple[str, str]] = {}
-    for item in document.get("input_fingerprints", []):
-        input_id = item["input_id"]
-        value = (item["role"], item["fingerprint"])
-        if input_id in seen_input_ids:
-            errors.append(
-                f"Duplicate input_id {input_id} cannot represent multiple fingerprint bindings."
+    _keyed_collection_ids(
+        document.get("input_fingerprints", []),
+        "input_id",
+        "artifact input fingerprints",
+        errors,
+    )
+
+    if artifact_kind == "capability-snapshot":
+        _keyed_collection_ids(
+            document.get("capabilities", []),
+            "capability_id",
+            "capability snapshot",
+            errors,
+        )
+    elif artifact_kind == "legacy-migration-manifest":
+        _keyed_collection_ids(
+            document.get("mappings", []),
+            "source_rule_id",
+            "legacy migration mappings",
+            errors,
+        )
+    elif artifact_kind == "execution-evidence-artifact":
+        for collection, key_field, context in (
+            ("capability_versions", "capability_id", "evidence capability versions"),
+            ("measured_results", "metric_id", "evidence measured results"),
+            ("history", "entry_id", "evidence history"),
+        ):
+            _keyed_collection_ids(
+                document.get(collection, []), key_field, context, errors
             )
-        else:
-            seen_input_ids[input_id] = value
 
     def validate_key_and_candidate(
         key: dict[str, Any], candidate: dict[str, Any], context: str
@@ -276,12 +316,11 @@ def artifact_semantic_errors(
 
     if artifact_kind == "layered-rule-asset":
         layer_kind = document["layer_kind"]
-        seen_rules: set[str] = set()
+        _keyed_collection_ids(
+            document.get("rules", []), "rule_id", "layered rules", errors
+        )
         for rule in document.get("rules", []):
             rule_id = rule["rule_id"]
-            if rule_id in seen_rules:
-                errors.append(f"Duplicate rule ID: {rule_id}.")
-            seen_rules.add(rule_id)
             seen_properties: set[str] = set()
             for binding in rule.get("properties", []):
                 property_id = binding["property_id"]
@@ -327,13 +366,15 @@ def artifact_semantic_errors(
             elif sorted(values) != sorted(bindings[field]):
                 errors.append(f"Final profile {role} fingerprints do not match bindings.{field}.")
 
-        seen_resolution_ids: set[str] = set()
+        _keyed_collection_ids(
+            document.get("resolved_properties", []),
+            "resolution_id",
+            "final resolved properties",
+            errors,
+        )
         seen_composition_keys: set[str] = set()
         for resolved in document.get("resolved_properties", []):
             resolution_id = resolved["resolution_id"]
-            if resolution_id in seen_resolution_ids:
-                errors.append(f"Duplicate resolution_id: {resolution_id}.")
-            seen_resolution_ids.add(resolution_id)
             key = resolved["key"]
             composition_key = json.dumps(key, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
             if composition_key in seen_composition_keys:
@@ -354,15 +395,23 @@ def artifact_semantic_errors(
                 "layer_kind": resolved["final_layer_kind"],
             }
             validate_key_and_candidate(key, synthetic_candidate, "Resolved property")
+            active_ids = _keyed_collection_ids(
+                resolved["candidate_chain"],
+                "candidate_id",
+                f"resolved property {resolution_id} active candidates",
+                errors,
+            )
+            excluded_ids = _keyed_collection_ids(
+                resolved["excluded_candidates"],
+                "candidate_id",
+                f"resolved property {resolution_id} excluded candidates",
+                errors,
+                nested_object_field="candidate",
+            )
             applicable_ids: set[str] = set()
-            active_ids: set[str] = set()
-            excluded_ids: set[str] = set()
             final_source_matches = False
             for candidate in resolved["candidate_chain"]:
                 candidate_id = candidate["candidate_id"]
-                if candidate_id in active_ids:
-                    errors.append(f"Resolved property repeats active candidate_id {candidate_id}.")
-                active_ids.add(candidate_id)
                 validate_key_and_candidate(key, candidate, "Resolved property")
                 if candidate["scope_status"] == "applicable":
                     applicable_ids.add(candidate_id)
@@ -380,9 +429,6 @@ def artifact_semantic_errors(
             for excluded in resolved["excluded_candidates"]:
                 candidate = excluded["candidate"]
                 candidate_id = candidate["candidate_id"]
-                if candidate_id in excluded_ids:
-                    errors.append(f"Resolved property repeats excluded candidate_id {candidate_id}.")
-                excluded_ids.add(candidate_id)
                 validate_key_and_candidate(key, candidate, "Excluded resolved property")
                 if candidate["scope_status"] == "applicable":
                     errors.append("Excluded resolved candidates cannot be marked applicable.")
@@ -401,8 +447,32 @@ def artifact_semantic_errors(
                         f"Safety check references non-safety property {invariant_id}."
                     )
     elif artifact_kind == "conflict-report":
+        _keyed_collection_ids(
+            document.get("conflicts", []),
+            "conflict_id",
+            "conflict report",
+            errors,
+        )
         for conflict in document.get("conflicts", []):
             key = conflict["key"]
+            conflict_id = conflict["conflict_id"]
+            active_ids = _keyed_collection_ids(
+                conflict["candidates"],
+                "candidate_id",
+                f"conflict {conflict_id} active candidates",
+                errors,
+            )
+            excluded_ids = _keyed_collection_ids(
+                conflict["excluded_candidates"],
+                "candidate_id",
+                f"conflict {conflict_id} excluded candidates",
+                errors,
+                nested_object_field="candidate",
+            )
+            if active_ids & excluded_ids:
+                errors.append(
+                    f"Conflict {conflict_id} candidate IDs cannot be both active and excluded."
+                )
             layers: set[str] = set()
             for candidate in conflict["candidates"]:
                 validate_key_and_candidate(key, candidate, "Conflict")

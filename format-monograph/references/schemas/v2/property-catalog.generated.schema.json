@@ -10,7 +10,10 @@
       "required": ["property_id", "value", "unit_id", "mode"],
       "properties": {
         "property_id": {"const": "security.author-content-immutable"},
-        "value": {"$ref": "typed-value.generated.schema.json#/$defs/boolean"},
+        "value": {
+          "$ref": "typed-value.generated.schema.json#/$defs/boolean",
+          "properties": {"value": {"enum": [true]}}
+        },
         "unit_id": {"type": "null"},
         "mode": {"type": "string", "enum": ["block", "report"]}
       }

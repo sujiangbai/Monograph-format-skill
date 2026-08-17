@@ -375,6 +375,126 @@ class RuntimeAuthorityAndEvidenceTests(unittest.TestCase):
             validate_artifact(artifact, features={"profile_v2_schema": True})
 
 
+class ArtifactKeyedCollectionTests(unittest.TestCase):
+    """P1 stable-ID collections reject exact and payload-divergent duplicates."""
+
+    def setUp(self) -> None:
+        self.artifacts = minimal_artifacts()
+        self.features = {"profile_v2_schema": True}
+
+    def _validate(self, artifact: dict) -> None:
+        validate_artifact(artifact, features=self.features)
+
+    def _assert_exact_and_divergent_rejected(
+        self,
+        artifact_kind: str,
+        collection: str,
+        item: dict,
+        divergent: dict,
+    ) -> None:
+        exact = deepcopy(self.artifacts[artifact_kind])
+        exact[collection] = [deepcopy(item), deepcopy(item)]
+        with self.subTest(kind=artifact_kind, collection=collection, duplicate="exact"):
+            with self.assertRaises(ArtifactContractError):
+                self._validate(exact)
+
+        changed = deepcopy(self.artifacts[artifact_kind])
+        changed[collection] = [deepcopy(item), deepcopy(divergent)]
+        with self.subTest(
+            kind=artifact_kind, collection=collection, duplicate="different-payload"
+        ):
+            with self.assertRaisesRegex(ArtifactContractError, "Duplicate"):
+                self._validate(changed)
+
+    def test_t41_sch_005a_capability_snapshot_ids_are_unique(self) -> None:
+        item = {
+            "capability_id": "schema.validation",
+            "available": True,
+            "version": "2.0",
+        }
+        divergent = deepcopy(item)
+        divergent["version"] = "2.1"
+        self._assert_exact_and_divergent_rejected(
+            "capability-snapshot", "capabilities", item, divergent
+        )
+
+        artifact = deepcopy(self.artifacts["capability-snapshot"])
+        artifact["capabilities"].append(
+            {"capability_id": "schema.offline-ref", "available": True}
+        )
+        self._validate(artifact)
+
+    def test_t41_sch_005b_legacy_mapping_ids_are_unique(self) -> None:
+        item = {
+            "source_rule_id": "legacy-rule:one",
+            "disposition": "preserve",
+            "target_rule_ids": [],
+            "rationale": "Synthetic migration entry.",
+        }
+        divergent = deepcopy(item)
+        divergent["disposition"] = "retire"
+        divergent["rationale"] = "Synthetic divergent migration entry."
+        self._assert_exact_and_divergent_rejected(
+            "legacy-migration-manifest", "mappings", item, divergent
+        )
+
+        artifact = deepcopy(self.artifacts["legacy-migration-manifest"])
+        artifact["mappings"] = [item, deepcopy(item)]
+        artifact["mappings"][1]["source_rule_id"] = "legacy-rule:two"
+        self._validate(artifact)
+
+    def test_t41_sch_005c_evidence_capability_version_ids_are_unique(self) -> None:
+        item = {"capability_id": "schema.validation", "version": "2.0"}
+        divergent = deepcopy(item)
+        divergent["version"] = "2.1"
+        self._assert_exact_and_divergent_rejected(
+            "execution-evidence-artifact", "capability_versions", item, divergent
+        )
+
+        artifact = deepcopy(self.artifacts["execution-evidence-artifact"])
+        artifact["capability_versions"].append(
+            {"capability_id": "schema.offline-ref", "version": "2.0"}
+        )
+        self._validate(artifact)
+
+    def test_t41_sch_005d_evidence_metric_ids_are_unique(self) -> None:
+        item = {
+            "metric_id": "tests.contract",
+            "value": {"type": "boolean", "value": True},
+            "unit_id": None,
+            "status": "pass",
+        }
+        divergent = deepcopy(item)
+        divergent["value"]["value"] = False
+        divergent["status"] = "fail"
+        self._assert_exact_and_divergent_rejected(
+            "execution-evidence-artifact", "measured_results", item, divergent
+        )
+
+        artifact = deepcopy(self.artifacts["execution-evidence-artifact"])
+        artifact["measured_results"] = [item, deepcopy(item)]
+        artifact["measured_results"][1]["metric_id"] = "tests.privacy"
+        self._validate(artifact)
+
+    def test_t41_sch_005e_evidence_history_ids_are_unique(self) -> None:
+        item = {
+            "entry_id": "history:first",
+            "event_type": "created",
+            "created_at": "2026-01-01T00:00:00Z",
+            "reason": "Synthetic first event.",
+        }
+        divergent = deepcopy(item)
+        divergent["reason"] = "Synthetic divergent event."
+        self._assert_exact_and_divergent_rejected(
+            "execution-evidence-artifact", "history", item, divergent
+        )
+
+        artifact = deepcopy(self.artifacts["execution-evidence-artifact"])
+        artifact["history"] = [item, deepcopy(item)]
+        artifact["history"][1]["entry_id"] = "history:second"
+        self._validate(artifact)
+
+
 class RegistryFoundationTests(unittest.TestCase):
     """T41-REG-CORE-001..010 and V041-REGISTRY-CORE-001."""
 
@@ -571,6 +691,79 @@ class RegistryFoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryContractError, "outside its registered data type"):
             validate_registry_document(registry)
 
+    def test_t41_reg_core_005c_numeric_constraints_are_well_formed(self) -> None:
+        cases = []
+
+        registry = load_json(self.test_registry_path)
+        registry["properties"][0]["value_constraints"]["numeric_range"].update(
+            {"minimum": "11", "maximum": "10"}
+        )
+        cases.append(("reversed", registry, "minimum exceeds maximum"))
+
+        for inclusive_pair in ((False, True), (True, False), (False, False)):
+            registry = load_json(self.test_registry_path)
+            numeric_range = registry["properties"][0]["value_constraints"][
+                "numeric_range"
+            ]
+            numeric_range.update(
+                {
+                    "minimum": "10",
+                    "maximum": "10",
+                    "minimum_inclusive": inclusive_pair[0],
+                    "maximum_inclusive": inclusive_pair[1],
+                }
+            )
+            cases.append((f"empty-{inclusive_pair}", registry, "range is empty"))
+
+        registry = load_json(self.test_registry_path)
+        registry["data_types"].append(
+            {"data_type_id": "integer", "json_type": "integer"}
+        )
+        integer_property = registry["properties"][0]
+        integer_property["data_type_id"] = "integer"
+        integer_property["comparison_precision"] = None
+        integer_property["value_constraints"]["numeric_range"]["minimum"] = "0.5"
+        cases.append(("integer-decimal-endpoint", registry, "integer endpoint"))
+
+        registry = load_json(self.test_registry_path)
+        constrained_property = registry["properties"][0]
+        constrained_property["value_constraints"]["enum_values"] = ["1000.01"]
+        cases.append(("enum-outside-range", registry, "enum value outside"))
+
+        registry = load_json(self.test_registry_path)
+        nonnumeric_property = registry["properties"][0]
+        nonnumeric_property["data_type_id"] = "boolean"
+        nonnumeric_property["canonical_unit_id"] = None
+        nonnumeric_property["allowed_unit_ids"] = []
+        nonnumeric_property["comparison_precision"] = None
+        nonnumeric_property["value_constraints"]["enum_values"] = []
+        cases.append(("nonnumeric-range", registry, "nonnumeric data type"))
+
+        registry = load_json(self.test_registry_path)
+        nonnumeric_property = registry["properties"][0]
+        nonnumeric_property["data_type_id"] = "boolean"
+        nonnumeric_property["canonical_unit_id"] = None
+        nonnumeric_property["allowed_unit_ids"] = []
+        nonnumeric_property["value_constraints"] = {
+            "enum_values": [True],
+            "numeric_range": None,
+        }
+        cases.append(("nonnumeric-precision", registry, "comparison precision"))
+
+        for label, registry, message in cases:
+            with self.subTest(case=label), self.assertRaisesRegex(
+                RegistryContractError, message
+            ):
+                validate_registry_document(registry)
+
+    def test_t41_reg_core_005d_enum_values_must_match_registered_type(self) -> None:
+        registry = load_json(self.test_registry_path)
+        registry["properties"][0]["value_constraints"]["enum_values"] = [True]
+        with self.assertRaisesRegex(
+            RegistryContractError, "outside its registered data type"
+        ):
+            validate_registry_document(registry)
+
     def test_t41_reg_core_005b_automatic_requires_implemented_executor_and_auditor(self) -> None:
         registry = load_json(self.test_registry_path)
         validate_registry_document(registry)
@@ -614,6 +807,104 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
             features={"profile_v2_schema": True},
             registry=self.registry,
         )
+
+    def _layered_rule(self, value: str) -> dict:
+        artifact = deepcopy(self.artifacts["layered-rule-asset"])
+        artifact["rules"] = [
+            {
+                "rule_id": "RULE-TEST-FONT-SIZE",
+                "semantic_object_kind": "paragraph",
+                "scope": {
+                    "scope_kind": "document",
+                    "scope_ids": ["document:test"],
+                },
+                "confidence": "high",
+                "status": "draft",
+                "properties": [
+                    {
+                        "property_id": "test.paragraph-font-size",
+                        "value": {"type": "decimal", "value": value},
+                        "unit_id": "unit.pt",
+                        "mode": "report",
+                    }
+                ],
+            }
+        ]
+        return artifact
+
+    def _validate_with_registry(self, artifact: dict, registry: dict) -> None:
+        _validate_artifact_for_test(
+            artifact,
+            features={"profile_v2_schema": True},
+            registry=registry,
+        )
+
+    def test_t41_reg_core_010a_layered_bindings_enforce_decimal_ranges(self) -> None:
+        registry = deepcopy(self.registry)
+        numeric_range = registry["properties"][0]["value_constraints"][
+            "numeric_range"
+        ]
+        numeric_range.update({"minimum": "0", "maximum": "10"})
+        validate_registry_document(registry)
+
+        for value in ("0", "0.0000000000000000001", "9.9999999999999999999", "10"):
+            with self.subTest(value=value, bounds="closed"):
+                self._validate_with_registry(self._layered_rule(value), registry)
+        for value in ("-0.0000000000000000001", "10.0000000000000000001"):
+            with self.subTest(value=value, bounds="outside"), self.assertRaisesRegex(
+                ArtifactContractError, "outside its numeric range"
+            ):
+                self._validate_with_registry(self._layered_rule(value), registry)
+
+        numeric_range["minimum_inclusive"] = False
+        numeric_range["maximum_inclusive"] = False
+        validate_registry_document(registry)
+        for value in ("0.0000000000000000001", "9.9999999999999999999"):
+            with self.subTest(value=value, bounds="open"):
+                self._validate_with_registry(self._layered_rule(value), registry)
+        for value in ("0", "10"):
+            with self.subTest(value=value, bounds="excluded-endpoint"), self.assertRaisesRegex(
+                ArtifactContractError, "outside its numeric range"
+            ):
+                self._validate_with_registry(self._layered_rule(value), registry)
+
+    def test_t41_reg_core_010b_generated_enum_contract_reaches_layered_rules(self) -> None:
+        registry = deepcopy(self.registry)
+        registry["properties"][0]["value_constraints"]["enum_values"] = [
+            "10.50",
+            "12.00",
+        ]
+        validate_registry_document(registry)
+        self._validate_with_registry(self._layered_rule("10.50"), registry)
+        with self.assertRaises(ArtifactContractError):
+            self._validate_with_registry(self._layered_rule("11.00"), registry)
+
+    def test_t41_reg_core_010c_final_profile_and_conflict_enforce_ranges(self) -> None:
+        registry = deepcopy(self.registry)
+        registry["properties"][0]["value_constraints"]["numeric_range"][
+            "maximum"
+        ] = "10"
+        validate_registry_document(registry)
+
+        profile = deepcopy(self.profile)
+        with self.assertRaisesRegex(ArtifactContractError, "outside its numeric range"):
+            self._validate_with_registry(profile, registry)
+
+        conflict = self._conflict()
+        with self.assertRaisesRegex(ArtifactContractError, "outside its numeric range"):
+            self._validate_with_registry(conflict, registry)
+
+    def test_t41_reg_core_010d_layered_rule_ids_remain_unique(self) -> None:
+        artifact = self._layered_rule("10.50")
+        artifact["rules"].append(deepcopy(artifact["rules"][0]))
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate rule_id"):
+            self._validate(artifact)
+
+        artifact = self._layered_rule("10.50")
+        second = deepcopy(artifact["rules"][0])
+        second["rule_id"] = "RULE-TEST-FONT-SIZE-SECOND"
+        artifact["rules"].append(second)
+        self._validate(artifact)
 
     def test_t41_sch_015a_complete_resolved_property_contract_is_valid(self) -> None:
         self.assertFalse(self._schema_errors("final-execution-profile", self.profile))
@@ -723,7 +1014,7 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
         profile = deepcopy(self.profile)
         candidate = deepcopy(profile["resolved_properties"][0]["candidate_chain"][0])
         profile["resolved_properties"][0]["candidate_chain"].append(candidate)
-        with self.assertRaisesRegex(ArtifactContractError, "repeats active candidate_id"):
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate candidate_id"):
             self._validate(profile)
 
         profile = deepcopy(self.profile)
@@ -739,7 +1030,7 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
             exclusion,
             deepcopy(exclusion),
         ]
-        with self.assertRaisesRegex(ArtifactContractError, "repeats excluded candidate_id"):
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate candidate_id"):
             self._validate(profile)
 
         profile = deepcopy(self.profile)
@@ -890,6 +1181,91 @@ class ResolvedProfileAndConflictContractTests(unittest.TestCase):
                 "reason_code": "SCOPE-OUTSIDE-SECTION",
             }
         ]
+        self._validate(artifact)
+
+    def test_t41_sch_016d_conflict_ids_reject_exact_and_divergent_duplicates(self) -> None:
+        artifact = self._conflict()
+        artifact["conflicts"].append(deepcopy(artifact["conflicts"][0]))
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate conflict_id"):
+            self._validate(artifact)
+
+        artifact = self._conflict()
+        divergent = deepcopy(artifact["conflicts"][0])
+        divergent["key"]["normalized_scope"]["scope_id"] = "scope:other"
+        artifact["conflicts"].append(divergent)
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate conflict_id"):
+            self._validate(artifact)
+
+        artifact = self._conflict()
+        second = deepcopy(artifact["conflicts"][0])
+        second["conflict_id"] = "conflict:second"
+        second["key"]["normalized_scope"]["scope_id"] = "scope:other"
+        artifact["conflicts"].append(second)
+        self._validate(artifact)
+
+    def test_t41_sch_016e_active_candidate_ids_reject_both_duplicate_forms(self) -> None:
+        artifact = self._conflict()
+        artifact["conflicts"][0]["candidates"].append(
+            deepcopy(artifact["conflicts"][0]["candidates"][0])
+        )
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate candidate_id"):
+            self._validate(artifact)
+
+        artifact = self._conflict()
+        divergent = deepcopy(artifact["conflicts"][0]["candidates"][0])
+        divergent["property_binding"]["value"]["value"] = "12.00"
+        artifact["conflicts"][0]["candidates"].append(divergent)
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate candidate_id"):
+            self._validate(artifact)
+
+        artifact = self._conflict()
+        artifact["conflicts"][0]["candidates"].append(
+            self._candidate("candidate:third")
+        )
+        self._validate(artifact)
+
+    def test_t41_sch_016f_excluded_candidate_ids_are_unique_and_disjoint(self) -> None:
+        def scoped_conflict() -> dict:
+            artifact = self._conflict(reason="scope_violation")
+            artifact["conflicts"][0]["candidates"] = [
+                self._candidate("candidate:active")
+            ]
+            artifact["conflicts"][0]["excluded_candidates"] = [
+                {
+                    "candidate": self._candidate(
+                        "candidate:excluded", scope="out_of_scope"
+                    ),
+                    "exclusion_reason": "scope_violation",
+                    "reason_code": "SCOPE-OUTSIDE-SECTION",
+                }
+            ]
+            return artifact
+
+        artifact = scoped_conflict()
+        artifact["conflicts"][0]["excluded_candidates"].append(
+            deepcopy(artifact["conflicts"][0]["excluded_candidates"][0])
+        )
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate candidate_id"):
+            self._validate(artifact)
+
+        artifact = scoped_conflict()
+        divergent = deepcopy(artifact["conflicts"][0]["excluded_candidates"][0])
+        divergent["reason_code"] = "SCOPE-OTHER"
+        artifact["conflicts"][0]["excluded_candidates"].append(divergent)
+        with self.assertRaisesRegex(ArtifactContractError, "Duplicate candidate_id"):
+            self._validate(artifact)
+
+        artifact = scoped_conflict()
+        overlap = deepcopy(artifact["conflicts"][0]["excluded_candidates"][0])
+        overlap["candidate"]["candidate_id"] = "candidate:active"
+        artifact["conflicts"][0]["excluded_candidates"] = [overlap]
+        with self.assertRaisesRegex(ArtifactContractError, "both active and excluded"):
+            self._validate(artifact)
+
+        artifact = scoped_conflict()
+        second = deepcopy(artifact["conflicts"][0]["excluded_candidates"][0])
+        second["candidate"]["candidate_id"] = "candidate:excluded-second"
+        artifact["conflicts"][0]["excluded_candidates"].append(second)
         self._validate(artifact)
 
 
