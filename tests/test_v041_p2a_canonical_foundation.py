@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from urllib.parse import urldefrag, urljoin
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -21,17 +23,21 @@ from profile_v2_artifacts import (  # noqa: E402
     _validate_artifact_for_test,
     artifact_semantic_errors,
     load_artifact_schema,
+    offline_schema_registry,
     read_profile_document,
     schema_documents,
     validate_artifact,
 )
 from profile_v2_canonical import (  # noqa: E402
     CanonicalizationError,
+    _merge_schema,
     _semantic_projection,
     _stamp_semantic_fingerprint_for_test,
     canonical_semantic_bytes,
     compute_semantic_fingerprint,
     fingerprint_field_inventory,
+    fingerprint_field_node,
+    schema_node_fingerprint,
     semantic_projection,
     stamp_semantic_fingerprint,
     unclassified_array_paths,
@@ -134,6 +140,137 @@ def stamp_test(document: dict, registry: dict | None = None) -> dict:
     return _stamp_semantic_fingerprint_for_test(
         document, schema=schema, documents=documents, registry=registry
     )
+
+
+def _schema_example(
+    schema: dict,
+    *,
+    schema_id: str,
+    documents: dict[str, dict],
+    variant: int = 0,
+    depth: int = 0,
+) -> object:
+    """Build a small deterministic value for an actual committed schema node."""
+
+    if depth > 24:
+        raise AssertionError(f"Schema example recursion exceeded at {schema_id}")
+    current = deepcopy(schema)
+    if "$ref" in current:
+        reference = urljoin(schema_id, current.pop("$ref"))
+        target_uri, fragment = urldefrag(reference)
+        target = fingerprint_field_node(documents, f"{target_uri}#{fragment}")
+        merged = _merge_schema(target, current)
+        return _schema_example(
+            merged,
+            schema_id=target_uri,
+            documents=documents,
+            variant=variant,
+            depth=depth + 1,
+        )
+    if "oneOf" in current:
+        branches = current.pop("oneOf")
+        branch = deepcopy(branches[variant % len(branches)])
+        branch = _merge_schema(branch, current)
+        return _schema_example(
+            branch,
+            schema_id=schema_id,
+            documents=documents,
+            variant=variant,
+            depth=depth + 1,
+        )
+    if "const" in current:
+        return deepcopy(current["const"])
+    enum = current.get("enum")
+    if isinstance(enum, list) and enum:
+        return deepcopy(enum[variant % len(enum)])
+
+    value_type = current.get("type")
+    if isinstance(value_type, list):
+        value_type = next((item for item in value_type if item != "null"), "null")
+    if value_type == "null":
+        return None
+    if value_type == "boolean":
+        return bool(variant % 2)
+    if value_type == "integer":
+        minimum = current.get("minimum", 0)
+        if "exclusiveMinimum" in current:
+            minimum = max(minimum, current["exclusiveMinimum"] + 1)
+        value = int(minimum) + variant
+        maximum = current.get("maximum")
+        if maximum is not None:
+            value = min(value, int(maximum))
+        return value
+    if value_type == "string" or value_type is None:
+        if current.get("format") == "date-time":
+            return f"2026-01-{(variant % 9) + 1:02d}T00:00:00Z"
+        pattern = current.get("pattern")
+        candidates = [
+            f"test.value{variant}",
+            f"RULE-TEST-{variant:03d}",
+            f"test_value{variant}",
+            f"1.{variant}",
+            f"1.0.{variant}",
+            f"test-value{variant}",
+            "sha256:" + (f"{variant:x}"[-1] * 64),
+            f"item:test{variant}",
+            "scope:" + (f"{variant:x}"[-1] * 64),
+            f"unit.test{variant}",
+            f"constraint.test{variant}",
+            f"auditor.test{variant}",
+            f"executor.test{variant}",
+            f"comparator.test{variant}",
+            f"normalizer.test{variant}",
+            f"T41-TEST-{variant}",
+            f"registry:test{variant}",
+            str(variant),
+        ]
+        if isinstance(pattern, str):
+            for candidate in candidates:
+                if re.fullmatch(pattern, candidate):
+                    return candidate
+            raise AssertionError(f"No deterministic example matches {pattern!r}")
+        minimum = int(current.get("minLength", 1))
+        value = f"value-{variant}"
+        return value if len(value) >= minimum else ("x" * minimum)
+    if value_type == "array":
+        count = int(current.get("minItems", 0))
+        item_schema = current.get("items", {})
+        return [
+            _schema_example(
+                item_schema,
+                schema_id=schema_id,
+                documents=documents,
+                variant=variant + index,
+                depth=depth + 1,
+            )
+            for index in range(count)
+        ]
+    if value_type == "object":
+        properties = current.get("properties", {})
+        result = {}
+        for index, name in enumerate(current.get("required", [])):
+            result[name] = _schema_example(
+                properties[name],
+                schema_id=schema_id,
+                documents=documents,
+                variant=variant + index,
+                depth=depth + 1,
+            )
+        return result
+    raise AssertionError(f"Unsupported schema example type {value_type!r} at {schema_id}")
+
+
+def _set_pointer(document: dict, pointer: str, value: object) -> None:
+    current: object = document
+    parts = pointer.removeprefix("/").split("/") if pointer else []
+    for raw in parts[:-1]:
+        token = raw.replace("~1", "/").replace("~0", "~")
+        current = current[int(token)] if isinstance(current, list) else current[token]
+    final = parts[-1].replace("~1", "/").replace("~0", "~")
+    if isinstance(current, list):
+        current[int(final)] = value
+    else:
+        current[final] = value
 
 
 def candidate_v21() -> dict:
@@ -473,113 +610,248 @@ class CanonicalFingerprintTests(unittest.TestCase):
 
     def test_t41_p2a_can_008_schema_field_inventory_is_machine_locked(self) -> None:
         expected = load_json(FIXTURES / "semantic-fingerprint-field-inventory.json")
-        self.assertEqual("1.0", expected["schema_version"])
+        self.assertEqual("2.0", expected["schema_version"])
         self.assertEqual(
             {
-                "semantic_direct": "T41-P2A-CAN-009",
-                "semantic_guarded_combination": "T41-P2A-CAN-010",
+                "semantic_projected": "T41-P2A-CAN-009",
+                "semantic_guarded": "T41-P2A-CAN-010",
                 "fingerprint_excluded": "T41-P2A-CAN-011",
+                "validation_guard": "T41-P2A-CAN-010",
             },
-            expected["evidence_tests"],
+            expected["classification_tests"],
         )
-        self.assertEqual(
-            expected["inventory"], fingerprint_field_inventory(schema_documents())
+        documents = schema_documents()
+        actual = fingerprint_field_inventory(documents)
+        self.assertEqual(expected["inventory"], actual)
+        self.assertEqual(expected["counts"]["schema_property_nodes"], len(actual))
+        self.assertEqual(len(actual), len({record["field_path"] for record in actual}))
+        for classification in expected["classification_tests"]:
+            self.assertEqual(
+                expected["counts"][classification],
+                sum(
+                    record["classification"] == classification for record in actual
+                ),
+            )
+
+        for record in actual:
+            with self.subTest(field_path=record["field_path"]):
+                node = fingerprint_field_node(documents, record["field_path"])
+                self.assertEqual(
+                    record["schema_node_fingerprint"], schema_node_fingerprint(node)
+                )
+                self.assertEqual(
+                    record["field_name"],
+                    record["field_path"].rsplit("/properties/", 1)[-1]
+                    .replace("~1", "/")
+                    .replace("~0", "~"),
+                )
+
+        bad_path = deepcopy(actual[0])
+        bad_path["field_path"] += "/missing"
+        with self.assertRaises(CanonicalizationError):
+            fingerprint_field_node(documents, bad_path["field_path"])
+
+        added = deepcopy(documents)
+        root_id = "https://schemas.format-monograph.local/v2/capability-snapshot.schema.json"
+        added[root_id]["properties"]["unclassified_new_field"] = {"type": "string"}
+        self.assertNotEqual(expected["inventory"], fingerprint_field_inventory(added))
+
+        reclassified = deepcopy(documents)
+        projected = next(
+            record for record in actual if record["classification"] == "semantic_projected"
+        )
+        fingerprint_field_node(reclassified, projected["field_path"])[
+            "x-semantic-fingerprint"
+        ] = "exclude"
+        self.assertNotEqual(
+            expected["inventory"], fingerprint_field_inventory(reclassified)
         )
 
-    def test_t41_p2a_can_009_every_direct_field_has_mutation_evidence(self) -> None:
-        inventory = fingerprint_field_inventory(schema_documents())
-        schema_id = "https://schemas.format-monograph.local/test/direct-field.json"
-        schema = {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": schema_id,
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["target"],
-            "properties": {"target": {"type": "string"}},
-        }
-        for field_path in inventory["semantic_direct"]:
-            with self.subTest(field_path=field_path):
+    def test_t41_p2a_can_009_actual_included_nodes_project_their_field(self) -> None:
+        documents = schema_documents()
+        inventory = fingerprint_field_inventory(documents)
+        for record in inventory:
+            if record["classification"] != "semantic_projected":
+                continue
+            with self.subTest(field_path=record["field_path"]):
+                schema_id, _ = urldefrag(record["field_path"])
+                container = deepcopy(
+                    fingerprint_field_node(documents, record["container_path"])
+                )
+                container["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+                container["$id"] = schema_id
+                node = fingerprint_field_node(documents, record["field_path"])
+                sample = _schema_example(
+                    node, schema_id=schema_id, documents=documents
+                )
+                registry = load_registry(version=record["schema_version"])
                 first = _semantic_projection(
-                    {"target": "alpha"},
-                    schema=schema,
-                    documents={schema_id: schema},
-                    registry=test_registry(),
+                    {}, schema=container, documents=documents, registry=registry
                 )
                 second = _semantic_projection(
-                    {"target": "beta"},
-                    schema=schema,
-                    documents={schema_id: schema},
-                    registry=test_registry(),
+                    {record["field_name"]: sample},
+                    schema=container,
+                    documents=documents,
+                    registry=registry,
                 )
                 self.assertNotEqual(first, second)
+                self.assertIn(record["field_name"], second)
 
-    def test_t41_p2a_can_010_guarded_fields_map_to_combination_evidence(self) -> None:
-        inventory = fingerprint_field_inventory(schema_documents())
-        schema_id = "https://schemas.format-monograph.local/test/guarded-field.json"
-        schema = {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": schema_id,
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["target", "peer"],
-            "properties": {
-                "target": {"const": "fixed"},
-                "peer": {"type": "string"},
-            },
-        }
-        validator = Draft202012Validator(schema)
-        for field_path in inventory["semantic_guarded_combination"]:
-            with self.subTest(field_path=field_path):
-                baseline = {"target": "fixed", "peer": "alpha"}
-                combined = {"target": "changed", "peer": "beta"}
+    def test_t41_p2a_can_010_guarded_nodes_use_their_real_schema_constraint(self) -> None:
+        documents = schema_documents()
+        inventory = fingerprint_field_inventory(documents)
+        registry = offline_schema_registry()
+        guarded = [
+            record
+            for record in inventory
+            if record["classification"] in {"semantic_guarded", "validation_guard"}
+        ]
+        mechanism_map = load_json(
+            FIXTURES / "semantic-fingerprint-field-inventory.json"
+        )["guard_mechanism_tests"]
+        for record in guarded:
+            with self.subTest(field_path=record["field_path"]):
+                schema_id, _ = urldefrag(record["field_path"])
+                node = deepcopy(fingerprint_field_node(documents, record["field_path"]))
+                for reason in record["guard_reasons"]:
+                    self.assertIn(reason, mechanism_map)
+                if record["classification"] == "validation_guard":
+                    self.assertIn("validation_guard", record["schema_features"])
+                    continue
+                if not ({"const", "single_enum"} & set(record["guard_reasons"])):
+                    self.assertTrue(
+                        {
+                            "normalized_scope_context",
+                            "property_binding_context",
+                        }
+                        & set(record["guard_reasons"])
+                    )
+                    continue
+                validation_schema = {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": schema_id,
+                    **node,
+                }
+                baseline = _schema_example(
+                    node, schema_id=schema_id, documents=documents
+                )
+                if "const" in node:
+                    invalid = not baseline if isinstance(baseline, bool) else f"{baseline}-invalid"
+                else:
+                    invalid = f"{baseline}-invalid"
+                validator = Draft202012Validator(
+                    validation_schema,
+                    registry=registry,
+                    format_checker=FormatChecker(),
+                )
                 self.assertTrue(validator.is_valid(baseline))
-                self.assertFalse(validator.is_valid(combined))
-                first = _semantic_projection(
-                    baseline,
-                    schema=schema,
-                    documents={schema_id: schema},
-                    registry=test_registry(),
-                )
-                second = _semantic_projection(
-                    combined,
-                    schema=schema,
-                    documents={schema_id: schema},
-                    registry=test_registry(),
-                )
-                self.assertNotEqual(first, second)
+                self.assertFalse(validator.is_valid(invalid))
 
-    def test_t41_p2a_can_011_every_excluded_field_has_mutation_evidence(self) -> None:
-        inventory = fingerprint_field_inventory(schema_documents())
-        schema_id = "https://schemas.format-monograph.local/test/excluded-field.json"
-        schema = {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": schema_id,
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["target", "peer"],
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "x-semantic-fingerprint": "exclude",
-                },
-                "peer": {"type": "string"},
-            },
-        }
-        for field_path in inventory["fingerprint_excluded"]:
-            with self.subTest(field_path=field_path):
+        approval = deepcopy(self.artifacts["qa-approval-artifact"])
+        delegated_without_authorization = deepcopy(approval)
+        delegated_without_authorization["approver"]["actor_role"] = "delegated_publisher"
+        validator = Draft202012Validator(
+            load_artifact_schema("qa-approval-artifact"),
+            registry=offline_schema_registry(),
+            format_checker=FormatChecker(),
+        )
+        self.assertTrue(validator.is_valid(approval))
+        self.assertFalse(validator.is_valid(delegated_without_authorization))
+
+    def test_t41_p2a_can_011_actual_excluded_nodes_do_not_project_their_field(self) -> None:
+        documents = schema_documents()
+        inventory = fingerprint_field_inventory(documents)
+        excluded = [
+            record
+            for record in inventory
+            if record["classification"] == "fingerprint_excluded"
+        ]
+        for record in excluded:
+            with self.subTest(field_path=record["field_path"]):
+                schema_id, _ = urldefrag(record["field_path"])
+                container = deepcopy(
+                    fingerprint_field_node(documents, record["container_path"])
+                )
+                container["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+                container["$id"] = schema_id
+                node = fingerprint_field_node(documents, record["field_path"])
+                sample = _schema_example(
+                    node, schema_id=schema_id, documents=documents
+                )
+                registry = load_registry(version=record["schema_version"])
                 first = _semantic_projection(
-                    {"target": "alpha", "peer": "fixed"},
-                    schema=schema,
-                    documents={schema_id: schema},
-                    registry=test_registry(),
+                    {}, schema=container, documents=documents, registry=registry
                 )
                 second = _semantic_projection(
-                    {"target": "beta", "peer": "fixed"},
-                    schema=schema,
-                    documents={schema_id: schema},
-                    registry=test_registry(),
+                    {record["field_name"]: sample},
+                    schema=container,
+                    documents=documents,
+                    registry=registry,
                 )
                 self.assertEqual(first, second)
+
+    def test_t41_p2a_can_012_projection_mechanisms_are_real_and_closed(self) -> None:
+        expected = load_json(FIXTURES / "semantic-fingerprint-field-inventory.json")
+        inventory = fingerprint_field_inventory(schema_documents())
+        actual_features = sorted(
+            {feature for record in inventory for feature in record["schema_features"]}
+        )
+        self.assertEqual(
+            sorted(expected["projection_mechanism_tests"]), actual_features
+        )
+        self.assertTrue(any("ref" in record["schema_features"] for record in inventory))
+        self.assertTrue(any("one_of" in record["schema_features"] for record in inventory))
+        self.assertTrue(
+            any("generated_schema" in record["schema_features"] for record in inventory)
+        )
+        unsupported = deepcopy(schema_documents())
+        root_id = "https://schemas.format-monograph.local/v2/capability-snapshot.schema.json"
+        unsupported[root_id]["properties"]["unsupported_composition"] = {
+            "anyOf": [{"type": "string"}]
+        }
+        with self.assertRaisesRegex(CanonicalizationError, "does not support"):
+            fingerprint_field_inventory(unsupported)
+
+    def test_t41_p2a_can_013_key_artifact_end_to_end_mutations_are_real(self) -> None:
+        evidence = load_json(FIXTURES / "semantic-fingerprint-field-inventory.json")
+        inventory_paths = {
+            record["field_path"] for record in evidence["inventory"]
+        }
+        factories = {
+            "layered_v21": layered_v21,
+            "conflict_v21": conflict_v21,
+            "final_profile_v21": final_profile_v21,
+        }
+        for case in evidence["end_to_end_cases"]:
+            with self.subTest(case_id=case["case_id"]):
+                self.assertIn(case["schema_field_path"], inventory_paths)
+                if case["document_factory"] == "minimal_artifact":
+                    baseline = deepcopy(self.artifacts[case["artifact_kind"]])
+                    changed = deepcopy(baseline)
+                    _set_pointer(changed, case["instance_path"], case["replacement"])
+                    baseline = stamp_semantic_fingerprint(baseline)
+                    changed = stamp_semantic_fingerprint(changed)
+                    validate_artifact(baseline, features={"profile_v2_schema": True})
+                    validate_artifact(changed, features={"profile_v2_schema": True})
+                else:
+                    baseline = factories[case["document_factory"]]()
+                    changed = deepcopy(baseline)
+                    _set_pointer(changed, case["instance_path"], case["replacement"])
+                    baseline = stamp_test(baseline)
+                    changed = stamp_test(changed)
+                    _validate_artifact_for_test(
+                        baseline,
+                        registry=test_registry(),
+                        features={"profile_v2_schema": True},
+                    )
+                    _validate_artifact_for_test(
+                        changed,
+                        registry=test_registry(),
+                        features={"profile_v2_schema": True},
+                    )
+                self.assertNotEqual(
+                    baseline["semantic_fingerprint"], changed["semantic_fingerprint"]
+                )
 
 
 class ExactUnitTests(unittest.TestCase):
