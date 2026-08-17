@@ -1,0 +1,43 @@
+{
+  "schema_version": "2.0",
+  "registry_id": "registry:test-v041",
+  "registry_scope": "test",
+  "data_types": [
+    {"data_type_id": "decimal", "json_type": "string", "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"}
+  ],
+  "units": [
+    {"unit_id": "unit.pt", "dimension": "length", "symbol": "pt"}
+  ],
+  "normalizers": [
+    {"normalizer_id": "normalizer.decimal", "description": "Synthetic decimal normalizer contract."}
+  ],
+  "comparators": [
+    {"comparator_id": "comparator.decimal", "description": "Synthetic decimal comparator contract."}
+  ],
+  "executor_capabilities": [
+    {"capability_id": "executor.none", "description": "Synthetic non-executing capability."}
+  ],
+  "auditor_capabilities": [
+    {"capability_id": "auditor.content-integrity", "description": "Synthetic audit capability."}
+  ],
+  "properties": [
+    {
+      "property_id": "test.paragraph-font-size",
+      "test_only": true,
+      "semantic_object_kinds": ["paragraph"],
+      "allowed_layers": ["monograph_base"],
+      "data_type_id": "decimal",
+      "canonical_unit_id": "unit.pt",
+      "allowed_unit_ids": ["unit.pt"],
+      "comparison_precision": {"kind": "decimal_places", "value": 2},
+      "normalizer_id": "normalizer.decimal",
+      "comparator_id": "comparator.decimal",
+      "executor_capability_id": "executor.none",
+      "auditor_capability_id": "auditor.content-integrity",
+      "overridable": true,
+      "safety_invariant": false,
+      "qa_required": false,
+      "modes": ["report"]
+    }
+  ]
+}

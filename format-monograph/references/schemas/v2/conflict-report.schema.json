@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2/conflict-report.schema.json",
+  "title": "Format Monograph V2 Conflict Report",
+  "type": "object",
+  "additionalProperties": false,
+  "x-read-compatible-minor-versions": [],
+  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
+  "required": [
+    "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
+    "input_fingerprints", "semantic_fingerprint", "generated_at", "conflicts"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "conflict-report"},
+    "schema_version": {"const": "2.0"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "conflicts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/conflict"}
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "source_artifact_id", "value", "confidence"],
+      "properties": {
+        "candidate_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "source_artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+        "value": {"$ref": "common.schema.json#/$defs/typed_value"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conflict_id", "semantic_object_kind", "property_id", "scope", "reason", "status", "candidates"],
+      "properties": {
+        "conflict_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "semantic_object_kind": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$"},
+        "property_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}(?:\\.[a-z][a-z0-9-]{1,31})+$"},
+        "scope": {"$ref": "common.schema.json#/$defs/semantic_scope"},
+        "reason": {"type": "string", "enum": ["same_layer", "missing", "low_confidence", "scope_violation", "unclassified"]},
+        "status": {"type": "string", "enum": ["open", "blocked_qa", "resolved"]},
+        "candidates": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/candidate"}
+        },
+        "review_note": {"type": "string", "maxLength": 1000}
+      }
+    }
+  }
+}

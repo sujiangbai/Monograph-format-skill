@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2/execution-evidence-artifact.schema.json",
+  "title": "Format Monograph V0.4.1 Execution Evidence Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "x-read-compatible-minor-versions": [],
+  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
+  "required": [
+    "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
+    "input_fingerprints", "semantic_fingerprint", "evidence_id", "evidence_class",
+    "non_delivery", "evidence_scope", "producer", "tool_version", "contract_schema_version",
+    "capability_versions", "bindings", "measured_results", "outcome", "created_at",
+    "supersedes", "final_ready_eligible", "history"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "execution-evidence-artifact"},
+    "schema_version": {"const": "2.0"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "evidence_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "evidence_class": {"type": "string", "enum": ["diagnostic", "implementation_exit"]},
+    "non_delivery": {"const": true},
+    "evidence_scope": {"const": "v0.4.1"},
+    "producer": {"$ref": "#/$defs/producer"},
+    "tool_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-+][A-Za-z0-9.-]+)?$"},
+    "contract_schema_version": {"const": "2.0"},
+    "capability_versions": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "#/$defs/capability_version"}
+    },
+    "bindings": {"$ref": "common.schema.json#/$defs/artifact_bindings"},
+    "measured_results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/measured_result"}
+    },
+    "outcome": {"type": "string", "enum": ["pass", "fail"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "supersedes": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+    },
+    "final_ready_eligible": {"const": false},
+    "history": {
+      "type": "array", "minItems": 1,
+      "items": {"$ref": "common.schema.json#/$defs/history_entry"}
+    }
+  },
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_role"],
+      "properties": {
+        "actor_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "actor_role": {"type": "string", "enum": ["project_manager", "developer", "automated_qa"]}
+      }
+    },
+    "capability_version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "version"],
+      "properties": {
+        "capability_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}(?:\\.[a-z][a-z0-9-]{1,31})+$"},
+        "version": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "measured_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_id", "value", "status"],
+      "properties": {
+        "metric_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}(?:\\.[a-z][a-z0-9-]{1,31})+$"},
+        "value": {"$ref": "common.schema.json#/$defs/typed_value"},
+        "unit_id": {
+          "oneOf": [
+            {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"},
+            {"type": "null"}
+          ]
+        },
+        "status": {"type": "string", "enum": ["pass", "fail", "observed"]}
+      }
+    }
+  }
+}

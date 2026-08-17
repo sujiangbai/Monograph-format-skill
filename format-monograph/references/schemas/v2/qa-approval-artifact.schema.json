@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2/qa-approval-artifact.schema.json",
+  "title": "Format Monograph V2 QA Approval Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "x-read-compatible-minor-versions": [],
+  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
+  "required": [
+    "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
+    "input_fingerprints", "semantic_fingerprint", "approval_id", "approver",
+    "decision_type", "authority_scope", "decision", "reason", "created_at",
+    "bindings", "previous_approval_id"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "qa-approval-artifact"},
+    "schema_version": {"const": "2.0"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "approval_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "approver": {"$ref": "#/$defs/approver"},
+    "decision_type": {
+      "type": "string",
+      "enum": ["task_format_override", "structure_approval", "conflict_resolution", "object_exception", "keep_original"]
+    },
+    "authority_scope": {"$ref": "common.schema.json#/$defs/semantic_scope"},
+    "decision": {"type": "string", "enum": ["approve", "reject", "keep_original", "select_candidate"]},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "created_at": {"type": "string", "format": "date-time"},
+    "bindings": {"$ref": "#/$defs/approval_bindings"},
+    "previous_approval_id": {
+      "oneOf": [
+        {"$ref": "common.schema.json#/$defs/stable_id"},
+        {"type": "null"}
+      ]
+    }
+  },
+  "$defs": {
+    "approver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_role"],
+      "properties": {
+        "actor_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "actor_role": {"type": "string", "enum": ["user", "delegated_publisher"]},
+        "authorization_reference": {"$ref": "#/$defs/authorization_reference"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"actor_role": {"const": "delegated_publisher"}}, "required": ["actor_role"]},
+          "then": {"required": ["authorization_reference"]}
+        }
+      ]
+    },
+    "authorization_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id", "granted_by_actor_id", "authority_scope", "issued_at"],
+      "properties": {
+        "authorization_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "granted_by_actor_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "authority_scope": {"$ref": "common.schema.json#/$defs/semantic_scope"},
+        "issued_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "approval_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_fingerprint", "profile_fingerprint", "structure_fingerprint", "conflict_report_fingerprint"],
+      "properties": {
+        "input_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+        "profile_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+        "structure_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+        "conflict_report_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"}
+      }
+    }
+  }
+}

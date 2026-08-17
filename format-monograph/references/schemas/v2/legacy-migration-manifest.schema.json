@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2/legacy-migration-manifest.schema.json",
+  "title": "Format Monograph V2 Legacy Migration Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "x-read-compatible-minor-versions": [],
+  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
+  "required": [
+    "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
+    "input_fingerprints", "semantic_fingerprint", "legacy_input",
+    "activation", "source_schema_versions", "mappings"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "legacy-migration-manifest"},
+    "schema_version": {"const": "2.0"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "legacy_input": {"const": true},
+    "activation": {"const": "disabled"},
+    "source_schema_versions": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"type": "string", "enum": ["1.0", "1.1"]}
+    },
+    "mappings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/mapping"}
+    }
+  },
+  "$defs": {
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_rule_id", "disposition", "target_rule_ids", "rationale"],
+      "properties": {
+        "source_rule_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "disposition": {"type": "string", "enum": ["preserve", "modify", "move_layer", "split", "retire"]},
+        "target_rule_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+        },
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    }
+  }
+}

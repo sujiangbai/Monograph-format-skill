@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2/final-execution-profile.schema.json",
+  "title": "Format Monograph V2 Final Execution Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "x-read-compatible-minor-versions": [],
+  "x-semantic-fingerprint-excludes": ["created_at", "display_name", "absolute_path"],
+  "required": [
+    "artifact_kind", "schema_version", "artifact_id", "created_by_tool",
+    "input_fingerprints", "semantic_fingerprint", "task_id", "legacy_input",
+    "activation", "final_ready_eligible", "delivery_allowed", "safety_invariants",
+    "source_artifact_ids", "approval_artifact_ids", "conflict_report_ids", "properties"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "final-execution-profile"},
+    "schema_version": {"const": "2.0"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+    "task_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "legacy_input": {"const": false},
+    "activation": {"const": "disabled"},
+    "final_ready_eligible": {"const": false},
+    "delivery_allowed": {"const": false},
+    "safety_invariants": {"$ref": "common.schema.json#/$defs/safety_invariants"},
+    "source_artifact_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "common.schema.json#/$defs/artifact_id"}
+    },
+    "approval_artifact_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "common.schema.json#/$defs/artifact_id"}
+    },
+    "conflict_report_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "common.schema.json#/$defs/artifact_id"}
+    },
+    "properties": {
+      "type": "array",
+      "items": {"$ref": "property-catalog.generated.schema.json"}
+    }
+  }
+}
