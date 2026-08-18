@@ -18,10 +18,6 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from profile_v2_artifacts import (
     ArtifactContractError,
     ProfileV2DisabledError,
-    _schema_documents,
-    _test_schema_overrides,
-    _validate_artifact_for_test,
-    load_artifact_schema,
     profile_v2_composer_contract_enabled,
     validate_artifact,
 )
@@ -29,10 +25,7 @@ from profile_v2_authority import (
     authority_contract_fingerprint,
     authority_rank,
 )
-from profile_v2_canonical import (
-    _stamp_semantic_fingerprint_for_test,
-    stamp_semantic_fingerprint,
-)
+from profile_v2_canonical import stamp_semantic_fingerprint
 from profile_v2_registry import (
     RegistryContractError,
     load_registry,
@@ -145,48 +138,6 @@ def _production_adapter() -> _ContractAdapter:
         stamp=stamp_semantic_fingerprint,
         feature_enabled=profile_v2_composer_contract_enabled,
     )
-
-
-def _test_adapter(registry: dict[str, Any]) -> _ContractAdapter:
-    validate_registry_document(registry)
-    if registry.get("registry_scope") != "test":
-        raise ComposerContractError("Private composer test path requires registry_scope=test.")
-    documents = _schema_documents(_test_schema_overrides(registry))
-
-    def validate(document: dict[str, Any]) -> None:
-        _validate_artifact_for_test(
-            document,
-            registry=registry,
-            features={"profile_v2_schema": True},
-        )
-
-    def stamp(document: dict[str, Any]) -> dict[str, Any]:
-        schema = load_artifact_schema(
-            document["artifact_kind"], version=document["schema_version"]
-        )
-        return _stamp_semantic_fingerprint_for_test(
-            document,
-            schema=schema,
-            documents=documents,
-            registry=registry,
-        )
-
-    def feature_enabled(manifest: dict[str, Any] | None) -> bool:
-        if manifest is None:
-            return False
-        try:
-            validate(manifest)
-        except (ArtifactContractError, ValueError):
-            return False
-        features = manifest.get("features", {})
-        return bool(
-            manifest.get("artifact_kind") == "feature-activation-manifest"
-            and manifest.get("schema_version") == "2.1"
-            and features.get("profile_v2_schema") is True
-            and features.get("profile_v2_composer") is True
-        )
-
-    return _ContractAdapter(registry, validate, stamp, feature_enabled)
 
 
 def _validate_fingerprint(value: str, name: str) -> None:
@@ -711,29 +662,6 @@ def compose_profile(
     )
 
 
-def _compose_profile_for_test(
-    rule_assets: Sequence[dict[str, Any]],
-    feature_manifest: dict[str, Any],
-    *,
-    registry: dict[str, Any],
-    input_fingerprint: str,
-    structure_fingerprint: str,
-    artifact_id: str,
-    created_by_tool: dict[str, Any],
-    generated_at: str,
-) -> dict[str, Any]:
-    return _report_documents(
-        rule_assets,
-        feature_manifest,
-        adapter=_test_adapter(registry),
-        input_fingerprint=input_fingerprint,
-        structure_fingerprint=structure_fingerprint,
-        artifact_id=artifact_id,
-        created_by_tool=created_by_tool,
-        generated_at=generated_at,
-    )
-
-
 def _proposal_to_resolved(
     proposal: Mapping[str, Any], registry: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1182,27 +1110,6 @@ def apply_resolutions(
         report,
         approvals,
         adapter=_production_adapter(),
-        task_id=task_id,
-        task_fingerprint=task_fingerprint,
-        artifact_id=artifact_id,
-        created_by_tool=created_by_tool,
-    )
-
-
-def _apply_resolutions_for_test(
-    report: dict[str, Any],
-    approvals: Sequence[dict[str, Any]],
-    *,
-    registry: dict[str, Any],
-    task_id: str,
-    task_fingerprint: str,
-    artifact_id: str,
-    created_by_tool: dict[str, Any],
-) -> dict[str, Any]:
-    return _apply_report(
-        report,
-        approvals,
-        adapter=_test_adapter(registry),
         task_id=task_id,
         task_fingerprint=task_fingerprint,
         artifact_id=artifact_id,
