@@ -4,7 +4,7 @@
   "title": "Format Monograph V2.2 Layered Rule Intent Asset",
   "type": "object",
   "additionalProperties": false,
-  "required": ["artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version", "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint", "layer_kind", "can_override_safety_invariants", "activation", "asset_scope", "allowed_semantic_object_kinds", "rules"],
+  "required": ["artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version", "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint", "property_registry_binding", "layer_kind", "can_override_safety_invariants", "activation", "asset_scope", "allowed_semantic_object_kinds", "rules"],
   "properties": {
     "artifact_kind": {"const": "layered-rule-asset"},
     "schema_version": {"const": "2.2"},
@@ -14,6 +14,7 @@
     "created_by_tool": {"$ref": "../v2.3/common.schema.json#/$defs/created_by_tool"},
     "input_fingerprints": {"$ref": "../v2.3/common.schema.json#/$defs/input_fingerprints"},
     "semantic_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "property_registry_binding": {"$ref": "#/$defs/property_registry_binding"},
     "layer_kind": {"$ref": "../v2.3/common.schema.json#/$defs/layer_kind"},
     "can_override_safety_invariants": {"const": false},
     "activation": {"type": "string", "enum": ["draft", "approved", "disabled"]},
@@ -23,6 +24,14 @@
     "rules": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "rule_id", "items": {"$ref": "#/$defs/rule"}}
   },
   "$defs": {
+    "property_registry_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["registry_fingerprint", "required_completeness"],
+      "properties": {
+        "registry_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint"},
+        "required_completeness": {"type": "string", "enum": ["contract_core", "full_production"]}
+      }
+    },
     "rule": {
       "type": "object", "additionalProperties": false,
       "required": ["rule_id", "semantic_object_kind", "scope", "confidence", "status", "properties"],

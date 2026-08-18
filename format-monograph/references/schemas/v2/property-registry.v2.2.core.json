@@ -2,6 +2,7 @@
   "schema_version": "2.2",
   "registry_id": "registry:profile-v2-intent-contract-core",
   "registry_scope": "production",
+  "registry_completeness": "contract_core",
   "data_types": [
     {"data_type_id": "boolean", "json_type": "boolean"},
     {"data_type_id": "string", "json_type": "string", "max_length": 1000},

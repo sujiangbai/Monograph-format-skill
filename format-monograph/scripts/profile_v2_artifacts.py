@@ -887,6 +887,34 @@ def artifact_semantic_errors(
 
     if artifact_kind == "layered-rule-asset":
         layer_kind = document["layer_kind"]
+        if schema_version == "2.2":
+            from profile_v2_canonical import canonical_data_digest
+
+            registry_binding = document.get("property_registry_binding", {})
+            registry_fingerprint = registry_binding.get("registry_fingerprint")
+            expected_registry_fingerprint = canonical_data_digest(registry)
+            if registry_fingerprint != expected_registry_fingerprint:
+                errors.append(
+                    "Layered intent asset property registry fingerprint does not match "
+                    "the routed registry."
+                )
+            if registry_binding.get("required_completeness") != registry.get(
+                "registry_completeness"
+            ):
+                errors.append(
+                    "Layered intent asset registry completeness does not match the "
+                    "routed registry."
+                )
+            registry_inputs = [
+                item.get("fingerprint")
+                for item in document.get("input_fingerprints", [])
+                if item.get("role") == "property_registry"
+            ]
+            if registry_inputs != [registry_fingerprint]:
+                errors.append(
+                    "Layered intent asset requires exactly one matching property_registry "
+                    "input fingerprint."
+                )
         _keyed_collection_ids(
             document.get("rules", []), "rule_id", "layered rules", errors
         )
@@ -1295,6 +1323,174 @@ def artifact_semantic_errors(
                     "Failed or not-evaluated scope partitions require an unresolvable "
                     "blocker for the same key."
                 )
+        if schema_version == "2.3":
+            from profile_v2_canonical import canonical_data_digest
+            from profile_v2_scope import scope_equal, scope_subset
+
+            coverage = document.get("coverage_evidence", {})
+            expected_items = coverage.get("expected_bindings", [])
+            consumed_items = coverage.get("consumed_bindings", [])
+            expected_ids = _keyed_collection_ids(
+                expected_items, "binding_id", "coverage expected bindings", errors
+            )
+            consumed_ids = _keyed_collection_ids(
+                consumed_items, "binding_id", "coverage consumed bindings", errors
+            )
+            if coverage.get("expected_binding_count") != len(expected_items):
+                errors.append("Coverage expected_binding_count does not match its inventory.")
+            if coverage.get("consumed_binding_count") != len(consumed_items):
+                errors.append("Coverage consumed_binding_count does not match its inventory.")
+            if expected_ids != consumed_ids:
+                errors.append(
+                    "Coverage consumed bindings must close every and only expected binding."
+                )
+            ordered_expected = sorted(
+                expected_items, key=lambda item: item.get("binding_id", "")
+            )
+            ordered_consumed = sorted(
+                consumed_items, key=lambda item: item.get("binding_id", "")
+            )
+            if coverage.get("expected_inventory_digest") != canonical_data_digest(
+                ordered_expected
+            ):
+                errors.append("Coverage expected inventory digest is inconsistent.")
+            if coverage.get("consumed_inventory_digest") != canonical_data_digest(
+                ordered_consumed
+            ):
+                errors.append("Coverage consumed inventory digest is inconsistent.")
+
+            expected_by_id = {
+                item["binding_id"]: item
+                for item in expected_items
+                if isinstance(item, dict) and "binding_id" in item
+            }
+            artifact_fingerprints: dict[str, str] = {}
+            bound_rule_fingerprints = set(
+                bindings.get("rule_asset_fingerprints", [])
+            )
+            for item in expected_items:
+                key = item.get("key", {})
+                if (
+                    key.get("semantic_object_kind") != item.get("semantic_object_kind")
+                    or key.get("property_id") != item.get("property_id")
+                    or not scope_equal(
+                        key.get("normalized_scope", {}),
+                        item.get("normalized_scope", {}),
+                    )
+                ):
+                    errors.append(
+                        "Coverage expected binding key differs from its object/property/scope."
+                    )
+                source_id = item.get("source_artifact_id")
+                source_fingerprint = item.get("source_artifact_fingerprint")
+                previous = artifact_fingerprints.setdefault(source_id, source_fingerprint)
+                if previous != source_fingerprint:
+                    errors.append(
+                        "Coverage maps one source artifact to multiple fingerprints."
+                    )
+                if source_fingerprint not in bound_rule_fingerprints:
+                    errors.append(
+                        "Coverage expected binding references an unbound rule asset fingerprint."
+                    )
+
+            candidate_locations: dict[str, dict[str, set[str]]] = {}
+            proposals_by_key = composition_maps.get("proposed_resolutions", {})
+            for group in document.get("candidate_groups", []):
+                group_key = composition_key(group["key"], "Coverage candidate group")
+                proposal = proposals_by_key.get(group_key)
+                if proposal is None:
+                    errors.append("Coverage candidate group has no proposed resolution.")
+                    continue
+                for candidate in group.get("candidates", []):
+                    candidate_id = candidate["candidate_id"]
+                    expected = expected_by_id.get(candidate_id)
+                    if expected is None:
+                        errors.append("Coverage candidate has no expected binding source.")
+                        continue
+                    if (
+                        candidate["source"].get("source_artifact_id")
+                        != expected.get("source_artifact_id")
+                        or candidate["source"].get("source_rule_id")
+                        != expected.get("source_rule_id")
+                        or candidate.get("layer_kind") != expected.get("layer_kind")
+                        or candidate["property_binding"].get("property_id")
+                        != expected.get("property_id")
+                        or canonical_data_digest(candidate["property_binding"])
+                        != expected.get("property_binding_digest")
+                    ):
+                        errors.append(
+                            "Coverage candidate provenance/layer/property/binding is inconsistent."
+                        )
+                    if (
+                        group["key"].get("semantic_object_kind")
+                        != expected.get("semantic_object_kind")
+                        or group["key"].get("property_id")
+                        != expected.get("property_id")
+                        or not scope_subset(
+                            group["key"].get("normalized_scope", {}),
+                            expected.get("normalized_scope", {}),
+                        )
+                    ):
+                        errors.append(
+                            "Coverage candidate group key is outside its expected binding scope."
+                        )
+                    location = candidate_locations.setdefault(
+                        candidate_id,
+                        {"candidate_group_ids": set(), "proposed_resolution_ids": set()},
+                    )
+                    location["candidate_group_ids"].add(group["candidate_group_id"])
+                    location["proposed_resolution_ids"].add(
+                        proposal["proposed_resolution_id"]
+                    )
+
+            blocker_locations: dict[str, set[str]] = {}
+            for blocker in document.get("unresolvable_blockers", []):
+                for candidate_id in blocker.get("candidate_ids", []):
+                    if candidate_id not in expected_by_id:
+                        errors.append("Coverage blocker references an unexpected binding.")
+                    blocker_locations.setdefault(candidate_id, set()).add(
+                        blocker["blocker_id"]
+                    )
+            if set(candidate_locations) & set(blocker_locations):
+                errors.append(
+                    "Coverage binding cannot be both candidate/proposal and blocker consumed."
+                )
+            if any(len(values) != 1 for values in blocker_locations.values()):
+                errors.append("Coverage binding cannot be consumed by multiple blockers.")
+
+            computed_consumed: dict[str, dict[str, Any]] = {}
+            for binding_id in sorted(expected_by_id):
+                if binding_id in candidate_locations:
+                    location = candidate_locations[binding_id]
+                    computed_consumed[binding_id] = {
+                        "binding_id": binding_id,
+                        "classification": "candidate_proposal",
+                        "candidate_group_ids": sorted(location["candidate_group_ids"]),
+                        "proposed_resolution_ids": sorted(
+                            location["proposed_resolution_ids"]
+                        ),
+                        "blocker_ids": [],
+                    }
+                elif binding_id in blocker_locations:
+                    computed_consumed[binding_id] = {
+                        "binding_id": binding_id,
+                        "classification": "unresolvable_blocker",
+                        "candidate_group_ids": [],
+                        "proposed_resolution_ids": [],
+                        "blocker_ids": sorted(blocker_locations[binding_id]),
+                    }
+            if set(computed_consumed) != set(expected_by_id):
+                errors.append("Coverage has expected bindings with no consumption record.")
+            supplied_consumed = {
+                item["binding_id"]: item
+                for item in consumed_items
+                if isinstance(item, dict) and "binding_id" in item
+            }
+            if supplied_consumed != computed_consumed:
+                errors.append(
+                    "Coverage consumed classifications do not match report candidates, "
+                    "proposals, and blockers."
+                )
         fatal = bool(document.get("fatal_diagnostics"))
         unresolvable = bool(document.get("unresolvable_blockers"))
         approvals = bool(document.get("approval_required_conflicts"))
@@ -1489,6 +1685,8 @@ def _is_obvious_placeholder_fingerprint(value: Any) -> bool:
 def _validate_artifact_dag_with_reader(
     documents: list[dict[str, Any]],
     reader: Callable[[dict[str, Any]], ProfileReadResult],
+    *,
+    matrix_version: str = "1.0",
 ) -> DagValidationResult:
     """Validate H bindings and closure evidence without composing any result."""
 
@@ -1507,7 +1705,7 @@ def _validate_artifact_dag_with_reader(
             raise ArtifactDagError(f"Artifact DAG repeats artifact_id {artifact_id}.")
         if fingerprint in by_fingerprint:
             raise ArtifactDagError("Artifact DAG repeats a semantic fingerprint.")
-        if str(document.get("schema_version")) in {"2.1", "2.2"} and _is_obvious_placeholder_fingerprint(fingerprint):
+        if str(document.get("schema_version")) in {"2.1", "2.2", "2.3"} and _is_obvious_placeholder_fingerprint(fingerprint):
             raise ArtifactDagError("New artifact contracts reject placeholder semantic fingerprints.")
         by_id[artifact_id] = document
         by_fingerprint[fingerprint] = document
@@ -1540,7 +1738,9 @@ def _validate_artifact_dag_with_reader(
                 f"{expected_schema_version}."
             )
         if expected_registry_contract_version is not None:
-            target_route = route_artifact_contract(target)
+            target_route = route_artifact_contract(
+                target, matrix_version=matrix_version
+            )
             if target_route.registry_contract_version != expected_registry_contract_version:
                 raise ArtifactDagError(
                     f"{owner['artifact_id']} requires {expected_kind} registry contract "
@@ -1555,81 +1755,104 @@ def _validate_artifact_dag_with_reader(
     for document in validated:
         kind = document["artifact_kind"]
         version = str(document.get("schema_version"))
-        if kind == "conflict-report" and version == "2.2":
+        if kind == "conflict-report" and version in {"2.2", "2.3"}:
             reports[document["semantic_fingerprint"]] = document
             bindings = document["bindings"]
+            intent_route = version == "2.3"
+            feature_version = "2.2" if intent_route else "2.1"
+            registry_version = "2.2" if intent_route else "2.1"
+            asset_version = "2.2" if intent_route else "2.1"
             feature = require_internal(
                 document,
                 bindings["feature_activation_fingerprint"],
                 "feature-activation-manifest",
-                expected_schema_version="2.1",
-                expected_registry_contract_version="2.1",
+                expected_schema_version=feature_version,
+                expected_registry_contract_version=registry_version,
             )
             if (
                 feature.get("features", {}).get("profile_v2_schema") is not True
                 or feature.get("features", {}).get("profile_v2_composer") is not True
+                or (
+                    intent_route
+                    and feature.get("features", {}).get("monograph_base_v041")
+                    is not True
+                )
             ):
                 raise ArtifactDagError(
                     "Composition report requires profile_v2_schema=true and "
-                    "profile_v2_composer=true."
+                    "profile_v2_composer=true; intent reports also require "
+                    "monograph_base_v041=true."
                 )
             for fingerprint in bindings["rule_asset_fingerprints"]:
                 require_internal(
                     document,
                     fingerprint,
                     "layered-rule-asset",
-                    expected_schema_version="2.1",
-                    expected_registry_contract_version="2.1",
+                    expected_schema_version=asset_version,
+                    expected_registry_contract_version=registry_version,
                 )
-        elif kind == "qa-approval-artifact" and version == "2.1":
+        elif kind == "qa-approval-artifact" and version in {"2.1", "2.2"}:
             approvals[document["semantic_fingerprint"]] = document
+            intent_route = version == "2.2"
             require_internal(
                 document,
                 document["bindings"]["composition_report_fingerprint"],
                 "conflict-report",
-                expected_schema_version="2.2",
-                expected_registry_contract_version="2.1",
+                expected_schema_version="2.3" if intent_route else "2.2",
+                expected_registry_contract_version="2.2" if intent_route else "2.1",
             )
-        elif kind == "final-execution-profile" and version == "2.2":
+        elif kind == "final-execution-profile" and version in {"2.2", "2.3"}:
             finals.append(document)
             bindings = document["bindings"]
+            intent_route = version == "2.3"
+            report_version = "2.3" if intent_route else "2.2"
+            feature_version = "2.2" if intent_route else "2.1"
+            approval_version = "2.2" if intent_route else "2.1"
+            asset_version = "2.2" if intent_route else "2.1"
+            registry_version = "2.2" if intent_route else "2.1"
             require_internal(
                 document,
                 bindings["composition_report_fingerprint"],
                 "conflict-report",
-                expected_schema_version="2.2",
-                expected_registry_contract_version="2.1",
+                expected_schema_version=report_version,
+                expected_registry_contract_version=registry_version,
             )
             feature = require_internal(
                 document,
                 bindings["feature_activation_fingerprint"],
                 "feature-activation-manifest",
-                expected_schema_version="2.1",
-                expected_registry_contract_version="2.1",
+                expected_schema_version=feature_version,
+                expected_registry_contract_version=registry_version,
             )
             if (
                 feature.get("features", {}).get("profile_v2_schema") is not True
                 or feature.get("features", {}).get("profile_v2_composer") is not True
+                or (
+                    intent_route
+                    and feature.get("features", {}).get("monograph_base_v041")
+                    is not True
+                )
             ):
                 raise ArtifactDagError(
                     "Final profile requires profile_v2_schema=true and "
-                    "profile_v2_composer=true."
+                    "profile_v2_composer=true; intent profiles also require "
+                    "monograph_base_v041=true."
                 )
             for fingerprint in bindings["rule_asset_fingerprints"]:
                 require_internal(
                     document,
                     fingerprint,
                     "layered-rule-asset",
-                    expected_schema_version="2.1",
-                    expected_registry_contract_version="2.1",
+                    expected_schema_version=asset_version,
+                    expected_registry_contract_version=registry_version,
                 )
             for fingerprint in bindings["approval_fingerprints"]:
                 require_internal(
                     document,
                     fingerprint,
                     "qa-approval-artifact",
-                    expected_schema_version="2.1",
-                    expected_registry_contract_version="2.1",
+                    expected_schema_version=approval_version,
+                    expected_registry_contract_version=registry_version,
                 )
 
     from profile_v2_scope import normalized_property_scope_key, scope_equal
@@ -1797,6 +2020,19 @@ def validate_artifact_dag(
         lambda document: validate_artifact(
             document, features={"profile_v2_schema": True}
         ),
+        matrix_version="1.0",
+    )
+
+
+def validate_intent_artifact_dag_v041(
+    documents: list[dict[str, Any]],
+) -> DagValidationResult:
+    """Validate the explicit matrix-1.1 declaration-intent DAG without upgrading legacy routes."""
+
+    return _validate_artifact_dag_with_reader(
+        documents,
+        validate_intent_artifact_v041,
+        matrix_version="1.1",
     )
 
 

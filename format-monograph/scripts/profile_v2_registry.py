@@ -418,6 +418,44 @@ def validate_registry_document(
         raise RegistryContractError("Invalid property registry: " + " | ".join(errors))
 
 
+def registry_supports_property_binding_normalization(
+    registry: dict[str, Any],
+) -> bool:
+    """Return whether the registry structurally declares exact binding normalization."""
+
+    units = registry.get("units")
+    if not isinstance(units, list) or not units:
+        return False
+    required_unit_fields = {
+        "dimension",
+        "canonical_unit_id",
+        "to_canonical_numerator",
+        "to_canonical_denominator",
+    }
+    if any(
+        not isinstance(unit, dict) or not required_unit_fields.issubset(unit)
+        for unit in units
+    ):
+        return False
+    normalizer_ids = {
+        item.get("normalizer_id")
+        for item in registry.get("normalizers", [])
+        if isinstance(item, dict)
+    }
+    comparator_ids = {
+        item.get("comparator_id")
+        for item in registry.get("comparators", [])
+        if isinstance(item, dict)
+    }
+    return {
+        "normalizer.identity",
+        "normalizer.decimal",
+    }.issubset(normalizer_ids) and {
+        "comparator.exact",
+        "comparator.decimal",
+    }.issubset(comparator_ids)
+
+
 def load_registry(
     path: Path | None = None,
     *,

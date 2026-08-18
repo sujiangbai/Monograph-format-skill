@@ -8,7 +8,7 @@
     "artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version",
     "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint",
     "activation", "runtime_eligible", "final_ready_eligible", "delivery_allowed",
-    "generated_at", "bindings", "candidate_groups", "scope_partitions",
+    "generated_at", "bindings", "coverage_evidence", "candidate_groups", "scope_partitions",
     "proposed_resolutions", "fatal_diagnostics", "unresolvable_blockers",
     "approval_required_conflicts", "diagnostics", "proposal_status"
   ],
@@ -27,6 +27,7 @@
     "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
     "generated_at": {"type": "string", "format": "date-time", "x-semantic-fingerprint": "exclude"},
     "bindings": {"$ref": "common.schema.json#/$defs/composition_report_bindings"},
+    "coverage_evidence": {"$ref": "#/$defs/coverage_evidence"},
     "candidate_groups": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate_group_id", "items": {"$ref": "#/$defs/candidate_group"}},
     "scope_partitions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "partition_id", "items": {"$ref": "#/$defs/scope_partition"}},
     "proposed_resolutions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "proposed_resolution_id", "items": {"$ref": "#/$defs/proposed_resolution"}},
@@ -37,6 +38,71 @@
     "proposal_status": {"type": "string", "enum": ["fatal", "unresolvable", "awaiting_approval", "resolvable"]}
   },
   "$defs": {
+    "coverage_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "expected_binding_count", "consumed_binding_count",
+        "expected_inventory_digest", "consumed_inventory_digest",
+        "expected_bindings", "consumed_bindings"
+      ],
+      "properties": {
+        "expected_binding_count": {"type": "integer", "minimum": 1},
+        "consumed_binding_count": {"type": "integer", "minimum": 1},
+        "expected_inventory_digest": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+        "consumed_inventory_digest": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+        "expected_bindings": {
+          "type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "binding_id",
+          "minItems": 1, "items": {"$ref": "#/$defs/expected_binding"}
+        },
+        "consumed_bindings": {
+          "type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "binding_id",
+          "minItems": 1, "items": {"$ref": "#/$defs/consumed_binding"}
+        }
+      }
+    },
+    "expected_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "binding_id", "source_artifact_id", "source_artifact_fingerprint",
+        "source_rule_id", "layer_kind", "semantic_object_kind", "property_id",
+        "normalized_scope", "key", "property_binding_digest"
+      ],
+      "properties": {
+        "binding_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "source_artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+        "source_artifact_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"},
+        "source_rule_id": {"$ref": "common.schema.json#/$defs/rule_id"},
+        "layer_kind": {"$ref": "common.schema.json#/$defs/layer_kind"},
+        "semantic_object_kind": {"$ref": "common.schema.json#/$defs/semantic_object_kind"},
+        "property_id": {"$ref": "common.schema.json#/$defs/property_id"},
+        "normalized_scope": {"$ref": "common.schema.json#/$defs/normalized_scope"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "property_binding_digest": {"$ref": "common.schema.json#/$defs/semantic_fingerprint"}
+      }
+    },
+    "consumed_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "binding_id", "classification", "candidate_group_ids",
+        "proposed_resolution_ids", "blocker_ids"
+      ],
+      "properties": {
+        "binding_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "classification": {"type": "string", "enum": ["candidate_proposal", "unresolvable_blocker"]},
+        "candidate_group_ids": {
+          "type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+        },
+        "proposed_resolution_ids": {
+          "type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+        },
+        "blocker_ids": {
+          "type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+        }
+      }
+    },
     "candidate_group": {
       "type": "object", "additionalProperties": false,
       "required": ["candidate_group_id", "key", "candidates", "excluded_candidates"],

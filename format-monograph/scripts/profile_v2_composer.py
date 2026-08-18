@@ -28,6 +28,7 @@ from profile_v2_authority import (
     authority_rank,
 )
 from profile_v2_canonical import (
+    canonical_data_digest,
     canonical_intent_semantic_bytes_v041,
     stamp_intent_semantic_fingerprint_v041,
     stamp_semantic_fingerprint,
@@ -90,7 +91,8 @@ class IntentCompositionMetrics:
     proposal_count: int
     blocker_count: int
     max_candidates_per_key: int
-    max_partition_depth: int
+    max_partition_width: int
+    max_repartition_depth: int
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -133,6 +135,12 @@ class _Region:
     candidates: tuple[_Candidate, ...]
 
 
+@dataclass(frozen=True)
+class _ReportBuild:
+    report: dict[str, Any]
+    max_repartition_depth: int
+
+
 def _canonical_value(value: Any) -> Any:
     if isinstance(value, dict):
         normalized: dict[str, Any] = {}
@@ -164,7 +172,7 @@ def _canonical_bytes(value: Any) -> bytes:
 
 
 def _digest(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return canonical_data_digest(value)
 
 
 def _stable_id(prefix: str, value: Any) -> str:
@@ -290,8 +298,12 @@ def _region_sort_key(region: _Region) -> str:
 
 
 def _insert_candidate(
-    regions: Sequence[_Region], scope: dict[str, Any], candidate: _Candidate
-) -> tuple[list[_Region], dict[str, Any] | None]:
+    regions: Sequence[_Region],
+    scope: dict[str, Any],
+    candidate: _Candidate,
+    *,
+    _depth: int = 1,
+) -> tuple[list[_Region], dict[str, Any] | None, int]:
     ordered = sorted(regions, key=_region_sort_key)
     for index, region in enumerate(ordered):
         partition = scope_partition(region.scope, scope)
@@ -302,7 +314,14 @@ def _insert_candidate(
                 region.scope,
                 tuple(sorted((*region.candidates, candidate), key=_candidate_sort_key)),
             )
-            return sorted([*ordered[:index], replacement, *ordered[index + 1 :]], key=_region_sort_key), None
+            return (
+                sorted(
+                    [*ordered[:index], replacement, *ordered[index + 1 :]],
+                    key=_region_sort_key,
+                ),
+                None,
+                _depth,
+            )
         if partition["status"] == "partitioned":
             residuals = [_Region(item, region.candidates) for item in partition["residual_scopes"]]
             intersection = _Region(
@@ -310,43 +329,59 @@ def _insert_candidate(
                 tuple(sorted((*region.candidates, candidate), key=_candidate_sort_key)),
             )
             result = [*ordered[:index], *residuals, intersection, *ordered[index + 1 :]]
-            return sorted(result, key=_region_sort_key), None
+            return sorted(result, key=_region_sort_key), None, _depth
         if partition["evidence"]["relation"] == "strict_superset":
             reverse = scope_partition(scope, region.scope)
             if reverse["status"] != "partitioned":
-                return ordered, partition
+                return ordered, partition, _depth
             result = [*ordered[:index], *ordered[index + 1 :]]
             updated = _Region(
                 region.scope,
                 tuple(sorted((*region.candidates, candidate), key=_candidate_sort_key)),
             )
             result.append(updated)
+            maximum_depth = _depth
             for residual in reverse["residual_scopes"]:
-                result, blocked = _insert_candidate(result, residual, candidate)
+                result, blocked, residual_depth = _insert_candidate(
+                    result, residual, candidate, _depth=_depth + 1
+                )
+                maximum_depth = max(maximum_depth, residual_depth)
                 if blocked is not None:
-                    return ordered, blocked
-            return sorted(result, key=_region_sort_key), None
-        return ordered, partition
-    return sorted([*ordered, _Region(scope, (candidate,))], key=_region_sort_key), None
+                    return ordered, blocked, maximum_depth
+            return sorted(result, key=_region_sort_key), None, maximum_depth
+        return ordered, partition, _depth
+    return (
+        sorted([*ordered, _Region(scope, (candidate,))], key=_region_sort_key),
+        None,
+        _depth,
+    )
 
 
 def _partition_candidates(
     candidates: Sequence[_Candidate],
-) -> tuple[list[_Region], dict[str, Any] | None]:
+) -> tuple[list[_Region], dict[str, Any] | None, int]:
     regions: list[_Region] = []
+    maximum_depth = 0
     for candidate in sorted(candidates, key=_candidate_sort_key):
-        regions, blocked = _insert_candidate(regions, candidate.scope, candidate)
+        regions, blocked, insertion_depth = _insert_candidate(
+            regions, candidate.scope, candidate
+        )
+        maximum_depth = max(maximum_depth, insertion_depth)
         if blocked is not None:
-            return [], blocked
+            return [], blocked, maximum_depth
     for left_index, left in enumerate(regions):
         for right in regions[left_index + 1 :]:
             if not scope_disjoint(left.scope, right.scope):
-                return [], {
-                    "status": "blocked",
-                    "code": "partition_conservation_failure",
-                    "evidence": {"relation": "unknown"},
-                }
-    return regions, None
+                return (
+                    [],
+                    {
+                        "status": "blocked",
+                        "code": "partition_conservation_failure",
+                        "evidence": {"relation": "unknown"},
+                    },
+                    maximum_depth,
+                )
+    return regions, None, maximum_depth
 
 
 def _scope_components(candidates: Sequence[_Candidate]) -> list[list[_Candidate]]:
@@ -457,7 +492,7 @@ def _make_proposal(
     return proposal, value_groups, chosen_group
 
 
-def _report_documents(
+def _build_report_documents(
     rule_assets: Sequence[dict[str, Any]],
     feature_manifest: dict[str, Any],
     *,
@@ -468,7 +503,8 @@ def _report_documents(
     created_by_tool: dict[str, Any],
     generated_at: str,
     intent_contract: bool = False,
-) -> dict[str, Any]:
+    intent_expected_inventory: Mapping[str, dict[str, Any]] | None = None,
+) -> _ReportBuild:
     if not rule_assets:
         raise ComposerContractError("Composition requires at least one rule asset.")
     _validate_fingerprint(input_fingerprint, "input_fingerprint")
@@ -568,6 +604,7 @@ def _report_documents(
     proposed_resolutions: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     approval_conflicts: list[dict[str, Any]] = []
+    maximum_repartition_depth = 0
 
     for group_identity in sorted(candidates_by_property):
         candidates = candidates_by_property[group_identity]
@@ -578,7 +615,10 @@ def _report_documents(
         regions: list[_Region] = []
         successful_candidates: list[_Candidate] = []
         for component in _scope_components(candidates):
-            component_regions, blocked = _partition_candidates(component)
+            component_regions, blocked, component_depth = _partition_candidates(component)
+            maximum_repartition_depth = max(
+                maximum_repartition_depth, component_depth
+            )
             if blocked is None:
                 regions.extend(component_regions)
                 successful_candidates.extend(component)
@@ -703,6 +743,10 @@ def _report_documents(
         "proposal_status": "resolvable",
     }
     if intent_contract:
+        if intent_expected_inventory is None:
+            raise ComposerContractError(
+                "Intent report construction requires the approved binding inventory."
+            )
         report.update(
             {
                 "activation": "disabled",
@@ -711,10 +755,40 @@ def _report_documents(
                 "delivery_allowed": False,
             }
         )
+        report["coverage_evidence"] = _build_intent_coverage_evidence_v041(
+            intent_expected_inventory, report
+        )
     report["proposal_status"] = _report_status(report)
     stamped = adapter.stamp(report)
     adapter.validate(stamped)
-    return stamped
+    return _ReportBuild(stamped, maximum_repartition_depth)
+
+
+def _report_documents(
+    rule_assets: Sequence[dict[str, Any]],
+    feature_manifest: dict[str, Any],
+    *,
+    adapter: _ContractAdapter,
+    input_fingerprint: str,
+    structure_fingerprint: str,
+    artifact_id: str,
+    created_by_tool: dict[str, Any],
+    generated_at: str,
+    intent_contract: bool = False,
+) -> dict[str, Any]:
+    """Preserve the P2b-C report interface and its existing 2.2 output."""
+
+    return _build_report_documents(
+        rule_assets,
+        feature_manifest,
+        adapter=adapter,
+        input_fingerprint=input_fingerprint,
+        structure_fingerprint=structure_fingerprint,
+        artifact_id=artifact_id,
+        created_by_tool=created_by_tool,
+        generated_at=generated_at,
+        intent_contract=intent_contract,
+    ).report
 
 
 def compose_profile(
@@ -1201,15 +1275,16 @@ def apply_resolutions(
 
 def _intent_expected_inventory_v041(
     rule_assets: Sequence[dict[str, Any]], adapter: _ContractAdapter
-) -> tuple[dict[str, tuple[str, str, str]], set[tuple[str, str, str]]]:
+) -> tuple[dict[str, dict[str, Any]], set[tuple[str, str, str]]]:
     if not rule_assets:
         raise ComposerContractError("Intent composition requires a non-empty rule asset inventory.")
-    expected: dict[str, tuple[str, str, str]] = {}
+    expected: dict[str, dict[str, Any]] = {}
     keys: set[tuple[str, str, str]] = set()
     seen_assets: set[str] = set()
     seen_rules: set[tuple[str, str]] = set()
     for asset in sorted((deepcopy(item) for item in rule_assets), key=_canonical_bytes):
         adapter.validate(asset)
+        _validate_intent_asset_registry_binding_v041(asset, adapter.registry)
         asset_id = asset.get("artifact_id")
         if asset_id in seen_assets:
             raise ComposerContractError(f"Duplicate approved asset identity: {asset_id}")
@@ -1240,12 +1315,28 @@ def _intent_expected_inventory_v041(
                 binding = normalize_property_binding(raw_binding, adapter.registry)
                 identity = _candidate_identity(asset, rule, binding, scope)
                 candidate_id = _stable_id("candidate", identity)
-                source = (asset_id, rule["rule_id"], binding["property_id"])
-                if candidate_id in expected and expected[candidate_id] != source:
+                key = {
+                    "semantic_object_kind": rule["semantic_object_kind"],
+                    "property_id": binding["property_id"],
+                    "normalized_scope": deepcopy(scope),
+                }
+                entry = {
+                    "binding_id": candidate_id,
+                    "source_artifact_id": asset_id,
+                    "source_artifact_fingerprint": asset["semantic_fingerprint"],
+                    "source_rule_id": rule["rule_id"],
+                    "layer_kind": asset["layer_kind"],
+                    "semantic_object_kind": rule["semantic_object_kind"],
+                    "property_id": binding["property_id"],
+                    "normalized_scope": deepcopy(scope),
+                    "key": key,
+                    "property_binding_digest": canonical_data_digest(binding),
+                }
+                if candidate_id in expected and expected[candidate_id] != entry:
                     raise ComposerContractError(
                         f"Candidate identity collision: {candidate_id}"
                     )
-                expected[candidate_id] = source
+                expected[candidate_id] = entry
                 keys.add(
                     normalized_property_scope_key(
                         rule["semantic_object_kind"],
@@ -1258,57 +1349,193 @@ def _intent_expected_inventory_v041(
     return expected, keys
 
 
-def _intent_consumed_candidates_v041(
-    report: Mapping[str, Any],
-) -> dict[str, tuple[str, str, str]]:
-    consumed: dict[str, tuple[str, str, str]] = {}
-    for group in report.get("candidate_groups", []):
-        for candidate in group.get("candidates", []):
-            source = candidate["source"]
-            consumed[candidate["candidate_id"]] = (
-                source["source_artifact_id"],
-                source["source_rule_id"],
-                candidate["property_binding"]["property_id"],
+def _validate_intent_asset_registry_binding_v041(
+    asset: Mapping[str, Any], registry: Mapping[str, Any]
+) -> None:
+    binding = asset.get("property_registry_binding")
+    if not isinstance(binding, Mapping):
+        raise ComposerContractError("Intent rule asset lacks a property registry binding.")
+    actual_fingerprint = canonical_data_digest(registry)
+    if binding.get("registry_fingerprint") != actual_fingerprint:
+        raise ComposerContractError(
+            "Intent rule asset is bound to a different property registry fingerprint."
+        )
+    if binding.get("required_completeness") != registry.get(
+        "registry_completeness"
+    ):
+        raise ComposerContractError(
+            "Intent rule asset registry completeness does not match the loaded registry."
+        )
+    matching_inputs = [
+        item
+        for item in asset.get("input_fingerprints", [])
+        if item.get("role") == "property_registry"
+        and item.get("fingerprint") == actual_fingerprint
+    ]
+    if len(matching_inputs) != 1:
+        raise ComposerContractError(
+            "Intent rule asset must bind exactly one matching property registry input."
+        )
+
+
+def _composition_key_tuple(key: Mapping[str, Any]) -> tuple[str, str, str]:
+    return normalized_property_scope_key(
+        key["semantic_object_kind"],
+        key["property_id"],
+        key["normalized_scope"],
+    )
+
+
+def _build_intent_coverage_evidence_v041(
+    expected: Mapping[str, dict[str, Any]], report: Mapping[str, Any]
+) -> dict[str, Any]:
+    if not expected:
+        raise ComposerContractError("Intent coverage inventory cannot be empty.")
+    expected_ids = set(expected)
+    proposal_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for proposal in report.get("proposed_resolutions", []):
+        key = _composition_key_tuple(proposal["key"])
+        if key in proposal_by_key:
+            raise ComposerContractError(
+                "Intent report contains duplicate proposal composition keys."
             )
-    blocker_ids = {
+        proposal_by_key[key] = proposal
+
+    candidate_locations: dict[str, dict[str, set[str]]] = {}
+    for group in report.get("candidate_groups", []):
+        key = _composition_key_tuple(group["key"])
+        proposal = proposal_by_key.get(key)
+        if proposal is None:
+            raise ComposerContractError(
+                "Intent candidate group has no matching proposed resolution."
+            )
+        for candidate in group.get("candidates", []):
+            candidate_id = candidate["candidate_id"]
+            if candidate_id not in expected_ids:
+                raise ComposerContractError(
+                    f"Intent report contains a source-less candidate: {candidate_id}"
+                )
+            location = candidate_locations.setdefault(
+                candidate_id,
+                {"candidate_group_ids": set(), "proposed_resolution_ids": set()},
+            )
+            location["candidate_group_ids"].add(group["candidate_group_id"])
+            location["proposed_resolution_ids"].add(
+                proposal["proposed_resolution_id"]
+            )
+
+    blocker_locations: dict[str, set[str]] = {}
+    for blocker in report.get("unresolvable_blockers", []):
+        for candidate_id in blocker.get("candidate_ids", []):
+            if candidate_id not in expected_ids:
+                raise ComposerContractError(
+                    f"Intent blocker contains an unknown binding: {candidate_id}"
+                )
+            blocker_locations.setdefault(candidate_id, set()).add(
+                blocker["blocker_id"]
+            )
+    overlapping = set(candidate_locations) & set(blocker_locations)
+    if overlapping:
+        raise ComposerContractError(
+            "Intent binding cannot be consumed by candidate/proposal and blocker: "
+            f"{sorted(overlapping)}"
+        )
+    duplicate_blockers = sorted(
         candidate_id
-        for blocker in report.get("unresolvable_blockers", [])
-        for candidate_id in blocker.get("candidate_ids", [])
+        for candidate_id, blocker_ids in blocker_locations.items()
+        if len(blocker_ids) != 1
+    )
+    if duplicate_blockers:
+        raise ComposerContractError(
+            "Intent binding cannot be consumed by multiple blockers: "
+            f"{duplicate_blockers}"
+        )
+
+    consumed: list[dict[str, Any]] = []
+    for binding_id in sorted(expected):
+        if binding_id in candidate_locations:
+            location = candidate_locations[binding_id]
+            consumed.append(
+                {
+                    "binding_id": binding_id,
+                    "classification": "candidate_proposal",
+                    "candidate_group_ids": sorted(location["candidate_group_ids"]),
+                    "proposed_resolution_ids": sorted(
+                        location["proposed_resolution_ids"]
+                    ),
+                    "blocker_ids": [],
+                }
+            )
+        elif binding_id in blocker_locations:
+            consumed.append(
+                {
+                    "binding_id": binding_id,
+                    "classification": "unresolvable_blocker",
+                    "candidate_group_ids": [],
+                    "proposed_resolution_ids": [],
+                    "blocker_ids": sorted(blocker_locations[binding_id]),
+                }
+            )
+        else:
+            raise ComposerContractError(
+                f"Intent binding was not consumed: {binding_id}"
+            )
+
+    expected_items = [deepcopy(expected[item]) for item in sorted(expected)]
+    return {
+        "expected_binding_count": len(expected_items),
+        "consumed_binding_count": len(consumed),
+        "expected_inventory_digest": canonical_data_digest(expected_items),
+        "consumed_inventory_digest": canonical_data_digest(consumed),
+        "expected_bindings": expected_items,
+        "consumed_bindings": consumed,
     }
-    for candidate_id in blocker_ids:
-        consumed.setdefault(candidate_id, ("<blocked>", "<blocked>", "<blocked>"))
-    return consumed
+
+
+def _verify_intent_report_coverage_v041(report: Mapping[str, Any]) -> None:
+    coverage = report.get("coverage_evidence")
+    if not isinstance(coverage, Mapping):
+        raise ComposerContractError("Intent report lacks coverage evidence.")
+    expected_items = coverage.get("expected_bindings")
+    if not isinstance(expected_items, list) or not expected_items:
+        raise ComposerContractError("Intent report coverage inventory is empty.")
+    expected: dict[str, dict[str, Any]] = {}
+    for item in expected_items:
+        binding_id = item.get("binding_id") if isinstance(item, Mapping) else None
+        if not isinstance(binding_id, str) or binding_id in expected:
+            raise ComposerContractError(
+                "Intent report coverage contains a missing or duplicate binding ID."
+            )
+        expected[binding_id] = deepcopy(dict(item))
+    computed = _build_intent_coverage_evidence_v041(expected, report)
+    if canonical_data_digest(computed) != canonical_data_digest(dict(coverage)):
+        raise ComposerContractError(
+            "Intent report coverage counts, digests, or classifications are inconsistent."
+        )
 
 
 def _verify_intent_coverage_v041(
-    expected: Mapping[str, tuple[str, str, str]], report: Mapping[str, Any]
+    expected: Mapping[str, dict[str, Any]], report: Mapping[str, Any]
 ) -> None:
     if report.get("fatal_diagnostics"):
         raise ComposerContractError("Intent composition produced fatal diagnostics.")
-    if not (
-        report.get("candidate_groups")
-        or report.get("proposed_resolutions")
-        or report.get("unresolvable_blockers")
-    ):
-        raise ComposerContractError("Intent composition produced no candidate, proposal, or blocker.")
-    consumed = _intent_consumed_candidates_v041(report)
-    if set(consumed) != set(expected):
-        missing = sorted(set(expected) - set(consumed))
-        unknown = sorted(set(consumed) - set(expected))
+    _verify_intent_report_coverage_v041(report)
+    report_expected = {
+        item["binding_id"]: item
+        for item in report["coverage_evidence"]["expected_bindings"]
+    }
+    if canonical_data_digest(report_expected) != canonical_data_digest(dict(expected)):
         raise ComposerContractError(
-            f"Intent binding coverage is not conserved; missing={missing}, unknown={unknown}."
+            "Intent report coverage differs from the approved input inventory."
         )
-    for candidate_id, source in consumed.items():
-        if source[0] != "<blocked>" and source != expected[candidate_id]:
-            raise ComposerContractError(
-                f"Intent candidate provenance mismatch: {candidate_id}"
-            )
 
 
 def _intent_metrics_v041(
     rule_assets: Sequence[dict[str, Any]],
     expected_keys: set[tuple[str, str, str]],
     report: Mapping[str, Any],
+    *,
+    max_repartition_depth: int,
 ) -> IntentCompositionMetrics:
     groups = report.get("candidate_groups", [])
     partitions = report.get("scope_partitions", [])
@@ -1339,9 +1566,10 @@ def _intent_metrics_v041(
         max_candidates_per_key=max(
             (len(item.get("candidates", [])) for item in groups), default=0
         ),
-        max_partition_depth=max(
+        max_partition_width=max(
             (len(item.get("partition_scopes", [])) for item in partitions), default=0
         ),
+        max_repartition_depth=max_repartition_depth,
     )
 
 
@@ -1365,7 +1593,7 @@ def compose_intent_profile_v041(
             "must all be explicitly true in a valid 2.2 manifest."
         )
     expected, expected_keys = _intent_expected_inventory_v041(rule_assets, adapter)
-    report = _report_documents(
+    report_build = _build_report_documents(
         rule_assets,
         feature_manifest,
         adapter=adapter,
@@ -1375,10 +1603,17 @@ def compose_intent_profile_v041(
         created_by_tool=created_by_tool,
         generated_at=generated_at,
         intent_contract=True,
+        intent_expected_inventory=expected,
     )
+    report = report_build.report
     _verify_intent_coverage_v041(expected, report)
     metrics = (
-        _intent_metrics_v041(rule_assets, expected_keys, report)
+        _intent_metrics_v041(
+            rule_assets,
+            expected_keys,
+            report,
+            max_repartition_depth=report_build.max_repartition_depth,
+        )
         if include_metrics
         else None
     )
@@ -1412,6 +1647,8 @@ def apply_intent_resolutions_v041(
         != feature_manifest.get("semantic_fingerprint")
     ):
         raise ComposerContractError("Intent report is bound to a different feature manifest.")
+    adapter.validate(report)
+    _verify_intent_report_coverage_v041(report)
     result = _apply_report(
         report,
         approvals,

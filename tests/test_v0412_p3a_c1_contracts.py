@@ -12,22 +12,31 @@ from jsonschema import Draft202012Validator, FormatChecker
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "format-monograph" / "scripts"
 SCHEMAS = ROOT / "format-monograph" / "references" / "schemas" / "v2"
+V041_FIXTURES = ROOT / "tests" / "fixtures" / "v041"
 sys.path.insert(0, str(SCRIPTS))
 
 import profile_v2_artifacts as artifacts
 from profile_v2_artifacts import (
     ArtifactContractError,
+    ArtifactDagError,
     ArtifactRouteError,
     load_artifact_contract_matrix,
     load_artifact_schema,
     offline_schema_registry,
     route_artifact_contract,
     schema_documents,
+    validate_artifact_dag,
+    validate_intent_artifact_dag_v041,
     validate_intent_artifact_v041,
     verify_contract_matrix_alignment,
+    _topological_artifact_order,
 )
 from profile_v2_canonical import (
+    _compute_semantic_fingerprint_for_test,
+    _semantic_projection_for_test,
+    canonical_data_digest,
     canonical_intent_semantic_bytes_v041,
+    compute_semantic_fingerprint,
     compute_intent_semantic_fingerprint_v041,
     fingerprint_field_inventory,
     stamp_intent_semantic_fingerprint_v041,
@@ -40,6 +49,7 @@ from profile_v2_composer import (
     apply_resolutions,
     compose_intent_profile_v041,
     compose_profile,
+    _validate_intent_asset_registry_binding_v041,
 )
 from profile_v2_registry import (
     RegistryContractError,
@@ -123,6 +133,10 @@ def asset(
     document_id: str = "document:book",
 ) -> dict:
     rule_scope = scope(document_id)
+    registry = load_registry(
+        version="2.2", validation_context="declaration_intent"
+    )
+    registry_fingerprint = canonical_data_digest(registry)
     document = {
         "artifact_kind": "layered-rule-asset",
         "schema_version": "2.2",
@@ -135,9 +149,18 @@ def asset(
                 "input_id": f"input:asset-{label}",
                 "role": "rule_asset",
                 "fingerprint": digest(f"asset-source-{label}"),
-            }
+            },
+            {
+                "input_id": f"input:asset-registry-{label}",
+                "role": "property_registry",
+                "fingerprint": registry_fingerprint,
+            },
         ],
         "semantic_fingerprint": digest(f"unstamped-asset-{label}"),
+        "property_registry_binding": {
+            "registry_fingerprint": registry_fingerprint,
+            "required_completeness": "contract_core",
+        },
         "layer_kind": "monograph_base",
         "can_override_safety_invariants": False,
         "activation": activation,
@@ -161,6 +184,18 @@ def asset(
             }
         ],
     }
+    return stamp_intent_semantic_fingerprint_v041(document)
+
+
+def scoped_asset(label: str, selectors: list[dict[str, object]]) -> dict:
+    document = asset(label)
+    scoped = {
+        "selectors": deepcopy(selectors),
+        "exclusions": [],
+        "mutually_exclusive_conditions": [],
+    }
+    document["asset_scope"] = deepcopy(scoped)
+    document["rules"][0]["scope"] = deepcopy(scoped)
     return stamp_intent_semantic_fingerprint_v041(document)
 
 
@@ -517,20 +552,144 @@ class P3aC1ContractTests(unittest.TestCase):
         no_bindings = asset(); no_bindings["rules"][0]["properties"] = []; no_bindings = stamp_intent_semantic_fingerprint_v041(no_bindings); checks.append(_raises(lambda: compose([no_bindings]), (ComposerContractError, ArtifactContractError)))
         bad_source = asset(); bad_source["semantic_fingerprint"] = digest("bad"); checks.append(_raises(lambda: compose([bad_source]), ArtifactContractError))
         two = compose([asset("one", document_id="document:one"), asset("two", document_id="document:two")], metrics=True)
+        coverage = result.report["coverage_evidence"]
         checks.extend([
             two.metrics.input_asset_count == 2,
             two.metrics.input_binding_count == 2,
             two.metrics.candidate_count == 2,
             two.metrics.expected_key_count == 2,
-            len(two.report["scope_partitions"]) == 2,
-            all(group["candidates"] for group in two.report["candidate_groups"]),
-            all(proposal["candidate_chain"] for proposal in two.report["proposed_resolutions"]),
-            result.report["fatal_diagnostics"] == [],
+            coverage["expected_binding_count"] == 1,
+            coverage["consumed_binding_count"] == 1,
+            coverage["expected_inventory_digest"]
+            == canonical_data_digest(coverage["expected_bindings"]),
+            coverage["consumed_inventory_digest"]
+            == canonical_data_digest(coverage["consumed_bindings"]),
         ])
         self.assertEqual(24, len(checks))
         for index, condition in enumerate(checks, 1):
             with self.subTest(assertion_id=f"T412-C1-COVER-{index:03d}"):
                 self._record(f"T412-C1-COVER-{index:03d}", condition)
+
+    def test_coverage_evidence_is_revalidated_before_application(self) -> None:
+        manifest = feature()
+        original = compose([asset()], manifest).report
+
+        def rejected(mutated: dict) -> bool:
+            try:
+                stamped = stamp_intent_semantic_fingerprint_v041(mutated)
+            except Exception:
+                return True
+            return _raises(
+                lambda: apply_intent_resolutions_v041(
+                    stamped,
+                    [],
+                    manifest,
+                    task_id="task:coverage-negative",
+                    task_fingerprint=digest("coverage-negative"),
+                    artifact_id="final-execution-profile:coverage-negative",
+                    created_by_tool=tool(),
+                ),
+                (ArtifactContractError, ComposerContractError),
+            )
+
+        mutations: list[tuple[str, dict]] = []
+        emptied = deepcopy(original)
+        emptied["candidate_groups"] = []
+        emptied["scope_partitions"] = []
+        emptied["proposed_resolutions"] = []
+        mutations.append(("empty-report-arrays", emptied))
+
+        empty_expected = deepcopy(original)
+        empty_expected["coverage_evidence"]["expected_bindings"] = []
+        empty_expected["coverage_evidence"]["expected_binding_count"] = 0
+        empty_expected["coverage_evidence"]["expected_inventory_digest"] = canonical_data_digest([])
+        mutations.append(("empty-expected-inventory", empty_expected))
+
+        empty_consumed = deepcopy(original)
+        empty_consumed["coverage_evidence"]["consumed_bindings"] = []
+        empty_consumed["coverage_evidence"]["consumed_binding_count"] = 0
+        empty_consumed["coverage_evidence"]["consumed_inventory_digest"] = canonical_data_digest([])
+        mutations.append(("missing-consumption", empty_consumed))
+
+        forged_count = deepcopy(original)
+        forged_count["coverage_evidence"]["expected_binding_count"] += 1
+        mutations.append(("forged-count", forged_count))
+
+        forged_digest = deepcopy(original)
+        forged_digest["coverage_evidence"]["consumed_inventory_digest"] = digest(
+            "forged-consumption"
+        )
+        mutations.append(("forged-digest", forged_digest))
+
+        wrong_source = deepcopy(original)
+        expected = wrong_source["coverage_evidence"]["expected_bindings"][0]
+        expected["source_rule_id"] = "RULE-WRONG-01"
+        wrong_source["coverage_evidence"]["expected_inventory_digest"] = canonical_data_digest(
+            wrong_source["coverage_evidence"]["expected_bindings"]
+        )
+        mutations.append(("source-rule-mismatch", wrong_source))
+
+        duplicate_consumption = deepcopy(original)
+        duplicate = deepcopy(
+            duplicate_consumption["coverage_evidence"]["consumed_bindings"][0]
+        )
+        duplicate["classification"] = "unresolvable_blocker"
+        duplicate["candidate_group_ids"] = []
+        duplicate["proposed_resolution_ids"] = []
+        duplicate["blocker_ids"] = ["blocker:duplicate-consumption"]
+        duplicate_consumption["coverage_evidence"]["consumed_bindings"].append(
+            duplicate
+        )
+        duplicate_consumption["coverage_evidence"]["consumed_binding_count"] = 2
+        duplicate_consumption["coverage_evidence"]["consumed_inventory_digest"] = canonical_data_digest(
+            duplicate_consumption["coverage_evidence"]["consumed_bindings"]
+        )
+        mutations.append(("duplicate-classification", duplicate_consumption))
+
+        multi_classified = deepcopy(original)
+        group = multi_classified["candidate_groups"][0]
+        candidate_id = group["candidates"][0]["candidate_id"]
+        multi_classified["unresolvable_blockers"] = [
+            {
+                "blocker_id": "blocker:coverage-overlap",
+                "category": "unknown_overlap",
+                "key": deepcopy(group["key"]),
+                "reason_code": "SCOPE-BLOCKED-COVERAGE",
+                "candidate_ids": [candidate_id],
+            }
+        ]
+        multi_classified["proposal_status"] = "unresolvable"
+        mutations.append(("candidate-and-blocker", multi_classified))
+
+        for name, mutated in mutations:
+            with self.subTest(name=name):
+                self.assertTrue(rejected(mutated), name)
+
+    def test_intent_assets_bind_exact_registry_maturity_and_fingerprint(self) -> None:
+        core = load_registry(
+            version="2.2", validation_context="declaration_intent"
+        )
+        bound = asset("registry-bound")
+        _validate_intent_asset_registry_binding_v041(bound, core)
+
+        full = deepcopy(core)
+        full["registry_completeness"] = "full_production"
+        self.assertNotEqual(canonical_data_digest(core), canonical_data_digest(full))
+        with self.assertRaisesRegex(
+            ComposerContractError, "different property registry fingerprint"
+        ):
+            _validate_intent_asset_registry_binding_v041(bound, full)
+
+        wrong_maturity = deepcopy(bound)
+        wrong_maturity["property_registry_binding"]["required_completeness"] = (
+            "full_production"
+        )
+        wrong_maturity = stamp_intent_semantic_fingerprint_v041(wrong_maturity)
+        with self.assertRaises(ArtifactContractError):
+            validate_intent_artifact_v041(wrong_maturity)
+
+        self.assertEqual("contract_core", core["registry_completeness"])
+        self.assertEqual("production", core["registry_scope"])
 
     def test_fingerprint_assertions(self) -> None:
         first = compose([asset()], metrics=False)
@@ -586,6 +745,120 @@ class P3aC1ContractTests(unittest.TestCase):
             with self.subTest(assertion_id=f"T412-C1-FP-{index:03d}"):
                 self._record(f"T412-C1-FP-{index:03d}", condition)
 
+    def test_registry_22_property_binding_normalization_is_capability_driven(self) -> None:
+        registry = load_registry(
+            version="2.2", validation_context="declaration_intent"
+        )
+        registry = deepcopy(registry)
+        registry["registry_id"] = "registry:decimal-normalization-test"
+        registry["registry_scope"] = "test"
+        safety = next(
+            item for item in registry["properties"] if item["safety_invariant"]
+        )
+        safety["property_id"] = "test.safety-author-content-immutable"
+        safety["test_only"] = True
+        for capability in registry["executor_capabilities"]:
+            if capability["capability_id"] == "executor.intent-reserved":
+                capability["availability"] = "implemented"
+        for capability in registry["auditor_capabilities"]:
+            if capability["capability_id"] == "auditor.intent-reserved":
+                capability["availability"] = "implemented"
+        probe = next(
+            item
+            for item in registry["properties"]
+            if not item["safety_invariant"]
+        )
+        probe.update(
+            {
+                "property_id": "test.decimal-normalization-probe",
+                "test_only": True,
+                "data_type_id": "decimal",
+                "canonical_unit_id": "unit.pt",
+                "allowed_unit_ids": ["unit.mm", "unit.pt"],
+                "comparison_precision": {"kind": "decimal_places", "value": 2},
+                "normalizer_id": "normalizer.decimal",
+                "comparator_id": "comparator.decimal",
+                "modes": ["automatic"],
+                "value_constraints": {"enum_values": [], "numeric_range": None},
+            }
+        )
+        validate_registry_document(registry)
+        catalog = build_property_catalog_schema(registry)
+        typed = build_typed_value_schema(registry)
+        root_schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://schemas.format-monograph.local/tests/decimal-binding.json",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["binding"],
+            "properties": {"binding": {"$ref": catalog["$id"]}},
+        }
+        documents = schema_documents(matrix_version="1.1")
+        documents.update(
+            {
+                root_schema["$id"]: root_schema,
+                catalog["$id"]: catalog,
+                typed["$id"]: typed,
+            }
+        )
+        millimetres = {
+            "binding": {
+                "property_id": "test.decimal-normalization-probe",
+                "value": {"type": "decimal", "value": "12.7"},
+                "unit_id": "unit.mm",
+                "mode": "automatic",
+            }
+        }
+        points = {
+            "binding": {
+                "property_id": "test.decimal-normalization-probe",
+                "value": {"type": "decimal", "value": "36.00"},
+                "unit_id": "unit.pt",
+                "mode": "automatic",
+            }
+        }
+        self.assertEqual(
+            _semantic_projection_for_test(
+                millimetres,
+                schema=root_schema,
+                documents=documents,
+                registry=registry,
+            ),
+            _semantic_projection_for_test(
+                points,
+                schema=root_schema,
+                documents=documents,
+                registry=registry,
+            ),
+        )
+        self.assertEqual(
+            _compute_semantic_fingerprint_for_test(
+                millimetres,
+                schema=root_schema,
+                documents=documents,
+                registry=registry,
+            ),
+            _compute_semantic_fingerprint_for_test(
+                points,
+                schema=root_schema,
+                documents=documents,
+                registry=registry,
+            ),
+        )
+
+        old_artifacts = json.loads(
+            (V041_FIXTURES / "minimal-artifacts.json").read_text(encoding="utf-8")
+        )
+        golden = json.loads(
+            (V041_FIXTURES / "canonical-golden-vectors.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            golden["feature_activation_fingerprint"],
+            compute_semantic_fingerprint(old_artifacts["feature-activation-manifest"]),
+        )
+
     def test_compatibility_assertions(self) -> None:
         old = load_artifact_contract_matrix("1.0")
         new = load_artifact_contract_matrix("1.1")
@@ -622,6 +895,69 @@ class P3aC1ContractTests(unittest.TestCase):
             with self.subTest(assertion_id=f"T412-C1-COMPAT-{index:03d}"):
                 self._record(f"T412-C1-COMPAT-{index:03d}", condition)
 
+    def test_explicit_intent_dag_validates_matrix_11_without_upgrading_legacy(self) -> None:
+        manifest = feature()
+        source_asset = asset("dag")
+        report = compose([source_asset], manifest).report
+        final = apply_intent_resolutions_v041(
+            report,
+            [],
+            manifest,
+            task_id="task:dag",
+            task_fingerprint=digest("dag-task"),
+            artifact_id="final-execution-profile:dag",
+            created_by_tool=tool(),
+        ).final_profile
+        documents = [source_asset, manifest, report, final]
+        dag = validate_intent_artifact_dag_v041(documents)
+        self.assertEqual(4, dag.artifact_count)
+        self.assertFalse(dag.runtime_eligible)
+        self.assertLess(
+            dag.topological_order.index(source_asset["artifact_id"]),
+            dag.topological_order.index(report["artifact_id"]),
+        )
+        self.assertLess(
+            dag.topological_order.index(report["artifact_id"]),
+            dag.topological_order.index(final["artifact_id"]),
+        )
+        with self.assertRaises((ArtifactDagError, ArtifactRouteError)):
+            validate_artifact_dag(documents)
+        with self.assertRaises(ArtifactDagError):
+            validate_intent_artifact_dag_v041([manifest, report, final])
+
+        approval_report = compose([asset("dag-approval", confidence="medium")], manifest).report
+        decision = approval(approval_report)
+        approved_final = apply_intent_resolutions_v041(
+            approval_report,
+            [decision],
+            manifest,
+            task_id="task:dag-approval",
+            task_fingerprint=digest("dag-approval-task"),
+            artifact_id="final-execution-profile:dag-approval",
+            created_by_tool=tool(),
+        ).final_profile
+        approval_dag = validate_intent_artifact_dag_v041(
+            [asset("dag-approval", confidence="medium"), manifest, approval_report, decision, approved_final]
+        )
+        self.assertFalse(approval_dag.runtime_eligible)
+        self.assertLess(
+            approval_dag.topological_order.index(approval_report["artifact_id"]),
+            approval_dag.topological_order.index(decision["artifact_id"]),
+        )
+        self.assertLess(
+            approval_dag.topological_order.index(decision["artifact_id"]),
+            approval_dag.topological_order.index(approved_final["artifact_id"]),
+        )
+
+        wrong_approval = deepcopy(decision)
+        wrong_approval["schema_version"] = "2.1"
+        with self.assertRaises((ArtifactContractError, ArtifactDagError, ArtifactRouteError)):
+            validate_intent_artifact_dag_v041(
+                [asset("dag-approval", confidence="medium"), manifest, approval_report, wrong_approval, approved_final]
+            )
+        with self.assertRaises(ArtifactDagError):
+            _topological_artifact_order({"artifact:a": {"artifact:b"}, "artifact:b": {"artifact:a"}})
+
     def test_metrics_assertions(self) -> None:
         without = compose([asset()], metrics=False)
         with_metrics = compose([asset()], metrics=True)
@@ -645,7 +981,9 @@ class P3aC1ContractTests(unittest.TestCase):
             metrics.input_binding_count == 1,
             metrics.candidate_count == 1,
             metrics.expected_key_count == 1,
-            metrics.max_candidates_per_key == 1,
+            metrics.max_candidates_per_key == 1
+            and metrics.max_partition_width == 1
+            and metrics.max_repartition_depth == 1,
             without.report == with_metrics.report,
             without.report["semantic_fingerprint"] == with_metrics.report["semantic_fingerprint"],
             applied.metrics == metrics and applied.final_profile["runtime_eligible"] is False,
@@ -653,6 +991,41 @@ class P3aC1ContractTests(unittest.TestCase):
         for index, condition in enumerate(checks, 1):
             with self.subTest(assertion_id=f"T412-C1-METRICS-{index:03d}"):
                 self._record(f"T412-C1-METRICS-{index:03d}", condition)
+
+    def test_partition_width_and_repartition_depth_are_distinct_metrics(self) -> None:
+        broad = [
+            {"selector_kind": "document", "selector_ids": ["document:book"]}
+        ]
+        middle = [
+            *broad,
+            {"selector_kind": "chapter", "selector_ids": ["chapter:one"]},
+        ]
+        narrow = [
+            *middle,
+            {
+                "selector_kind": "semantic_role",
+                "selector_ids": ["role:heading"],
+            },
+        ]
+        result = compose(
+            [
+                scoped_asset("narrow86", narrow),
+                scoped_asset("mid69", middle),
+                scoped_asset("broad59", broad),
+            ],
+            metrics=True,
+        )
+        self.assertEqual(3, result.metrics.max_partition_width)
+        self.assertEqual(2, result.metrics.max_repartition_depth)
+        self.assertNotEqual(
+            result.metrics.max_partition_width,
+            result.metrics.max_repartition_depth,
+        )
+        self.assertNotIn("max_partition_depth", result.metrics.as_dict())
+        self.assertNotIn("metrics", result.report)
+        self.assertNotIn(
+            b"metrics", canonical_intent_semantic_bytes_v041(result.report)
+        )
 
 
 def _raises(callable_value, error_type=Exception) -> bool:
