@@ -39,6 +39,16 @@ from profile_v2_scope import (  # noqa: E402
 
 SEED = 0x04115005
 GENERATED_ITERATIONS = 2048
+FAMILY_CASES = 512
+FAMILY_SPECS = {
+    "expressible_exclusions": (0x04115101, FAMILY_CASES),
+    "conditions": (0x04115102, FAMILY_CASES),
+    "crossing": (0x04115103, FAMILY_CASES),
+    "strict_superset": (0x04115104, FAMILY_CASES),
+    "partial_blocked": (0x04115105, FAMILY_CASES),
+    "partial_disjoint": (0x04115106, FAMILY_CASES),
+    "malformed": (0x04115107, FAMILY_CASES),
+}
 KINDS = (
     "document",
     "section",
@@ -162,6 +172,135 @@ def _oracle_partition_sets(
     return source_members, cut_members, residual_members
 
 
+def _oracle_pair_members(
+    source: dict[str, object], cut: dict[str, object]
+) -> tuple[set[tuple[object, ...]], set[tuple[object, ...]]]:
+    kinds, atoms = _oracle_universe([source, cut])
+    return (
+        _oracle_members(source, kinds, atoms),
+        _oracle_members(cut, kinds, atoms),
+    )
+
+
+def _oracle_partial_kinds(scope: dict[str, object]) -> set[str]:
+    selectors = _oracle_maps(scope, "selectors")
+    exclusions = _oracle_maps(scope, "exclusions")
+    return {
+        kind
+        for kind in selectors.keys() & exclusions.keys()
+        if selectors[kind] & exclusions[kind]
+    }
+
+
+def _oracle_safe_disjoint_axis(
+    source: dict[str, object], cut: dict[str, object], unsafe_kinds: set[str]
+) -> bool:
+    kinds, atoms = _oracle_universe([source, cut])
+    source_selectors = _oracle_maps(source, "selectors")
+    cut_selectors = _oracle_maps(cut, "selectors")
+    source_exclusions = _oracle_maps(source, "exclusions")
+    cut_exclusions = _oracle_maps(cut, "exclusions")
+    for kind in kinds:
+        if kind in unsafe_kinds:
+            continue
+        source_axis = {
+            atom
+            for atom in atoms[kind]
+            if (kind not in source_selectors or atom in source_selectors[kind])
+            and atom not in source_exclusions.get(kind, set())
+        }
+        cut_axis = {
+            atom
+            for atom in atoms[kind]
+            if (kind not in cut_selectors or atom in cut_selectors[kind])
+            and atom not in cut_exclusions.get(kind, set())
+        }
+        if source_axis.isdisjoint(cut_axis):
+            return True
+    return False
+
+
+def _strict_subset_precondition(
+    source: dict[str, object], cut: dict[str, object]
+) -> bool:
+    if source.get("mutually_exclusive_conditions") or cut.get(
+        "mutually_exclusive_conditions"
+    ):
+        return False
+    if _oracle_partial_kinds(source) or _oracle_partial_kinds(cut):
+        return False
+    source_members, cut_members = _oracle_pair_members(source, cut)
+    return bool(cut_members) and cut_members < source_members
+
+
+def _malformed_reason_matches(scope: dict[str, object], reason: str) -> bool:
+    selectors = scope.get("selectors")
+    if reason == "bad_scope_id":
+        return isinstance(scope.get("scope_id"), str) and scope["scope_id"] == (
+            "scope:" + ("0" * 64)
+        )
+    if not isinstance(selectors, list):
+        return False
+    if reason == "duplicate_selector_id":
+        return any(
+            isinstance(item, dict)
+            and isinstance(item.get("selector_ids"), list)
+            and len(item["selector_ids"]) != len(set(item["selector_ids"]))
+            for item in selectors
+        )
+    if reason == "empty_selector_ids":
+        return any(
+            isinstance(item, dict) and item.get("selector_ids") == []
+            for item in selectors
+        )
+    if reason == "duplicate_selector_kind":
+        kinds = [
+            item.get("selector_kind") for item in selectors if isinstance(item, dict)
+        ]
+        return len(kinds) != len(set(kinds))
+    return False
+
+
+def _family_precondition(
+    family: str,
+    source: dict[str, object],
+    cut: dict[str, object],
+    metadata: dict[str, str],
+) -> bool:
+    if family == "malformed":
+        return _malformed_reason_matches(source, metadata["malformed_reason"])
+    source_members, cut_members = _oracle_pair_members(source, cut)
+    partial_kinds = _oracle_partial_kinds(source) | _oracle_partial_kinds(cut)
+    safe_disjoint = _oracle_safe_disjoint_axis(source, cut, partial_kinds)
+    if family == "expressible_exclusions":
+        return (
+            bool(source.get("exclusions") or cut.get("exclusions"))
+            and not partial_kinds
+            and bool(cut_members)
+            and cut_members < source_members
+        )
+    if family == "conditions":
+        return (
+            bool(source.get("mutually_exclusive_conditions") or cut.get("mutually_exclusive_conditions"))
+            and bool(source_members & cut_members)
+            and source_members != cut_members
+        )
+    if family == "crossing":
+        return (
+            bool(source_members & cut_members)
+            and not source_members <= cut_members
+            and not cut_members <= source_members
+            and not partial_kinds
+        )
+    if family == "strict_superset":
+        return bool(source_members) and source_members < cut_members and not partial_kinds
+    if family == "partial_blocked":
+        return bool(partial_kinds) and not safe_disjoint and bool(source_members & cut_members)
+    if family == "partial_disjoint":
+        return bool(partial_kinds) and safe_disjoint and source_members.isdisjoint(cut_members)
+    raise AssertionError(f"Unknown generated family: {family}")
+
+
 def _generated_scope_pairs() -> tuple[tuple[dict[str, object], dict[str, object]], ...]:
     rng = random.Random(SEED)
     pairs = []
@@ -191,6 +330,255 @@ def _generated_scope_pairs() -> tuple[tuple[dict[str, object], dict[str, object]
     return tuple(pairs)
 
 
+@lru_cache(maxsize=None)
+def _generated_family_cases(
+    family: str,
+) -> tuple[tuple[dict[str, object], dict[str, object], dict[str, str]], ...]:
+    seed, count = FAMILY_SPECS[family]
+    rng = random.Random(seed)
+    cases = []
+    for iteration in range(count):
+        anchor, secondary = rng.sample(list(KINDS), 2)
+        anchor_id = f"{anchor}:{iteration}:anchor"
+        metadata: dict[str, str] = {}
+        if family == "expressible_exclusions":
+            excluded = [f"{secondary}:{iteration}:excluded:{index}" for index in range(1 + iteration % 2)]
+            chosen = f"{secondary}:{iteration}:chosen"
+            source = raw_scope({anchor: [anchor_id]}, {secondary: excluded})
+            cut = raw_scope(
+                {anchor: [anchor_id], secondary: [chosen]}, {secondary: list(reversed(excluded))}
+            )
+        elif family == "conditions":
+            source = raw_scope({anchor: [anchor_id]})
+            cut = raw_scope(
+                {anchor: [anchor_id], secondary: [f"{secondary}:{iteration}:cut"]},
+                conditions=[
+                    {
+                        "condition_id": f"condition:{iteration}",
+                        "condition_kind": rng.choice(
+                            ("requires_selector", "excludes_selector", "mutually_exclusive")
+                        ),
+                        "target": {
+                            "selector_kind": secondary,
+                            "selector_ids": [f"{secondary}:{iteration}:condition"],
+                        },
+                    }
+                ],
+            )
+        elif family == "crossing":
+            source = raw_scope(
+                {anchor: [f"{anchor}:{iteration}:left", f"{anchor}:{iteration}:shared"]}
+            )
+            cut = raw_scope(
+                {anchor: [f"{anchor}:{iteration}:shared", f"{anchor}:{iteration}:right"]}
+            )
+        elif family == "strict_superset":
+            source = raw_scope(
+                {anchor: [anchor_id], secondary: [f"{secondary}:{iteration}:narrow"]}
+            )
+            cut = raw_scope({anchor: [anchor_id]})
+        elif family == "partial_blocked":
+            shared = f"{anchor}:{iteration}:shared"
+            source = raw_scope(
+                {anchor: [f"{anchor}:{iteration}:kept", shared]}, {anchor: [shared]}
+            )
+            cut = raw_scope({anchor: [f"{anchor}:{iteration}:kept"]})
+        elif family == "partial_disjoint":
+            shared = f"{anchor}:{iteration}:shared"
+            source = raw_scope(
+                {
+                    anchor: [f"{anchor}:{iteration}:kept", shared],
+                    secondary: [f"{secondary}:{iteration}:left"],
+                },
+                {anchor: [shared]},
+            )
+            cut = raw_scope(
+                {
+                    anchor: [f"{anchor}:{iteration}:kept"],
+                    secondary: [f"{secondary}:{iteration}:right"],
+                }
+            )
+        elif family == "malformed":
+            source = raw_scope({anchor: [anchor_id]})
+            cut = raw_scope({anchor: [anchor_id], secondary: [f"{secondary}:{iteration}:cut"]})
+            reason = (
+                "bad_scope_id",
+                "duplicate_selector_id",
+                "empty_selector_ids",
+                "duplicate_selector_kind",
+            )[iteration % 4]
+            metadata["malformed_reason"] = reason
+            if reason == "bad_scope_id":
+                source["scope_id"] = "scope:" + ("0" * 64)
+            elif reason == "duplicate_selector_id":
+                source["selectors"][0]["selector_ids"] = [anchor_id, anchor_id]  # type: ignore[index]
+            elif reason == "empty_selector_ids":
+                source["selectors"][0]["selector_ids"] = []  # type: ignore[index]
+            else:
+                source["selectors"].append(  # type: ignore[index]
+                    {"selector_kind": anchor, "selector_ids": [f"{anchor}:{iteration}:duplicate-kind"]}
+                )
+        else:
+            raise AssertionError(f"Unknown generated family: {family}")
+        if family not in {"malformed", "conditions"}:
+            rng.shuffle(source["selectors"])  # type: ignore[arg-type,index]
+            rng.shuffle(cut["selectors"])  # type: ignore[arg-type,index]
+        cases.append((source, cut, metadata))
+    return tuple(cases)
+
+
+def _family_expected(family: str) -> dict[str, object]:
+    return {
+        "expressible_exclusions": {
+            "status": "partitioned",
+            "code": None,
+            "relation": "strict_subset",
+            "conservation": "proven",
+        },
+        "conditions": {
+            "status": "blocked",
+            "code": "unprovable_condition",
+            "relation": "unknown",
+            "conservation": "not_proven",
+        },
+        "crossing": {
+            "status": "blocked",
+            "code": "crossing_overlap",
+            "relation": "crossing",
+            "conservation": "not_proven",
+        },
+        "strict_superset": {
+            "status": "blocked",
+            "code": "unexpressible_difference",
+            "relation": "strict_superset",
+            "conservation": "not_proven",
+        },
+        "partial_blocked": {
+            "status": "blocked",
+            "code": "unexpressible_difference",
+            "relation": "unknown",
+            "conservation": "not_proven",
+        },
+        "partial_disjoint": {
+            "status": "disjoint",
+            "code": None,
+            "relation": "disjoint",
+            "conservation": "proven",
+        },
+        "malformed": {"raises": "ScopeContractError"},
+    }[family]
+
+
+def _result_matches_expected(
+    family: str,
+    source: dict[str, object],
+    cut: dict[str, object],
+    result: dict[str, object],
+) -> bool:
+    expected = _family_expected(family)
+    if any(result.get(field) != expected[field] for field in ("status", "code")):
+        return False
+    evidence = result.get("evidence")
+    if not isinstance(evidence, dict) or any(
+        evidence.get(field) != expected[field] for field in ("relation", "conservation")
+    ):
+        return False
+    if result["status"] == "blocked":
+        return result["intersection"] is None and result["residual_scopes"] == []
+    if result["status"] == "disjoint":
+        source_members, cut_members, residual_members = _oracle_partition_sets(
+            source, cut, result
+        )
+        return (
+            result["intersection"] is None
+            and source_members.isdisjoint(cut_members)
+            and residual_members == [source_members]
+        )
+    source_members, cut_members, residual_members = _oracle_partition_sets(
+        source, cut, result
+    )
+    return (
+        cut_members < source_members
+        and all(part <= source_members for part in residual_members)
+        and all(part.isdisjoint(cut_members) for part in residual_members)
+        and all(
+            left.isdisjoint(right)
+            for offset, left in enumerate(residual_members)
+            for right in residual_members[offset + 1 :]
+        )
+        and set().union(cut_members, *residual_members) == source_members
+    )
+
+
+def _generated_family_case_holds(
+    family: str,
+    source: dict[str, object],
+    cut: dict[str, object],
+    metadata: dict[str, str],
+) -> bool:
+    if not _family_precondition(family, source, cut, metadata):
+        return False
+    if family == "malformed":
+        try:
+            scope_partition(source, cut)
+        except ScopeAlgebraError:
+            return False
+        except ScopeContractError:
+            return True
+        return False
+    return _result_matches_expected(family, source, cut, scope_partition(source, cut))
+
+
+@lru_cache(maxsize=1)
+def _generated_family_evidence() -> dict[str, tuple[dict[str, object], ...]]:
+    evidence = {}
+    for family, (seed, _) in FAMILY_SPECS.items():
+        results = []
+        for iteration, (source, cut, metadata) in enumerate(
+            _generated_family_cases(family)
+        ):
+            if not _family_precondition(family, source, cut, metadata):
+                raise AssertionError(
+                    f"generated family precondition failed: {family}:{iteration}"
+                )
+            if not _generated_family_case_holds(family, source, cut, metadata):
+                minimal = _shrink_counterexample(
+                    source,
+                    cut,
+                    lambda candidate_source, candidate_cut: _family_precondition(
+                        family, candidate_source, candidate_cut, metadata
+                    )
+                    and not _generated_family_case_holds(
+                        family, candidate_source, candidate_cut, metadata
+                    ),
+                )
+                raise AssertionError(
+                    "scope algebra generated family counterexample: "
+                    + json.dumps(
+                        {
+                            "family": family,
+                            "seed": seed,
+                            "iteration": iteration,
+                            "minimal": minimal,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            if family == "malformed":
+                results.append(
+                    {
+                        "status": "ScopeContractError",
+                        "malformed_reason": metadata["malformed_reason"],
+                    }
+                )
+            else:
+                results.append(scope_partition(source, cut))
+        evidence[family] = tuple(results)
+    return evidence
+
+
 @lru_cache(maxsize=1)
 def _generated_evidence() -> tuple[
     tuple[
@@ -205,6 +593,10 @@ def _generated_evidence() -> tuple[
 ]:
     evidence = []
     for iteration, (source, cut) in enumerate(_generated_scope_pairs()):
+        if not _strict_subset_precondition(source, cut):
+            raise AssertionError(
+                f"generated strict-subset precondition failed: {iteration}"
+            )
         result = scope_partition(source, cut)
         source_members, cut_members, residual_members = _oracle_partition_sets(
             source, cut, result
@@ -227,14 +619,16 @@ def _generated_evidence() -> tuple[
             minimal = _shrink_counterexample(
                 source,
                 cut,
-                lambda candidate_source, candidate_cut: not _generated_case_holds(
-                    candidate_source, candidate_cut
+                lambda candidate_source, candidate_cut: (
+                    _strict_subset_precondition(candidate_source, candidate_cut)
+                    and not _generated_case_holds(candidate_source, candidate_cut)
                 ),
             )
             raise AssertionError(
                 "scope algebra generated counterexample: "
                 + json.dumps(
                     {
+                        "family": "strict_subset_success",
                         "seed": SEED,
                         "iteration": iteration,
                         "minimal": minimal,
@@ -260,6 +654,8 @@ def _generated_evidence() -> tuple[
 def _generated_case_holds(
     source: dict[str, object], cut: dict[str, object]
 ) -> bool:
+    if not _strict_subset_precondition(source, cut):
+        return False
     try:
         result = scope_partition(source, cut)
         if result["status"] != "partitioned":
@@ -665,8 +1061,47 @@ class ScopeAlgebraContracts(unittest.TestCase):
             with self.assertRaises(ScopeContractError):
                 scope_partition(malformed, narrower)
         elif index == 28:
-            result = scope_partition(source, narrower)
-            self.assertEqual(result, json.loads(json.dumps(result, ensure_ascii=False)))
+            partition_cut = raw_scope(
+                {
+                    "document": ["document:one"],
+                    "chapter": ["chapter:one"],
+                    "object": ["object:one"],
+                }
+            )
+            results = {
+                "equal": scope_partition(source, deepcopy(source)),
+                "disjoint": scope_partition(source, disjoint),
+                "partitioned": scope_partition(source, partition_cut),
+                "blocked": scope_partition(crossing_source, crossing_cut),
+            }
+            for status, result in results.items():
+                with self.subTest(status=status):
+                    self.assertEqual(
+                        result, json.loads(json.dumps(result, ensure_ascii=False))
+                    )
+                    scope_ids = result["evidence"]["scope_ids"]
+                    self.assertEqual(
+                        {"source", "cut", "intersection", "residuals"},
+                        set(scope_ids),
+                    )
+                    self.assertIsInstance(scope_ids["source"], str)
+                    self.assertIsInstance(scope_ids["cut"], str)
+                    self.assertTrue(
+                        scope_ids["intersection"] is None
+                        or isinstance(scope_ids["intersection"], str)
+                    )
+                    self.assertIsInstance(scope_ids["residuals"], list)
+                    self.assertEqual(
+                        None
+                        if result["intersection"] is None
+                        else result["intersection"]["scope_id"],
+                        scope_ids["intersection"],
+                    )
+                    residual_ids = [
+                        item["scope_id"] for item in result["residual_scopes"]
+                    ]
+                    self.assertEqual(sorted(residual_ids), residual_ids)
+                    self.assertEqual(residual_ids, scope_ids["residuals"])
             self.assertEqual(
                 {
                     "status",
@@ -677,8 +1112,31 @@ class ScopeAlgebraContracts(unittest.TestCase):
                     "residual_scopes",
                     "evidence",
                 },
-                set(result),
+                set(results["partitioned"]),
             )
+            tampered_results = []
+            missing_key = deepcopy(results["equal"])
+            del missing_key["evidence"]["scope_ids"]["intersection"]
+            tampered_results.append(missing_key)
+            wrong_type = deepcopy(results["equal"])
+            wrong_type["evidence"]["scope_ids"]["source"] = 7
+            tampered_results.append(wrong_type)
+            wrong_intersection = deepcopy(results["partitioned"])
+            wrong_intersection["evidence"]["scope_ids"]["intersection"] = None
+            tampered_results.append(wrong_intersection)
+            wrong_residual = deepcopy(results["partitioned"])
+            wrong_residual["evidence"]["scope_ids"]["residuals"] = []
+            tampered_results.append(wrong_residual)
+            unstable_order = deepcopy(results["partitioned"])
+            unstable_order["residual_scopes"].reverse()
+            tampered_results.append(unstable_order)
+            inconsistent_status = deepcopy(results["equal"])
+            inconsistent_status["status"] = "blocked"
+            inconsistent_status["code"] = "unknown_overlap"
+            tampered_results.append(inconsistent_status)
+            for tampered in tampered_results:
+                with self.assertRaises(ScopeContractError):
+                    scope_module._validate_partition_result_bindings(tampered)
         elif index == 29:
             self.assertIsNone(scope_intersection(source, disjoint))
         else:
@@ -695,13 +1153,40 @@ class ScopeAlgebraContracts(unittest.TestCase):
 
     def _assert_property(self, index: int) -> None:
         evidence = _generated_evidence()
+        family_evidence = (
+            _generated_family_evidence() if 2 <= index <= 8 else None
+        )
         if index == 1:
             self.assertEqual(GENERATED_ITERATIONS, len(evidence))
             self.assertTrue(all(item[2]["status"] == "partitioned" for item in evidence))
         elif index == 2:
             self.assertTrue(all(item[4] < item[3] for item in evidence))
+            generated = family_evidence["expressible_exclusions"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertTrue(
+                all(
+                    item["status"] == "partitioned"
+                    and item["evidence"]["conservation"] == "proven"
+                    for item in generated
+                )
+            )
         elif index == 3:
             self.assertTrue(all(all(part <= item[3] for part in item[5]) for item in evidence))
+            generated = family_evidence["conditions"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertTrue(
+                all(
+                    (item["status"], item["code"]) == (
+                        "blocked",
+                        "unprovable_condition",
+                    )
+                    and item["evidence"]["relation"] == "unknown"
+                    and item["evidence"]["conservation"] == "not_proven"
+                    and item["intersection"] is None
+                    and item["residual_scopes"] == []
+                    for item in generated
+                )
+            )
         elif index == 4:
             self.assertTrue(
                 all(
@@ -709,10 +1194,52 @@ class ScopeAlgebraContracts(unittest.TestCase):
                     for item in evidence
                 )
             )
+            generated = family_evidence["crossing"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertTrue(
+                all(
+                    (item["status"], item["code"]) == (
+                        "blocked",
+                        "crossing_overlap",
+                    )
+                    and item["evidence"]["relation"] == "crossing"
+                    and item["intersection"] is None
+                    and item["residual_scopes"] == []
+                    for item in generated
+                )
+            )
         elif index == 5:
             self.assertTrue(all(all(part.isdisjoint(item[4]) for part in item[5]) for item in evidence))
+            generated = family_evidence["strict_superset"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertTrue(
+                all(
+                    (item["status"], item["code"]) == (
+                        "blocked",
+                        "unexpressible_difference",
+                    )
+                    and item["evidence"]["relation"] == "strict_superset"
+                    and item["intersection"] is None
+                    and item["residual_scopes"] == []
+                    for item in generated
+                )
+            )
         elif index == 6:
             self.assertTrue(all(set().union(item[4], *item[5]) == item[3] for item in evidence))
+            generated = family_evidence["partial_blocked"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertTrue(
+                all(
+                    (item["status"], item["code"]) == (
+                        "blocked",
+                        "unexpressible_difference",
+                    )
+                    and item["evidence"]["relation"] == "unknown"
+                    and item["intersection"] is None
+                    and item["residual_scopes"] == []
+                    for item in generated
+                )
+            )
         elif index == 7:
             for source, cut, result, *_ in evidence[:128]:
                 source = deepcopy(source)
@@ -720,11 +1247,38 @@ class ScopeAlgebraContracts(unittest.TestCase):
                 source["selectors"].reverse()
                 cut["selectors"].reverse()
                 self.assertEqual(result, scope_partition(source, cut))
+            generated = family_evidence["partial_disjoint"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertTrue(
+                all(
+                    item["status"] == "disjoint"
+                    and item["code"] is None
+                    and item["evidence"]["relation"] == "disjoint"
+                    and item["evidence"]["conservation"] == "proven"
+                    and item["intersection"] is None
+                    and len(item["residual_scopes"]) == 1
+                    for item in generated
+                )
+            )
         elif index == 8:
             for source, cut, result, *_ in evidence[:128]:
                 source = dict(reversed(list(source.items())))
                 cut = dict(reversed(list(cut.items())))
                 self.assertEqual(result, scope_partition(source, cut))
+            generated = family_evidence["malformed"]  # type: ignore[index]
+            self.assertEqual(FAMILY_CASES, len(generated))
+            self.assertEqual(
+                {
+                    "bad_scope_id",
+                    "duplicate_selector_id",
+                    "empty_selector_ids",
+                    "duplicate_selector_kind",
+                },
+                {item["malformed_reason"] for item in generated},
+            )
+            self.assertTrue(
+                all(item["status"] == "ScopeContractError" for item in generated)
+            )
         elif index == 9:
             left = raw_scope({"document": ["document:Caf\u00e9"]})
             right = raw_scope({"document": ["document:Cafe\u0301"], "chapter": ["chapter:one"]})
@@ -759,8 +1313,20 @@ class ScopeAlgebraContracts(unittest.TestCase):
             )
             self.assertEqual("crossing_overlap", result["code"])
         elif index == 14:
-            result = scope_partition(raw_scope({"document": ["document:one"]}), conditional_scope())
+            condition = conditional_scope()
+            result = scope_partition(
+                raw_scope({"document": ["document:one"]}), condition
+            )
             self.assertEqual("unprovable_condition", result["code"])
+            self.assertEqual(
+                "equal", scope_partition(condition, deepcopy(condition))["status"]
+            )
+            self.assertEqual(
+                "disjoint",
+                scope_partition(
+                    condition, raw_scope({"document": ["document:two"]})
+                )["status"],
+            )
         elif index == 15:
             result = scope_partition(
                 raw_scope({"document": ["document:one", "document:two"]}, {"document": ["document:two"]}),
@@ -770,17 +1336,184 @@ class ScopeAlgebraContracts(unittest.TestCase):
         elif index == 16:
             self.assertEqual(_generated_scope_pairs(), _generated_scope_pairs())
         elif index == 17:
-            source = raw_scope(
-                {"document": ["document:one", "document:two"], "chapter": ["chapter:one"]},
-                {"object": ["object:excluded"]},
-                conditional_scope()["mutually_exclusive_conditions"],
+            strict_source = raw_scope(
+                {
+                    "document": ["document:one"],
+                    "object": ["object:one"],
+                    "property": ["property:one"],
+                }
             )
-            cut = raw_scope({"document": ["document:one"], "chapter": ["chapter:one"]})
-            minimal = _shrink_counterexample(source, cut, lambda *_: True)
-            self.assertLess(len(json.dumps(minimal, sort_keys=True)), len(json.dumps((source, cut), sort_keys=True)))
+            strict_cut = raw_scope(
+                {
+                    "document": ["document:one"],
+                    "chapter": ["chapter:one"],
+                    "object": ["object:one"],
+                    "property": ["property:one"],
+                }
+            )
+            crossing_source = raw_scope(
+                {
+                    "document": ["document:left", "document:shared"],
+                    "object": ["object:one"],
+                }
+            )
+            crossing_cut = raw_scope(
+                {
+                    "document": ["document:shared", "document:right"],
+                    "object": ["object:one"],
+                }
+            )
+            condition_source = raw_scope(
+                {
+                    "document": ["document:one"],
+                    "object": ["object:one"],
+                }
+            )
+            condition_cut = raw_scope(
+                {
+                    "document": ["document:one"],
+                    "chapter": ["chapter:one"],
+                    "object": ["object:one"],
+                },
+                conditions=conditional_scope()["mutually_exclusive_conditions"],
+            )
+            malformed_cut = raw_scope(
+                {"document": ["document:one"], "chapter": ["chapter:one"]}
+            )
+            malformed_cases = []
+            for reason in (
+                "bad_scope_id",
+                "duplicate_selector_id",
+                "empty_selector_ids",
+                "duplicate_selector_kind",
+            ):
+                malformed_source = raw_scope(
+                    {
+                        "document": ["document:one"],
+                        "object": ["object:one"],
+                    }
+                )
+                if reason == "bad_scope_id":
+                    malformed_source["scope_id"] = "scope:" + ("0" * 64)
+                elif reason == "duplicate_selector_id":
+                    malformed_source["selectors"][0]["selector_ids"] = [  # type: ignore[index]
+                        "document:one",
+                        "document:one",
+                    ]
+                elif reason == "empty_selector_ids":
+                    malformed_source["selectors"][0]["selector_ids"] = []  # type: ignore[index]
+                else:
+                    malformed_source["selectors"].append(  # type: ignore[index]
+                        {
+                            "selector_kind": "document",
+                            "selector_ids": ["document:duplicate-kind"],
+                        }
+                    )
+                metadata = {"malformed_reason": reason}
+                malformed_cases.append(
+                    (
+                        "malformed",
+                        malformed_source,
+                        deepcopy(malformed_cut),
+                        metadata,
+                        lambda left, right, metadata=metadata: _family_precondition(
+                            "malformed", left, right, metadata
+                        ),
+                        lambda left, right, metadata=metadata: _generated_family_case_holds(
+                            "malformed", left, right, metadata
+                        ),
+                    )
+                )
+            cases = (
+                (
+                    "strict_subset_success",
+                    strict_source,
+                    strict_cut,
+                    {},
+                    lambda left, right: _strict_subset_precondition(left, right),
+                    lambda left, right: _generated_case_holds(left, right),
+                ),
+                (
+                    "crossing",
+                    crossing_source,
+                    crossing_cut,
+                    {},
+                    lambda left, right: _family_precondition(
+                        "crossing", left, right, {}
+                    ),
+                    lambda left, right: _generated_family_case_holds(
+                        "crossing", left, right, {}
+                    ),
+                ),
+                (
+                    "conditions",
+                    condition_source,
+                    condition_cut,
+                    {},
+                    lambda left, right: _family_precondition(
+                        "conditions", left, right, {}
+                    ),
+                    lambda left, right: _generated_family_case_holds(
+                        "conditions", left, right, {}
+                    ),
+                ),
+            ) + tuple(malformed_cases)
+            shrunk_sizes = []
+            broken_result = {"status": "unexpected", "code": None}
+            with mock.patch.dict(
+                globals(), {"scope_partition": lambda *_: broken_result}
+            ):
+                for family, source, cut, metadata, precondition, holds in cases:
+                    self.assertTrue(precondition(source, cut), family)
+                    minimal = _shrink_counterexample(
+                        source,
+                        cut,
+                        lambda left, right: precondition(left, right)
+                        and not holds(left, right),
+                    )
+                    self.assertTrue(precondition(*minimal), (family, metadata))
+                    self.assertFalse(holds(*minimal), family)
+                    shrunk_sizes.append(
+                        (
+                            len(json.dumps((source, cut), sort_keys=True)),
+                            len(json.dumps(minimal, sort_keys=True)),
+                        )
+                    )
+            self.assertTrue(all(after <= before for before, after in shrunk_sizes))
+            self.assertTrue(any(after < before for before, after in shrunk_sizes))
         elif index == 18:
-            names = _oracle_members.__code__.co_names
-            self.assertFalse(any(name.startswith("scope_") or name.startswith("_proof") for name in names))
+            oracle_functions = (
+                _oracle_maps,
+                _oracle_universe,
+                _oracle_members,
+                _oracle_partition_sets,
+                _oracle_pair_members,
+                _oracle_partial_kinds,
+                _oracle_safe_disjoint_axis,
+                _strict_subset_precondition,
+                _malformed_reason_matches,
+                _family_precondition,
+                _family_expected,
+                _result_matches_expected,
+            )
+            banned_exact = {
+                "_scope_payload",
+                "_selector_map",
+                "scope_subset",
+                "scope_intersection",
+                "scope_difference",
+                "scope_partition",
+            }
+            for function in oracle_functions:
+                names = set(function.__code__.co_names)
+                self.assertTrue(names.isdisjoint(banned_exact), function.__name__)
+                self.assertFalse(
+                    any(
+                        name.startswith("_axis_") or name.startswith("_proof_")
+                        for name in names
+                    ),
+                    function.__name__,
+                )
         elif index == 19:
             source, cut = _generated_scope_pairs()[0]
             first = json.dumps(scope_partition(source, cut), sort_keys=True, ensure_ascii=False)
