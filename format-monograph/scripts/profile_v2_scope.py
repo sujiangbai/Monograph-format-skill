@@ -643,4 +643,3 @@ def validate_module_asset_scope(asset: dict[str, Any]) -> None:
             raise ScopeContractError(
                 f"Module rule {rule['rule_id']} scope is not provably within asset_scope."
             )
-
