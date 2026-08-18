@@ -551,74 +551,182 @@ def scope_difference(
 def _partition_evidence(
     relation: str,
     conservation: Literal["proven", "not_proven"],
-    source_scope_id: str,
-    cut_scope_id: str,
+    source: dict[str, Any],
+    cut: dict[str, Any],
+    intersection: dict[str, Any] | None,
+    residuals: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
         "relation": relation,
         "conservation": conservation,
-        "scope_ids": {"source": source_scope_id, "cut": cut_scope_id},
+        "scope_ids": {
+            "source": source["scope_id"],
+            "cut": cut["scope_id"],
+            "intersection": None if intersection is None else intersection["scope_id"],
+            "residuals": sorted(item["scope_id"] for item in residuals),
+        },
     }
+
+
+def _validate_partition_result_bindings(result: dict[str, Any]) -> None:
+    evidence = result.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ScopeContractError("Partition evidence must be an object.")
+    scope_ids = evidence.get("scope_ids")
+    if not isinstance(scope_ids, dict):
+        raise ScopeContractError("Partition evidence.scope_ids must be an object.")
+    if set(scope_ids) != {"source", "cut", "intersection", "residuals"}:
+        raise ScopeContractError("Partition evidence.scope_ids has an invalid shape.")
+    if not isinstance(scope_ids["source"], str) or not isinstance(
+        scope_ids["cut"], str
+    ):
+        raise ScopeContractError("Partition evidence source/cut IDs must be strings.")
+    if scope_ids["source"] != result["source_scope_id"] or scope_ids["cut"] != result[
+        "cut_scope_id"
+    ]:
+        raise ScopeContractError("Partition evidence source/cut IDs do not match.")
+    intersection = result.get("intersection")
+    if intersection is not None and (
+        not isinstance(intersection, dict)
+        or not isinstance(intersection.get("scope_id"), str)
+    ):
+        raise ScopeContractError("Partition intersection must be a normalized scope.")
+    expected_intersection = None if intersection is None else intersection["scope_id"]
+    if scope_ids["intersection"] is not None and not isinstance(
+        scope_ids["intersection"], str
+    ):
+        raise ScopeContractError("Partition evidence intersection ID is invalid.")
+    if scope_ids["intersection"] != expected_intersection:
+        raise ScopeContractError("Partition evidence intersection ID does not match.")
+    residual_scopes = result.get("residual_scopes")
+    if not isinstance(residual_scopes, list) or any(
+        not isinstance(item, dict) or not isinstance(item.get("scope_id"), str)
+        for item in residual_scopes
+    ):
+        raise ScopeContractError("Partition residual scopes must be normalized scopes.")
+    residual_ids = [item["scope_id"] for item in residual_scopes]
+    if residual_ids != sorted(residual_ids):
+        raise ScopeContractError("Partition residual scopes are not stably sorted.")
+    if not isinstance(scope_ids["residuals"], list) or scope_ids[
+        "residuals"
+    ] != residual_ids:
+        raise ScopeContractError("Partition evidence residual IDs do not match.")
+
+    status = result.get("status")
+    if status == "equal":
+        valid_shape = (
+            result.get("code") is None
+            and expected_intersection == result.get("source_scope_id")
+            and not residual_ids
+            and evidence.get("relation") == "equal"
+            and evidence.get("conservation") == "proven"
+        )
+    elif status == "disjoint":
+        valid_shape = (
+            result.get("code") is None
+            and expected_intersection is None
+            and residual_ids == [result.get("source_scope_id")]
+            and evidence.get("relation") == "disjoint"
+            and evidence.get("conservation") == "proven"
+        )
+    elif status == "partitioned":
+        valid_shape = (
+            result.get("code") is None
+            and expected_intersection == result.get("cut_scope_id")
+            and bool(residual_ids)
+            and evidence.get("relation") == "strict_subset"
+            and evidence.get("conservation") == "proven"
+        )
+    elif status == "blocked":
+        valid_shape = (
+            result.get("code") in ALGEBRA_ERROR_CODES
+            and expected_intersection is None
+            and not residual_ids
+            and evidence.get("conservation") == "not_proven"
+        )
+    else:
+        valid_shape = False
+    if not valid_shape:
+        raise ScopeContractError("Partition result status and evidence are inconsistent.")
+
+
+def _partition_result(
+    status: Literal["equal", "disjoint", "partitioned", "blocked"],
+    code: str | None,
+    source: dict[str, Any],
+    cut: dict[str, Any],
+    intersection: dict[str, Any] | None,
+    residuals: list[dict[str, Any]],
+    relation: str,
+    conservation: Literal["proven", "not_proven"],
+) -> dict[str, Any]:
+    result = {
+        "status": status,
+        "code": code,
+        "source_scope_id": source["scope_id"],
+        "cut_scope_id": cut["scope_id"],
+        "intersection": intersection,
+        "residual_scopes": residuals,
+        "evidence": _partition_evidence(
+            relation, conservation, source, cut, intersection, residuals
+        ),
+    }
+    _validate_partition_result_bindings(result)
+    return result
 
 
 def scope_partition(source: dict[str, Any], cut: dict[str, Any]) -> dict[str, Any]:
     source_normalized = normalize_scope(source)
     cut_normalized = normalize_scope(cut)
-    source_scope_id = source_normalized["scope_id"]
-    cut_scope_id = cut_normalized["scope_id"]
     try:
         relation = _scope_relation_normalized(source_normalized, cut_normalized)
         if relation == "equal":
-            return {
-                "status": "equal",
-                "code": None,
-                "source_scope_id": source_scope_id,
-                "cut_scope_id": cut_scope_id,
-                "intersection": source_normalized,
-                "residual_scopes": [],
-                "evidence": _partition_evidence(
-                    relation, "proven", source_scope_id, cut_scope_id
-                ),
-            }
+            return _partition_result(
+                "equal",
+                None,
+                source_normalized,
+                cut_normalized,
+                source_normalized,
+                [],
+                relation,
+                "proven",
+            )
         if relation == "disjoint":
-            return {
-                "status": "disjoint",
-                "code": None,
-                "source_scope_id": source_scope_id,
-                "cut_scope_id": cut_scope_id,
-                "intersection": None,
-                "residual_scopes": [source_normalized],
-                "evidence": _partition_evidence(
-                    relation, "proven", source_scope_id, cut_scope_id
-                ),
-            }
+            return _partition_result(
+                "disjoint",
+                None,
+                source_normalized,
+                cut_normalized,
+                None,
+                [source_normalized],
+                relation,
+                "proven",
+            )
         if relation == "strict_subset":
             residuals = _strict_subset_difference(source_normalized, cut_normalized)
-            return {
-                "status": "partitioned",
-                "code": None,
-                "source_scope_id": source_scope_id,
-                "cut_scope_id": cut_scope_id,
-                "intersection": cut_normalized,
-                "residual_scopes": residuals,
-                "evidence": _partition_evidence(
-                    relation, "proven", source_scope_id, cut_scope_id
-                ),
-            }
+            return _partition_result(
+                "partitioned",
+                None,
+                source_normalized,
+                cut_normalized,
+                cut_normalized,
+                residuals,
+                relation,
+                "proven",
+            )
         _raise_for_non_difference_relation(relation)
     except ScopeAlgebraError as exc:
         relation = exc.details.get("relation", "unknown")
-        return {
-            "status": "blocked",
-            "code": exc.code,
-            "source_scope_id": source_scope_id,
-            "cut_scope_id": cut_scope_id,
-            "intersection": None,
-            "residual_scopes": [],
-            "evidence": _partition_evidence(
-                relation, "not_proven", source_scope_id, cut_scope_id
-            ),
-        }
+        return _partition_result(
+            "blocked",
+            exc.code,
+            source_normalized,
+            cut_normalized,
+            None,
+            [],
+            relation,
+            "not_proven",
+        )
     raise AssertionError("unreachable")
 
 
