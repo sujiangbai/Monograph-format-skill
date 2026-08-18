@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.1/legacy-migration-manifest.intent.schema.json",
+  "title": "Format Monograph V2.1 Intent Legacy Migration Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "x-read-compatible-minor-versions": [],
+  "required": [
+    "artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version", "artifact_id", "created_by_tool",
+    "input_fingerprints", "semantic_fingerprint", "legacy_input",
+    "activation", "source_schema_versions", "mappings"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "legacy-migration-manifest"},
+    "schema_version": {"const": "2.1"},
+    "registry_contract_version": {"const": "2.2"},
+    "authority_contract_version": {"const": "1.0"},
+    "artifact_id": {"$ref": "../v2.3/common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "../v2.3/common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "../v2.3/common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {
+      "$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint",
+      "x-semantic-fingerprint": "exclude"
+    },
+    "legacy_input": {"const": true},
+    "activation": {"const": "disabled"},
+    "source_schema_versions": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "x-semantic-array": "set_by_scalar",
+      "items": {"type": "string", "enum": ["1.0", "1.1"]}
+    },
+    "mappings": {
+      "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "source_rule_id",
+      "items": {"$ref": "#/$defs/mapping"}
+    }
+  },
+  "$defs": {
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_rule_id", "disposition", "target_rule_ids", "rationale"],
+      "properties": {
+        "source_rule_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        "disposition": {"type": "string", "enum": ["preserve", "modify", "move_layer", "split", "retire"]},
+        "target_rule_ids": {
+          "type": "array", "uniqueItems": true,
+          "x-semantic-array": "set_by_scalar",
+          "items": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"}
+        },
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    }
+  }
+}

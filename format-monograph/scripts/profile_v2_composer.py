@@ -19,13 +19,19 @@ from profile_v2_artifacts import (
     ArtifactContractError,
     ProfileV2DisabledError,
     profile_v2_composer_contract_enabled,
+    profile_v2_intent_contract_enabled,
     validate_artifact,
+    validate_intent_artifact_v041,
 )
 from profile_v2_authority import (
     authority_contract_fingerprint,
     authority_rank,
 )
-from profile_v2_canonical import stamp_semantic_fingerprint
+from profile_v2_canonical import (
+    canonical_intent_semantic_bytes_v041,
+    stamp_intent_semantic_fingerprint_v041,
+    stamp_semantic_fingerprint,
+)
 from profile_v2_registry import (
     RegistryContractError,
     load_registry,
@@ -68,6 +74,49 @@ class _ContractAdapter:
     validate: Callable[[dict[str, Any]], None]
     stamp: Callable[[dict[str, Any]], dict[str, Any]]
     feature_enabled: Callable[[dict[str, Any] | None], bool]
+    registry_validation_context: str = "strict_execution"
+
+
+@dataclass(frozen=True)
+class IntentCompositionMetrics:
+    input_asset_count: int
+    input_rule_count: int
+    input_binding_count: int
+    expected_key_count: int
+    candidate_count: int
+    candidate_group_count: int
+    partition_count: int
+    conflict_count: int
+    proposal_count: int
+    blocker_count: int
+    max_candidates_per_key: int
+    max_partition_depth: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            field: int(getattr(self, field))
+            for field in self.__dataclass_fields__
+        }
+
+
+@dataclass(frozen=True)
+class IntentCompositionResult:
+    status: str
+    report: dict[str, Any]
+    final_profile: dict[str, Any] | None
+    application_diagnostics: tuple[dict[str, Any], ...]
+    metrics: IntentCompositionMetrics | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "report": deepcopy(self.report),
+            "final_profile": deepcopy(self.final_profile),
+            "application_diagnostics": [
+                deepcopy(item) for item in self.application_diagnostics
+            ],
+            "metrics": None if self.metrics is None else self.metrics.as_dict(),
+        }
 
 
 @dataclass(frozen=True)
@@ -137,6 +186,20 @@ def _production_adapter() -> _ContractAdapter:
         validate=validate,
         stamp=stamp_semantic_fingerprint,
         feature_enabled=profile_v2_composer_contract_enabled,
+    )
+
+
+def _intent_adapter_v041() -> _ContractAdapter:
+    registry = load_registry(
+        version="2.2", validation_context="declaration_intent"
+    )
+
+    return _ContractAdapter(
+        registry=registry,
+        validate=lambda document: validate_intent_artifact_v041(document),
+        stamp=stamp_intent_semantic_fingerprint_v041,
+        feature_enabled=profile_v2_intent_contract_enabled,
+        registry_validation_context="declaration_intent",
     )
 
 
@@ -404,6 +467,7 @@ def _report_documents(
     artifact_id: str,
     created_by_tool: dict[str, Any],
     generated_at: str,
+    intent_contract: bool = False,
 ) -> dict[str, Any]:
     if not rule_assets:
         raise ComposerContractError("Composition requires at least one rule asset.")
@@ -415,7 +479,9 @@ def _report_documents(
         )
 
     registry = adapter.registry
-    validate_registry_document(registry)
+    validate_registry_document(
+        registry, validation_context=adapter.registry_validation_context
+    )
     registry_fingerprint = _digest(registry)
     authority_fingerprint = authority_contract_fingerprint("1.0")
     fatal_diagnostics: list[dict[str, Any]] = []
@@ -526,6 +592,10 @@ def _report_documents(
                 "key": key,
                 "reason_code": _reason_code("SCOPE-BLOCKED", [group_identity, code]),
             }
+            if intent_contract:
+                blocker["candidate_ids"] = sorted(
+                    item.record["candidate_id"] for item in component
+                )
             blockers.append(blocker)
             scope_partitions.append(
                 {
@@ -614,8 +684,8 @@ def _report_documents(
     )
     report = {
         "artifact_kind": "conflict-report",
-        "schema_version": "2.2",
-        "registry_contract_version": "2.1",
+        "schema_version": "2.3" if intent_contract else "2.2",
+        "registry_contract_version": "2.2" if intent_contract else "2.1",
         "authority_contract_version": "1.0",
         "artifact_id": artifact_id,
         "created_by_tool": deepcopy(created_by_tool),
@@ -632,6 +702,15 @@ def _report_documents(
         "diagnostics": sorted(diagnostics, key=lambda item: item["diagnostic_id"]),
         "proposal_status": "resolvable",
     }
+    if intent_contract:
+        report.update(
+            {
+                "activation": "disabled",
+                "runtime_eligible": False,
+                "final_ready_eligible": False,
+                "delivery_allowed": False,
+            }
+        )
     report["proposal_status"] = _report_status(report)
     stamped = adapter.stamp(report)
     adapter.validate(stamped)
@@ -915,6 +994,7 @@ def _apply_report(
     task_fingerprint: str,
     artifact_id: str,
     created_by_tool: dict[str, Any],
+    intent_contract: bool = False,
 ) -> dict[str, Any]:
     original_report = deepcopy(report)
     original_approvals = deepcopy(list(approvals))
@@ -1067,8 +1147,8 @@ def _apply_report(
     )
     final = {
         "artifact_kind": "final-execution-profile",
-        "schema_version": "2.2",
-        "registry_contract_version": "2.1",
+        "schema_version": "2.3" if intent_contract else "2.2",
+        "registry_contract_version": "2.2" if intent_contract else "2.1",
         "authority_contract_version": "1.0",
         "artifact_id": artifact_id,
         "created_by_tool": deepcopy(created_by_tool),
@@ -1090,6 +1170,8 @@ def _apply_report(
         "resolved_properties": final_items,
         "closure_evidence": sorted(closure, key=lambda item: item["conflict_id"]),
     }
+    if intent_contract:
+        final["runtime_eligible"] = False
     stamped = adapter.stamp(final)
     adapter.validate(stamped)
     return _application_result("profile_generated", original_report, stamped, [])
@@ -1114,4 +1196,251 @@ def apply_resolutions(
         task_fingerprint=task_fingerprint,
         artifact_id=artifact_id,
         created_by_tool=created_by_tool,
+    )
+
+
+def _intent_expected_inventory_v041(
+    rule_assets: Sequence[dict[str, Any]], adapter: _ContractAdapter
+) -> tuple[dict[str, tuple[str, str, str]], set[tuple[str, str, str]]]:
+    if not rule_assets:
+        raise ComposerContractError("Intent composition requires a non-empty rule asset inventory.")
+    expected: dict[str, tuple[str, str, str]] = {}
+    keys: set[tuple[str, str, str]] = set()
+    seen_assets: set[str] = set()
+    seen_rules: set[tuple[str, str]] = set()
+    for asset in sorted((deepcopy(item) for item in rule_assets), key=_canonical_bytes):
+        adapter.validate(asset)
+        asset_id = asset.get("artifact_id")
+        if asset_id in seen_assets:
+            raise ComposerContractError(f"Duplicate approved asset identity: {asset_id}")
+        seen_assets.add(asset_id)
+        if asset.get("activation") != "approved":
+            raise ComposerContractError(
+                f"Intent composition refuses non-approved asset: {asset_id}"
+            )
+        rules = asset.get("rules", [])
+        if not rules:
+            raise ComposerContractError(f"Approved asset has no rules: {asset_id}")
+        for rule in sorted(rules, key=lambda item: item["rule_id"]):
+            rule_key = (asset_id, rule.get("rule_id"))
+            if rule_key in seen_rules:
+                raise ComposerContractError(f"Duplicate approved rule identity: {rule_key}")
+            seen_rules.add(rule_key)
+            if rule.get("status") != "approved":
+                raise ComposerContractError(
+                    f"Intent composition refuses non-approved rule: {rule_key}"
+                )
+            scope = normalize_rule_scope(rule["scope"])
+            for raw_binding in sorted(
+                rule.get("properties", []), key=lambda item: item["property_id"]
+            ):
+                validate_binding_for_layer(
+                    raw_binding, asset["layer_kind"], adapter.registry
+                )
+                binding = normalize_property_binding(raw_binding, adapter.registry)
+                identity = _candidate_identity(asset, rule, binding, scope)
+                candidate_id = _stable_id("candidate", identity)
+                source = (asset_id, rule["rule_id"], binding["property_id"])
+                if candidate_id in expected and expected[candidate_id] != source:
+                    raise ComposerContractError(
+                        f"Candidate identity collision: {candidate_id}"
+                    )
+                expected[candidate_id] = source
+                keys.add(
+                    normalized_property_scope_key(
+                        rule["semantic_object_kind"],
+                        binding["property_id"],
+                        scope,
+                    )
+                )
+    if not expected:
+        raise ComposerContractError("Intent composition expected binding inventory is empty.")
+    return expected, keys
+
+
+def _intent_consumed_candidates_v041(
+    report: Mapping[str, Any],
+) -> dict[str, tuple[str, str, str]]:
+    consumed: dict[str, tuple[str, str, str]] = {}
+    for group in report.get("candidate_groups", []):
+        for candidate in group.get("candidates", []):
+            source = candidate["source"]
+            consumed[candidate["candidate_id"]] = (
+                source["source_artifact_id"],
+                source["source_rule_id"],
+                candidate["property_binding"]["property_id"],
+            )
+    blocker_ids = {
+        candidate_id
+        for blocker in report.get("unresolvable_blockers", [])
+        for candidate_id in blocker.get("candidate_ids", [])
+    }
+    for candidate_id in blocker_ids:
+        consumed.setdefault(candidate_id, ("<blocked>", "<blocked>", "<blocked>"))
+    return consumed
+
+
+def _verify_intent_coverage_v041(
+    expected: Mapping[str, tuple[str, str, str]], report: Mapping[str, Any]
+) -> None:
+    if report.get("fatal_diagnostics"):
+        raise ComposerContractError("Intent composition produced fatal diagnostics.")
+    if not (
+        report.get("candidate_groups")
+        or report.get("proposed_resolutions")
+        or report.get("unresolvable_blockers")
+    ):
+        raise ComposerContractError("Intent composition produced no candidate, proposal, or blocker.")
+    consumed = _intent_consumed_candidates_v041(report)
+    if set(consumed) != set(expected):
+        missing = sorted(set(expected) - set(consumed))
+        unknown = sorted(set(consumed) - set(expected))
+        raise ComposerContractError(
+            f"Intent binding coverage is not conserved; missing={missing}, unknown={unknown}."
+        )
+    for candidate_id, source in consumed.items():
+        if source[0] != "<blocked>" and source != expected[candidate_id]:
+            raise ComposerContractError(
+                f"Intent candidate provenance mismatch: {candidate_id}"
+            )
+
+
+def _intent_metrics_v041(
+    rule_assets: Sequence[dict[str, Any]],
+    expected_keys: set[tuple[str, str, str]],
+    report: Mapping[str, Any],
+) -> IntentCompositionMetrics:
+    groups = report.get("candidate_groups", [])
+    partitions = report.get("scope_partitions", [])
+    candidate_ids = {
+        item["candidate_id"]
+        for group in groups
+        for item in group.get("candidates", [])
+    } | {
+        candidate_id
+        for blocker in report.get("unresolvable_blockers", [])
+        for candidate_id in blocker.get("candidate_ids", [])
+    }
+    return IntentCompositionMetrics(
+        input_asset_count=len(rule_assets),
+        input_rule_count=sum(len(item.get("rules", [])) for item in rule_assets),
+        input_binding_count=sum(
+            len(rule.get("properties", []))
+            for item in rule_assets
+            for rule in item.get("rules", [])
+        ),
+        expected_key_count=len(expected_keys),
+        candidate_count=len(candidate_ids),
+        candidate_group_count=len(groups),
+        partition_count=len(partitions),
+        conflict_count=len(report.get("approval_required_conflicts", [])),
+        proposal_count=len(report.get("proposed_resolutions", [])),
+        blocker_count=len(report.get("unresolvable_blockers", [])),
+        max_candidates_per_key=max(
+            (len(item.get("candidates", [])) for item in groups), default=0
+        ),
+        max_partition_depth=max(
+            (len(item.get("partition_scopes", [])) for item in partitions), default=0
+        ),
+    )
+
+
+def compose_intent_profile_v041(
+    rule_assets: Sequence[dict[str, Any]],
+    feature_manifest: dict[str, Any],
+    *,
+    input_fingerprint: str,
+    structure_fingerprint: str,
+    artifact_id: str,
+    created_by_tool: dict[str, Any],
+    generated_at: str,
+    include_metrics: bool = False,
+) -> IntentCompositionResult:
+    """Compose a disabled declaration-intent report; no runtime imports this API."""
+
+    adapter = _intent_adapter_v041()
+    if not adapter.feature_enabled(feature_manifest):
+        raise ComposerDisabledError(
+            "profile_v2_schema, profile_v2_composer, and monograph_base_v041 "
+            "must all be explicitly true in a valid 2.2 manifest."
+        )
+    expected, expected_keys = _intent_expected_inventory_v041(rule_assets, adapter)
+    report = _report_documents(
+        rule_assets,
+        feature_manifest,
+        adapter=adapter,
+        input_fingerprint=input_fingerprint,
+        structure_fingerprint=structure_fingerprint,
+        artifact_id=artifact_id,
+        created_by_tool=created_by_tool,
+        generated_at=generated_at,
+        intent_contract=True,
+    )
+    _verify_intent_coverage_v041(expected, report)
+    metrics = (
+        _intent_metrics_v041(rule_assets, expected_keys, report)
+        if include_metrics
+        else None
+    )
+    return IntentCompositionResult(
+        status=report["proposal_status"],
+        report=deepcopy(report),
+        final_profile=None,
+        application_diagnostics=(),
+        metrics=metrics,
+    )
+
+
+def apply_intent_resolutions_v041(
+    report: dict[str, Any],
+    approvals: Sequence[dict[str, Any]],
+    feature_manifest: dict[str, Any],
+    *,
+    task_id: str,
+    task_fingerprint: str,
+    artifact_id: str,
+    created_by_tool: dict[str, Any],
+    metrics: IntentCompositionMetrics | None = None,
+) -> IntentCompositionResult:
+    """Mechanically apply bound 2.2 approvals to a disabled 2.3 intent report."""
+
+    adapter = _intent_adapter_v041()
+    if not adapter.feature_enabled(feature_manifest):
+        raise ComposerDisabledError("The V0.4.1 intent feature contract is disabled.")
+    if (
+        report.get("bindings", {}).get("feature_activation_fingerprint")
+        != feature_manifest.get("semantic_fingerprint")
+    ):
+        raise ComposerContractError("Intent report is bound to a different feature manifest.")
+    result = _apply_report(
+        report,
+        approvals,
+        adapter=adapter,
+        task_id=task_id,
+        task_fingerprint=task_fingerprint,
+        artifact_id=artifact_id,
+        created_by_tool=created_by_tool,
+        intent_contract=True,
+    )
+    final_profile = result["final_profile"]
+    if final_profile is not None:
+        for field, expected_value in (
+            ("activation", "disabled"),
+            ("runtime_eligible", False),
+            ("final_ready_eligible", False),
+            ("delivery_allowed", False),
+        ):
+            if final_profile.get(field) != expected_value:
+                raise ComposerContractError(
+                    f"Intent final profile violates disabled delivery contract: {field}"
+                )
+        canonical_intent_semantic_bytes_v041(final_profile)
+    return IntentCompositionResult(
+        status=result["status"],
+        report=deepcopy(result["report"]),
+        final_profile=deepcopy(final_profile),
+        application_diagnostics=tuple(
+            deepcopy(item) for item in result["application_diagnostics"]
+        ),
+        metrics=metrics,
     )

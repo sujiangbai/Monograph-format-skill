@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/contracts/artifact-routes/1.1/artifact-contract-matrix.schema.json",
+  "title": "Format Monograph Artifact Contract Matrix V1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "contract_version", "routes", "schema_resources"],
+  "properties": {
+    "contract_id": {"const": "format-monograph-artifact-routes"},
+    "contract_version": {"const": "1.1"},
+    "routes": {
+      "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "route_id",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/route"}
+    },
+    "schema_resources": {
+      "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "schema_id",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/schema_resource"}
+    }
+  },
+  "$defs": {
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route_id", "artifact_kind", "schema_version", "registry_contract_version",
+        "authority_contract_version", "registry_validation_context", "schema_file", "schema_id", "version_source"
+      ],
+      "properties": {
+        "route_id": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{2,127}$"},
+        "artifact_kind": {
+          "type": "string",
+          "enum": [
+            "layered-rule-asset", "final-execution-profile", "qa-approval-artifact",
+            "legacy-migration-manifest", "feature-activation-manifest", "capability-snapshot",
+            "conflict-report", "execution-evidence-artifact"
+          ]
+        },
+        "schema_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+        "registry_contract_version": {"type": "string", "enum": ["2.0", "2.1", "2.2"]},
+        "authority_contract_version": {"type": "string", "enum": ["none", "1.0"]},
+        "registry_validation_context": {"type": "string", "enum": ["strict_execution", "declaration_intent"]},
+        "schema_file": {"type": "string", "pattern": "^[a-z0-9.-]+\\.schema\\.json$"},
+        "schema_id": {"type": "string", "pattern": "^https://schemas\\.format-monograph\\.local/"},
+        "version_source": {"type": "string", "enum": ["legacy_matrix", "artifact_fields"]}
+      }
+    },
+    "schema_resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_file", "schema_id", "schema_version", "registry_contract_version",
+        "resource_kind", "fingerprint_inventory", "version_source"
+      ],
+      "properties": {
+        "schema_file": {"type": "string", "pattern": "^[a-z0-9.-]+\\.schema\\.json$"},
+        "schema_id": {"type": "string", "pattern": "^https://schemas\\.format-monograph\\.local/"},
+        "schema_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+        "registry_contract_version": {"type": "string", "enum": ["none", "2.0", "2.1", "2.2"]},
+        "resource_kind": {"type": "string", "enum": ["fingerprint_shared", "contract_metadata"]},
+        "fingerprint_inventory": {"type": "boolean"},
+        "version_source": {"type": "string", "enum": ["legacy_matrix", "schema_metadata", "contract_matrix"]}
+      }
+    }
+  }
+}

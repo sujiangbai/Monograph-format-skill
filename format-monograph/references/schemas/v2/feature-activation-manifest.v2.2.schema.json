@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.2/feature-activation-manifest.schema.json",
+  "title": "Format Monograph V2.2 Intent Feature Activation Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version",
+    "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint", "features"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "feature-activation-manifest"},
+    "schema_version": {"const": "2.2"},
+    "registry_contract_version": {"const": "2.2"},
+    "authority_contract_version": {"const": "1.0"},
+    "artifact_id": {"$ref": "../v2.3/common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "../v2.3/common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "../v2.3/common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_v2_schema", "profile_v2_composer", "monograph_base_v041", "final_ready_eligible"],
+      "properties": {
+        "profile_v2_schema": {"type": "boolean"},
+        "profile_v2_composer": {"type": "boolean"},
+        "monograph_base_v041": {"type": "boolean"},
+        "final_ready_eligible": {"const": false}
+      }
+    }
+  }
+}

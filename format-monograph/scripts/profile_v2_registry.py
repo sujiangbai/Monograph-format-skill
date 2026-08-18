@@ -22,18 +22,22 @@ SCHEMA_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas" /
 REGISTRY_SCHEMA_PATHS = {
     "2.0": SCHEMA_DIR / "property-registry.schema.json",
     "2.1": SCHEMA_DIR / "property-registry.v2.1.schema.json",
+    "2.2": SCHEMA_DIR / "property-registry.v2.2.schema.json",
 }
 CORE_REGISTRY_PATHS = {
     "2.0": SCHEMA_DIR / "property-registry.core.json",
     "2.1": SCHEMA_DIR / "property-registry.v2.1.core.json",
+    "2.2": SCHEMA_DIR / "property-registry.v2.2.core.json",
 }
 GENERATED_CATALOG_PATHS = {
     "2.0": SCHEMA_DIR / "property-catalog.generated.schema.json",
     "2.1": SCHEMA_DIR / "property-catalog.v2.1.generated.schema.json",
+    "2.2": SCHEMA_DIR / "property-catalog.v2.2.generated.schema.json",
 }
 GENERATED_TYPED_VALUE_PATHS = {
     "2.0": SCHEMA_DIR / "typed-value.generated.schema.json",
     "2.1": SCHEMA_DIR / "typed-value.v2.1.generated.schema.json",
+    "2.2": SCHEMA_DIR / "typed-value.v2.2.generated.schema.json",
 }
 REGISTRY_SCHEMA_PATH = REGISTRY_SCHEMA_PATHS["2.0"]
 CORE_REGISTRY_PATH = CORE_REGISTRY_PATHS["2.0"]
@@ -66,6 +70,7 @@ FORBIDDEN_CALLABLE_TOKENS = {
     "system",
 }
 NUMERIC_DATA_TYPES = {"integer", "decimal"}
+REGISTRY_VALIDATION_CONTEXTS = {"strict_execution", "declaration_intent"}
 
 
 class RegistryContractError(ValueError):
@@ -174,8 +179,15 @@ def _numeric_range_errors(
     return errors
 
 
-def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
+def registry_semantic_errors(
+    registry: dict[str, Any], *, validation_context: str = "strict_execution"
+) -> list[str]:
     """Check cross-catalog references without duplicating property knowledge."""
+
+    if validation_context not in REGISTRY_VALIDATION_CONTEXTS:
+        return [f"Unknown registry validation context: {validation_context}."]
+    if validation_context == "declaration_intent" and registry.get("schema_version") != "2.2":
+        return ["Declaration/intent validation is available only for registry contract 2.2."]
 
     errors = _ensure_unique_catalog_ids(registry)
     known_types = set(_catalog_ids(registry, "data_types"))
@@ -208,7 +220,7 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
         )
 
     schema_version = registry.get("schema_version")
-    if schema_version == "2.1":
+    if schema_version in {"2.1", "2.2"}:
         unit_index = {item["unit_id"]: item for item in registry.get("units", [])}
         canonical_by_dimension: dict[str, list[str]] = {}
         for unit in registry.get("units", []):
@@ -309,7 +321,7 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
             errors.append(
                 f"{property_id} declares decimal comparison precision for a nonnumeric data type."
             )
-        if schema_version == "2.1" and item["data_type_id"] == "decimal":
+        if schema_version in {"2.1", "2.2"} and item["data_type_id"] == "decimal":
             if item["normalizer_id"] != "normalizer.decimal":
                 errors.append(f"{property_id} decimal values require normalizer.decimal.")
             if item["comparator_id"] != "comparator.decimal":
@@ -318,14 +330,25 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
         if "automatic" in item.get("modes", []):
             executor = executor_index.get(item["executor_capability_id"])
             auditor = auditor_index.get(item["auditor_capability_id"])
-            if executor is None or executor.get("availability") != "implemented":
-                errors.append(
-                    f"{property_id} cannot use automatic mode without an implemented executor."
-                )
-            if auditor is None or auditor.get("availability") != "implemented":
-                errors.append(
-                    f"{property_id} cannot use automatic mode without an implemented auditor."
-                )
+            if validation_context == "strict_execution":
+                if executor is None or executor.get("availability") != "implemented":
+                    errors.append(
+                        f"{property_id} cannot use automatic mode without an implemented executor."
+                    )
+                if auditor is None or auditor.get("availability") != "implemented":
+                    errors.append(
+                        f"{property_id} cannot use automatic mode without an implemented auditor."
+                    )
+            else:
+                allowed = {"reserved", "implemented"}
+                if executor is None or executor.get("availability") not in allowed:
+                    errors.append(
+                        f"{property_id} declaration intent requires a reserved or implemented executor."
+                    )
+                if auditor is None or auditor.get("availability") not in allowed:
+                    errors.append(
+                        f"{property_id} declaration intent requires a reserved or implemented auditor."
+                    )
 
         canonical_unit = item.get("canonical_unit_id")
         allowed_units = set(item.get("allowed_unit_ids", []))
@@ -340,7 +363,7 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
             errors.append(f"{property_id} must include its canonical unit in allowed_unit_ids.")
         if canonical_unit is None and allowed_units:
             errors.append(f"{property_id} cannot allow units without a canonical unit.")
-        if schema_version == "2.1" and canonical_unit is not None:
+        if schema_version in {"2.1", "2.2"} and canonical_unit is not None:
             unit_index = {unit["unit_id"]: unit for unit in registry.get("units", [])}
             canonical = unit_index.get(canonical_unit)
             if canonical is not None and canonical["canonical_unit_id"] != canonical_unit:
@@ -375,7 +398,9 @@ def registry_semantic_errors(registry: dict[str, Any]) -> list[str]:
     return errors
 
 
-def validate_registry_document(registry: dict[str, Any]) -> None:
+def validate_registry_document(
+    registry: dict[str, Any], *, validation_context: str = "strict_execution"
+) -> None:
     version = registry.get("schema_version")
     try:
         schema_path = REGISTRY_SCHEMA_PATHS[version]
@@ -386,7 +411,9 @@ def validate_registry_document(registry: dict[str, Any]) -> None:
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     errors = _format_errors(validator, registry)
     if not errors:
-        errors.extend(registry_semantic_errors(registry))
+        errors.extend(
+            registry_semantic_errors(registry, validation_context=validation_context)
+        )
     if errors:
         raise RegistryContractError("Invalid property registry: " + " | ".join(errors))
 
@@ -396,6 +423,7 @@ def load_registry(
     *,
     allow_test: bool = False,
     version: str = "2.0",
+    validation_context: str = "strict_execution",
 ) -> dict[str, Any]:
     if version not in CORE_REGISTRY_PATHS:
         raise RegistryContractError(f"Unsupported property registry version: {version}")
@@ -404,7 +432,7 @@ def load_registry(
         raise RegistryContractError(
             f"Registry version {registry.get('schema_version')} does not match requested {version}."
         )
-    validate_registry_document(registry)
+    validate_registry_document(registry, validation_context=validation_context)
     if registry["registry_scope"] == "test" and not allow_test:
         raise RegistryContractError("Production loader refuses test-only property registries.")
     return registry
@@ -427,16 +455,18 @@ def _value_schema(data_type: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_typed_value_schema(registry: dict[str, Any]) -> dict[str, Any]:
+def build_typed_value_schema(
+    registry: dict[str, Any], *, validation_context: str = "strict_execution"
+) -> dict[str, Any]:
     """Generate every typed scalar contract from the registry's data type catalog."""
 
-    validate_registry_document(registry)
+    validate_registry_document(registry, validation_context=validation_context)
     definitions = {
         item["data_type_id"]: _value_schema(item)
         for item in sorted(registry["data_types"], key=lambda value: value["data_type_id"])
     }
     version = registry["schema_version"]
-    schema_base = "v2" if version == "2.0" else "v2.1"
+    schema_base = "v2" if version == "2.0" else f"v{version}"
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": f"https://schemas.format-monograph.local/{schema_base}/typed-value.generated.schema.json",
@@ -455,10 +485,12 @@ def build_typed_value_schema(registry: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-def build_property_catalog_schema(registry: dict[str, Any]) -> dict[str, Any]:
+def build_property_catalog_schema(
+    registry: dict[str, Any], *, validation_context: str = "strict_execution"
+) -> dict[str, Any]:
     """Generate the property-binding schema only from registry declarations."""
 
-    validate_registry_document(registry)
+    validate_registry_document(registry, validation_context=validation_context)
     variants: list[dict[str, Any]] = []
     for item in sorted(registry["properties"], key=lambda value: value["property_id"]):
         unit_schema: dict[str, Any]
@@ -493,7 +525,7 @@ def build_property_catalog_schema(registry: dict[str, Any]) -> dict[str, Any]:
             }
         )
     version = registry["schema_version"]
-    schema_base = "v2" if version == "2.0" else "v2.1"
+    schema_base = "v2" if version == "2.0" else f"v{version}"
     catalog = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": f"https://schemas.format-monograph.local/{schema_base}/property-catalog.generated.schema.json",
@@ -545,9 +577,14 @@ def typed_value_differences(
 
 
 def verify_committed_catalog(
-    registry: dict[str, Any] | None = None, *, version: str = "2.0"
+    registry: dict[str, Any] | None = None,
+    *,
+    version: str = "2.0",
+    validation_context: str = "strict_execution",
 ) -> None:
-    registry = registry or load_registry(version=version)
+    registry = registry or load_registry(
+        version=version, validation_context=validation_context
+    )
     if registry.get("schema_version") != version:
         raise RegistryContractError(
             f"Registry version {registry.get('schema_version')} does not match requested {version}."
@@ -558,9 +595,13 @@ def verify_committed_catalog(
             "Production registry differs from the committed property registry."
         )
     committed = _load_json(GENERATED_CATALOG_PATHS[version])
-    generated = build_property_catalog_schema(registry)
+    generated = build_property_catalog_schema(
+        registry, validation_context=validation_context
+    )
     committed_typed_values = _load_json(GENERATED_TYPED_VALUE_PATHS[version])
-    generated_typed_values = build_typed_value_schema(registry)
+    generated_typed_values = build_typed_value_schema(
+        registry, validation_context=validation_context
+    )
     differences = catalog_differences(registry, committed)
     if differences["registry_only"] or differences["schema_only"]:
         raise RegistryContractError(f"Registry/schema property difference is not zero: {differences}")
@@ -603,7 +644,7 @@ def validate_binding_for_layer(
             f"Property {entry['property_id']} binding uses the wrong data type."
         )
     effective_binding = binding
-    if registry.get("schema_version") == "2.1":
+    if registry.get("schema_version") in {"2.1", "2.2"}:
         try:
             effective_binding = normalize_property_binding(binding, registry)
         except ValueNormalizationError as exc:

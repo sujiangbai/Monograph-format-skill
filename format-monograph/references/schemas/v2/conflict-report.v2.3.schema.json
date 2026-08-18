@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.3/conflict-report.schema.json",
+  "title": "Format Monograph V2.3 Declaration Intent Composition Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version",
+    "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint",
+    "activation", "runtime_eligible", "final_ready_eligible", "delivery_allowed",
+    "generated_at", "bindings", "candidate_groups", "scope_partitions",
+    "proposed_resolutions", "fatal_diagnostics", "unresolvable_blockers",
+    "approval_required_conflicts", "diagnostics", "proposal_status"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "conflict-report"},
+    "schema_version": {"const": "2.3"},
+    "registry_contract_version": {"const": "2.2"},
+    "authority_contract_version": {"const": "1.0"},
+    "activation": {"const": "disabled"},
+    "runtime_eligible": {"const": false},
+    "final_ready_eligible": {"const": false},
+    "delivery_allowed": {"const": false},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "generated_at": {"type": "string", "format": "date-time", "x-semantic-fingerprint": "exclude"},
+    "bindings": {"$ref": "common.schema.json#/$defs/composition_report_bindings"},
+    "candidate_groups": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate_group_id", "items": {"$ref": "#/$defs/candidate_group"}},
+    "scope_partitions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "partition_id", "items": {"$ref": "#/$defs/scope_partition"}},
+    "proposed_resolutions": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "proposed_resolution_id", "items": {"$ref": "#/$defs/proposed_resolution"}},
+    "fatal_diagnostics": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "diagnostic_id", "items": {"$ref": "#/$defs/fatal_diagnostic"}},
+    "unresolvable_blockers": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "blocker_id", "items": {"$ref": "#/$defs/unresolvable_blocker"}},
+    "approval_required_conflicts": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "conflict_id", "items": {"$ref": "#/$defs/approval_required_conflict"}},
+    "diagnostics": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "diagnostic_id", "items": {"$ref": "#/$defs/diagnostic"}},
+    "proposal_status": {"type": "string", "enum": ["fatal", "unresolvable", "awaiting_approval", "resolvable"]}
+  },
+  "$defs": {
+    "candidate_group": {
+      "type": "object", "additionalProperties": false,
+      "required": ["candidate_group_id", "key", "candidates", "excluded_candidates"],
+      "properties": {
+        "candidate_group_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate_id", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/candidate_record"}},
+        "excluded_candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate.candidate_id", "items": {"$ref": "common.schema.json#/$defs/excluded_candidate"}}
+      }
+    },
+    "scope_partition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["partition_id", "key", "source_scope", "partition_scopes", "evidence_status"],
+      "properties": {
+        "partition_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "source_scope": {"$ref": "common.schema.json#/$defs/normalized_scope"},
+        "partition_scopes": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "scope_id", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/normalized_scope"}},
+        "evidence_status": {"type": "string", "enum": ["not_evaluated", "verified", "failed"]}
+      }
+    },
+    "proposed_resolution": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "proposed_resolution_id", "key", "proposed_binding", "final_layer_kind",
+        "final_source", "candidate_chain", "override_chain", "confidence", "execution_mode"
+      ],
+      "properties": {
+        "proposed_resolution_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "proposed_binding": {"$ref": "../v2.2/property-catalog.generated.schema.json"},
+        "final_layer_kind": {"$ref": "common.schema.json#/$defs/layer_kind"},
+        "final_source": {"$ref": "common.schema.json#/$defs/source_reference"},
+        "candidate_chain": {"type": "array", "x-semantic-array": "ordered", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/candidate_record"}},
+        "override_chain": {"type": "array", "x-semantic-array": "ordered", "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/stable_id"}},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "execution_mode": {"type": "string", "enum": ["automatic", "preserve", "qa", "report", "block"]}
+      }
+    },
+    "fatal_diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["diagnostic_id", "category", "reason_code"],
+      "properties": {
+        "diagnostic_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "category": {"type": "string", "enum": ["invalid_artifact", "invalid_schema", "invalid_registry", "invalid_fingerprint", "invalid_binding", "module_asset_out_of_bounds", "safety_hard_failure"]},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"},
+        "related_artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"}
+      }
+    },
+    "unresolvable_blocker": {
+      "type": "object", "additionalProperties": false,
+      "required": ["blocker_id", "category", "key", "reason_code", "candidate_ids"],
+      "properties": {
+        "blocker_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "category": {"type": "string", "enum": ["crossing_overlap", "unknown_overlap", "unprovable_condition", "unexpressible_difference", "partition_conservation_failure"]},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"},
+        "candidate_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/stable_id"}}
+      }
+    },
+    "approval_required_conflict": {
+      "type": "object", "additionalProperties": false,
+      "required": ["conflict_id", "proposed_resolution_id", "key", "candidates", "allowed_decisions"],
+      "properties": {
+        "conflict_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "proposed_resolution_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate_id", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/candidate_record"}},
+        "allowed_decisions": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["adopt_proposed", "select_candidate", "keep_original", "exclude_candidate"]}}
+      }
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["diagnostic_id", "category", "reason_code"],
+      "properties": {
+        "diagnostic_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "category": {"type": "string", "enum": ["preflight", "out_of_scope", "module_out_of_scope", "qa_exclusion"]},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"}
+      }
+    }
+  }
+}

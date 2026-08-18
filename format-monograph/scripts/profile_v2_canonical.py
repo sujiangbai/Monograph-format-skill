@@ -345,14 +345,28 @@ def _schema_for_document(document: dict[str, Any]) -> tuple[dict[str, Any], dict
     return schema, schema_documents(), registry
 
 
+def _schema_for_intent_document_v041(
+    document: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Any]]:
+    from profile_v2_artifacts import load_routed_contracts, schema_documents
+
+    _, schema, registry, _ = load_routed_contracts(
+        document, matrix_version="1.1"
+    )
+    return schema, schema_documents(matrix_version="1.1"), registry
+
+
 def _semantic_projection(
     document: dict[str, Any],
     *,
     schema: dict[str, Any],
     documents: Mapping[str, dict[str, Any]],
     registry: dict[str, Any],
+    registry_validation_context: str = "strict_execution",
 ) -> dict[str, Any]:
-    validate_registry_document(registry)
+    validate_registry_document(
+        registry, validation_context=registry_validation_context
+    )
     audit_schema_composition(documents)
     schema_id = schema.get("$id")
     if not isinstance(schema_id, str):
@@ -389,6 +403,45 @@ def verify_semantic_fingerprint(document: dict[str, Any]) -> None:
 def stamp_semantic_fingerprint(document: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(document)
     result["semantic_fingerprint"] = compute_semantic_fingerprint(result)
+    return result
+
+
+def intent_semantic_projection_v041(document: dict[str, Any]) -> dict[str, Any]:
+    """Project a P3 declaration/intent artifact using the append-only 1.1 route."""
+
+    schema, documents, registry = _schema_for_intent_document_v041(document)
+    return _semantic_projection(
+        document,
+        schema=schema,
+        documents=documents,
+        registry=registry,
+        registry_validation_context="declaration_intent",
+    )
+
+
+def canonical_intent_semantic_bytes_v041(document: dict[str, Any]) -> bytes:
+    return _raw_canonical_bytes(intent_semantic_projection_v041(document))
+
+
+def compute_intent_semantic_fingerprint_v041(document: dict[str, Any]) -> str:
+    return FINGERPRINT_PATTERN_PREFIX + hashlib.sha256(
+        canonical_intent_semantic_bytes_v041(document)
+    ).hexdigest()
+
+
+def verify_intent_semantic_fingerprint_v041(document: dict[str, Any]) -> None:
+    expected = compute_intent_semantic_fingerprint_v041(document)
+    if document.get("semantic_fingerprint") != expected:
+        raise CanonicalizationError(
+            "semantic_fingerprint does not match canonical intent semantics."
+        )
+
+
+def stamp_intent_semantic_fingerprint_v041(
+    document: dict[str, Any],
+) -> dict[str, Any]:
+    result = deepcopy(document)
+    result["semantic_fingerprint"] = compute_intent_semantic_fingerprint_v041(result)
     return result
 
 
@@ -510,6 +563,8 @@ def _schema_type_feature(node: dict[str, Any]) -> str:
 
 def fingerprint_field_inventory(
     documents: Mapping[str, dict[str, Any]],
+    *,
+    matrix_version: str = "1.0",
 ) -> list[dict[str, Any]]:
     """Bind every real schema property node to a classification evidence record.
 
@@ -690,7 +745,7 @@ def fingerprint_field_inventory(
 
     for schema_id, schema in sorted(documents.items()):
         schema_version, registry_contract_version, inventory_enabled = (
-            schema_inventory_contract(schema_id)
+            schema_inventory_contract(schema_id, matrix_version=matrix_version)
         )
         if not inventory_enabled:
             continue
