@@ -29,8 +29,9 @@ from profile_v2_authority import authority_contract_fingerprint  # noqa: E402
 from profile_v2_canonical import _stamp_semantic_fingerprint_for_test  # noqa: E402
 from profile_v2_composer import (  # noqa: E402
     ComposerDisabledError,
-    _apply_resolutions_for_test,
-    _compose_profile_for_test,
+    _ContractAdapter,
+    _apply_report,
+    _report_documents,
 )
 from profile_v2_registry import load_registry  # noqa: E402
 from profile_v2_scope import normalize_scope, scope_disjoint  # noqa: E402
@@ -79,6 +80,39 @@ def stamp(document: dict, registry: dict) -> dict:
         schema=schema,
         documents=documents,
         registry=registry,
+    )
+
+
+def composer_test_adapter(registry: dict) -> _ContractAdapter:
+    """Build the private test adapter outside the production composer module."""
+
+    def validate(document: dict) -> None:
+        _validate_artifact_for_test(
+            document,
+            registry=registry,
+            features={"profile_v2_schema": True},
+        )
+
+    def feature_enabled(manifest: dict | None) -> bool:
+        if manifest is None:
+            return False
+        try:
+            validate(manifest)
+        except ValueError:
+            return False
+        features = manifest.get("features", {})
+        return bool(
+            manifest.get("artifact_kind") == "feature-activation-manifest"
+            and manifest.get("schema_version") == "2.1"
+            and features.get("profile_v2_schema") is True
+            and features.get("profile_v2_composer") is True
+        )
+
+    return _ContractAdapter(
+        registry=registry,
+        validate=validate,
+        stamp=lambda document: stamp(document, registry),
+        feature_enabled=feature_enabled,
     )
 
 
@@ -169,10 +203,10 @@ def asset(
 
 def compose(registry: dict, assets: list[dict], *, enabled: bool = True) -> tuple[dict, dict]:
     manifest = feature(registry, enabled=enabled)
-    report = _compose_profile_for_test(
+    report = _report_documents(
         assets,
         manifest,
-        registry=registry,
+        adapter=composer_test_adapter(registry),
         input_fingerprint=digest("source-document"),
         structure_fingerprint=digest("structure-map"),
         artifact_id="conflict-report:p2b-c",
@@ -189,6 +223,7 @@ def approval(
     *,
     conflict_index: int = 0,
     candidate_index: int = 0,
+    candidate_id: str | None = None,
     approval_id: str = "approval:p2b-c",
     previous: str | None = None,
 ) -> dict:
@@ -199,7 +234,7 @@ def approval(
         "normalized_scope": deepcopy(conflict["key"]["normalized_scope"]),
     }
     if decision in {"select_candidate", "exclude_candidate"}:
-        target["candidate_id"] = conflict["candidates"][candidate_index]["candidate_id"]
+        target["candidate_id"] = candidate_id or conflict["candidates"][candidate_index]["candidate_id"]
     decision_type = {
         "adopt_proposed": "conflict_resolution",
         "select_candidate": "conflict_resolution",
@@ -239,10 +274,10 @@ def approval(
 
 
 def apply(registry: dict, report: dict, approvals: list[dict]) -> dict:
-    return _apply_resolutions_for_test(
+    return _apply_report(
         report,
         approvals,
-        registry=registry,
+        adapter=composer_test_adapter(registry),
         task_id="task:p2b-c",
         task_fingerprint=digest("task-p2b-c"),
         artifact_id="final-execution-profile:p2b-c",
@@ -513,20 +548,183 @@ class P2bCComposerTests(unittest.TestCase):
         )
         keep = approval(self.registry, preserve_report, "keep_original", approval_id="approval:keep")
         keep_result = apply(self.registry, preserve_report, [keep])
-        excluded = approval(self.registry, report, "exclude_candidate", candidate_index=0, approval_id="approval:exclude")
-        excluded_result = apply(self.registry, report, [excluded])
-        missing_result = apply(self.registry, report, [])
+        proposal = report["proposed_resolutions"][0]
+        conflict = report["approval_required_conflicts"][0]
+        proposed_candidate = next(
+            item
+            for item in conflict["candidates"]
+            if item["source"] == proposal["final_source"]
+            and item["property_binding"] == proposal["proposed_binding"]
+        )
+        losing_candidate = next(
+            item
+            for item in conflict["candidates"]
+            if item["candidate_id"] != proposed_candidate["candidate_id"]
+        )
+        exclude_winner = approval(
+            self.registry,
+            report,
+            "exclude_candidate",
+            candidate_id=proposed_candidate["candidate_id"],
+            approval_id="approval:exclude-winner",
+        )
+        exclude_winner_result = apply(self.registry, report, [exclude_winner])
+        exclude_loser = approval(
+            self.registry,
+            report,
+            "exclude_candidate",
+            candidate_id=losing_candidate["candidate_id"],
+            approval_id="approval:exclude-loser",
+        )
+        exclude_loser_result = apply(self.registry, report, [exclude_loser])
+
+        redundant_report, _ = compose(
+            self.registry,
+            [
+                asset(self.registry, "app_redundant_high", value="12.00"),
+                asset(
+                    self.registry,
+                    "app_redundant_medium",
+                    value="12.00",
+                    confidence="medium",
+                ),
+            ],
+        )
+        redundant_conflict = redundant_report["approval_required_conflicts"][0]
+        redundant_target = next(
+            item
+            for item in redundant_conflict["candidates"]
+            if item["confidence"] == "medium"
+        )
+        redundant_remaining = next(
+            item
+            for item in redundant_conflict["candidates"]
+            if item["candidate_id"] != redundant_target["candidate_id"]
+        )
+        redundant_exclusion = approval(
+            self.registry,
+            redundant_report,
+            "exclude_candidate",
+            candidate_id=redundant_target["candidate_id"],
+            approval_id="approval:exclude-redundant",
+        )
+        redundant_result = apply(
+            self.registry, redundant_report, [redundant_exclusion]
+        )
+
+        unresolved_report, _ = compose(
+            self.registry,
+            [
+                asset(self.registry, "app_unresolved_a", value="10.00"),
+                asset(self.registry, "app_unresolved_b", value="11.00"),
+                asset(self.registry, "app_unresolved_c", value="12.00"),
+            ],
+        )
+        unresolved_exclusion = approval(
+            self.registry,
+            unresolved_report,
+            "exclude_candidate",
+            candidate_index=0,
+            approval_id="approval:exclude-still-conflicted",
+        )
+        unresolved_result = apply(
+            self.registry, unresolved_report, [unresolved_exclusion]
+        )
+
+        weak_report, _ = compose(
+            self.registry,
+            [
+                asset(
+                    self.registry,
+                    "app_weak_low",
+                    value="13.00",
+                    confidence="low",
+                ),
+                asset(
+                    self.registry,
+                    "app_weak_medium",
+                    value="13.00",
+                    confidence="medium",
+                ),
+            ],
+        )
+        weak_conflict = weak_report["approval_required_conflicts"][0]
+        weak_target = next(
+            item for item in weak_conflict["candidates"] if item["confidence"] == "low"
+        )
+        weak_exclusion = approval(
+            self.registry,
+            weak_report,
+            "exclude_candidate",
+            candidate_id=weak_target["candidate_id"],
+            approval_id="approval:exclude-to-medium",
+        )
+        weak_result = apply(self.registry, weak_report, [weak_exclusion])
+
+        unknown_target = approval(
+            self.registry,
+            report,
+            "exclude_candidate",
+            candidate_id="candidate:" + ("f" * 64),
+            approval_id="approval:exclude-unknown",
+        )
+        unknown_target_result = apply(self.registry, report, [unknown_target])
+
+        foreign_report, _ = compose(
+            self.registry,
+            [
+                asset(
+                    self.registry,
+                    "app_foreign_a1",
+                    value="10.00",
+                    scope=raw_scope("document:a"),
+                ),
+                asset(
+                    self.registry,
+                    "app_foreign_a2",
+                    value="11.00",
+                    scope=raw_scope("document:a"),
+                ),
+                asset(
+                    self.registry,
+                    "app_foreign_b1",
+                    value="12.00",
+                    scope=raw_scope("document:b"),
+                ),
+                asset(
+                    self.registry,
+                    "app_foreign_b2",
+                    value="13.00",
+                    scope=raw_scope("document:b"),
+                ),
+            ],
+        )
+        foreign_candidate_id = foreign_report["approval_required_conflicts"][1][
+            "candidates"
+        ][0]["candidate_id"]
+        foreign_target = approval(
+            self.registry,
+            foreign_report,
+            "exclude_candidate",
+            conflict_index=0,
+            candidate_id=foreign_candidate_id,
+            approval_id="approval:exclude-foreign",
+        )
+        foreign_target_result = apply(
+            self.registry, foreign_report, [foreign_target]
+        )
+
         medium_report, _ = compose(
             self.registry, [asset(self.registry, "app_medium", confidence="medium")]
         )
-        medium_exclusion = approval(
+        sole_exclusion = approval(
             self.registry,
             medium_report,
             "exclude_candidate",
-            approval_id="approval:medium-exclusion",
+            approval_id="approval:exclude-sole",
         )
-        medium_exclusion_result = apply(
-            self.registry, medium_report, [medium_exclusion]
+        sole_exclusion_result = apply(
+            self.registry, medium_report, [sole_exclusion]
         )
         unexpressible_keep = approval(
             self.registry, report, "keep_original", approval_id="approval:no-preserve"
@@ -584,32 +782,132 @@ class P2bCComposerTests(unittest.TestCase):
                         self.assertFalse(adopt_dag.runtime_eligible)
                 elif index <= 10:
                     result = selected_result
-                    self.assertEqual("profile_generated", result["status"])
                     selected_id = selected["target"]["candidate_id"]
                     resolved = result["final_profile"]["resolved_properties"][0]
-                    self.assertTrue(any(item["candidate_id"] == selected_id and item["source"] == resolved["final_source"] for item in resolved["candidate_chain"]))
-                elif index <= 15:
-                    result = keep_result
-                    self.assertEqual("profile_generated", result["status"])
-                    self.assertEqual("preserve", result["final_profile"]["resolved_properties"][0]["execution_mode"])
-                elif index <= 20:
-                    result = excluded_result
-                    self.assertEqual("profile_generated", result["status"])
-                    excluded = result["final_profile"]["resolved_properties"][0]["excluded_candidates"]
-                    self.assertEqual("qa_exclusion", excluded[0]["exclusion_reason"])
-                elif index <= 23:
-                    result = (
-                        missing_result
-                        if index == 21
-                        else medium_exclusion_result
-                        if index == 22
-                        else unexpressible_keep_result
+                    selected_candidate = next(
+                        item
+                        for item in conflict["candidates"]
+                        if item["candidate_id"] == selected_id
                     )
-                    self.assertEqual("awaiting_approval", result["status"])
+                    if index == 6:
+                        self.assertEqual("profile_generated", result["status"])
+                    elif index == 7:
+                        self.assertEqual(
+                            selected_candidate["property_binding"],
+                            resolved["resolved_binding"],
+                        )
+                    elif index == 8:
+                        self.assertEqual(selected_candidate["source"], resolved["final_source"])
+                    elif index == 9:
+                        self.assertTrue(
+                            any(
+                                item["candidate_id"] == selected_id
+                                for item in resolved["candidate_chain"]
+                            )
+                        )
+                    else:
+                        self.assertEqual(
+                            selected["approval_id"],
+                            result["final_profile"]["closure_evidence"][0][
+                                "qa_decision_id"
+                            ],
+                        )
+                elif index <= 15:
+                    if index == 15:
+                        self.assertEqual(
+                            "awaiting_approval", unexpressible_keep_result["status"]
+                        )
+                        self.assertIsNone(unexpressible_keep_result["final_profile"])
+                    else:
+                        resolved = keep_result["final_profile"]["resolved_properties"][0]
+                        if index == 11:
+                            self.assertEqual("profile_generated", keep_result["status"])
+                        elif index == 12:
+                            self.assertEqual("preserve", resolved["execution_mode"])
+                        elif index == 13:
+                            self.assertEqual("preserve", resolved["resolved_binding"]["mode"])
+                        else:
+                            self.assertTrue(
+                                any(
+                                    item["source"] == resolved["final_source"]
+                                    and item["property_binding"]["mode"] == "preserve"
+                                    for item in resolved["candidate_chain"]
+                                )
+                            )
+                elif index == 16:
+                    resolved = exclude_winner_result["final_profile"]["resolved_properties"][0]
+                    self.assertEqual("profile_generated", exclude_winner_result["status"])
+                    self.assertEqual(losing_candidate["property_binding"], resolved["resolved_binding"])
+                    self.assertEqual(losing_candidate["layer_kind"], resolved["final_layer_kind"])
+                    self.assertEqual(losing_candidate["source"], resolved["final_source"])
+                    self.assertEqual(
+                        [losing_candidate["candidate_id"]],
+                        [item["candidate_id"] for item in resolved["candidate_chain"]],
+                    )
+                    self.assertEqual(
+                        proposed_candidate["candidate_id"],
+                        resolved["excluded_candidates"][0]["candidate"]["candidate_id"],
+                    )
+                elif index == 17:
+                    resolved = exclude_loser_result["final_profile"]["resolved_properties"][0]
+                    self.assertEqual("profile_generated", exclude_loser_result["status"])
+                    self.assertEqual(proposal["proposed_binding"], resolved["resolved_binding"])
+                    self.assertEqual(proposal["final_source"], resolved["final_source"])
+                    self.assertEqual(
+                        losing_candidate["candidate_id"],
+                        resolved["excluded_candidates"][0]["candidate"]["candidate_id"],
+                    )
+                elif index == 18:
+                    resolved = redundant_result["final_profile"]["resolved_properties"][0]
+                    self.assertEqual("profile_generated", redundant_result["status"])
+                    self.assertEqual("12.00", resolved["resolved_binding"]["value"]["value"])
+                    self.assertEqual(redundant_remaining["layer_kind"], resolved["final_layer_kind"])
+                    self.assertEqual(redundant_remaining["source"], resolved["final_source"])
+                    self.assertEqual(
+                        [redundant_remaining["candidate_id"]],
+                        [item["candidate_id"] for item in resolved["candidate_chain"]],
+                    )
+                    self.assertEqual(
+                        redundant_target["candidate_id"],
+                        resolved["excluded_candidates"][0]["candidate"]["candidate_id"],
+                    )
+                    self.assertEqual(
+                        "qa_exclusion",
+                        resolved["excluded_candidates"][0]["exclusion_reason"],
+                    )
+                elif index == 19:
+                    self.assertEqual("awaiting_approval", unresolved_result["status"])
+                    self.assertIsNone(unresolved_result["final_profile"])
+                elif index == 20:
+                    self.assertEqual("awaiting_approval", weak_result["status"])
+                    self.assertIsNone(weak_result["final_profile"])
+                elif index == 21:
+                    self.assertEqual("awaiting_approval", unknown_target_result["status"])
+                    self.assertIsNone(unknown_target_result["final_profile"])
+                    self.assertTrue(unknown_target_result["application_diagnostics"])
+                elif index == 22:
+                    self.assertEqual("awaiting_approval", foreign_target_result["status"])
+                    self.assertIsNone(foreign_target_result["final_profile"])
+                    self.assertTrue(foreign_target_result["application_diagnostics"])
+                elif index == 23:
+                    self.assertEqual("awaiting_approval", sole_exclusion_result["status"])
+                    self.assertIsNone(sole_exclusion_result["final_profile"])
                 elif index <= 26:
                     result = chain_result
-                    self.assertEqual("profile_generated", result["status"])
-                    self.assertEqual([second["semantic_fingerprint"]], result["final_profile"]["bindings"]["approval_fingerprints"])
+                    if index == 24:
+                        self.assertEqual("profile_generated", result["status"])
+                    elif index == 25:
+                        self.assertEqual(
+                            [second["semantic_fingerprint"]],
+                            result["final_profile"]["bindings"]["approval_fingerprints"],
+                        )
+                    else:
+                        self.assertEqual(
+                            second["approval_id"],
+                            result["final_profile"]["closure_evidence"][0][
+                                "qa_decision_id"
+                            ],
+                        )
                 elif index <= 28:
                     result = branch_result if index == 27 else cycle_result
                     self.assertEqual("awaiting_approval", result["status"])
@@ -688,6 +986,15 @@ class P2bCComposerTests(unittest.TestCase):
         module = ROOT / "format-monograph" / "scripts" / "profile_v2_composer.py"
         source = module.read_text(encoding="utf-8")
         self.assertNotIn("argparse", source)
+        for private_test_adapter in (
+            "_schema_documents",
+            "_test_schema_overrides",
+            "_validate_artifact_for_test",
+            "_stamp_semantic_fingerprint_for_test",
+            "_compose_profile_for_test",
+            "_apply_resolutions_for_test",
+        ):
+            self.assertNotIn(private_test_adapter, source)
         self.assertIsNotNone(importlib.util.spec_from_file_location("p2b_c_candidate", module))
 
 
