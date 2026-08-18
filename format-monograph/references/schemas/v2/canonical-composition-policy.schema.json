@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/contracts/canonical/canonical-composition-policy.schema.json",
+  "title": "Format Monograph Canonical Composition Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "contract_version", "approved_all_of_nodes"],
+  "properties": {
+    "contract_id": {"const": "format-monograph-canonical-composition-policy"},
+    "contract_version": {"const": "1.0"},
+    "approved_all_of_nodes": {
+      "type": "array",
+      "x-semantic-array": "set_by_key",
+      "x-semantic-key": "policy_id",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["policy_id", "schema_id", "json_pointer", "node_digest", "guard_kind"],
+        "properties": {
+          "policy_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"},
+          "schema_id": {"type": "string", "pattern": "^https://schemas\\.format-monograph\\.local/"},
+          "json_pointer": {"type": "string", "pattern": "^#(?:/.*)?$"},
+          "node_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "guard_kind": {"const": "qa_delegated_publisher_authorization"}
+        }
+      }
+    }
+  }
+}

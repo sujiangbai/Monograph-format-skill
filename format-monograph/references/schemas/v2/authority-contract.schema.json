@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/contracts/authority/authority-contract.schema.json",
+  "title": "Format Monograph Authority Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "contract_version", "safety_policy", "layers"],
+  "properties": {
+    "contract_id": {"const": "format-monograph-authority"},
+    "contract_version": {"const": "1.0"},
+    "safety_policy": {"const": "independent_non_overridable"},
+    "layers": {
+      "type": "array",
+      "x-semantic-array": "ordered",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer_id", "rank"],
+        "properties": {
+          "layer_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$"},
+          "rank": {"type": "integer", "minimum": 0, "maximum": 5}
+        }
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
@@ -23,9 +23,18 @@ from profile_v2_registry import (
     validate_registry_document,
     verify_committed_catalog,
 )
+from profile_v2_authority import (
+    AuthorityContractError,
+    authority_contract_fingerprint,
+    load_authority_contract,
+    verify_authority_projection,
+    verify_legacy_layer_compatibility,
+)
 
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas" / "v2"
+CONTRACT_MATRIX_PATH = SCHEMA_DIR / "artifact-contract-matrix.v1.0.json"
+CONTRACT_MATRIX_SCHEMA_PATH = SCHEMA_DIR / "artifact-contract-matrix.schema.json"
 LEGACY_SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent / "references" / "format-profile.schema.json"
 )
@@ -41,11 +50,15 @@ ARTIFACT_KINDS = (
     "execution-evidence-artifact",
 )
 
+_MATRIX_SOURCE = json.loads(CONTRACT_MATRIX_PATH.read_text(encoding="utf-8"))
 ARTIFACT_SCHEMA_FILES = {
-    **{(kind, "2.0"): f"{kind}.schema.json" for kind in ARTIFACT_KINDS},
-    ("layered-rule-asset", "2.1"): "layered-rule-asset.v2.1.schema.json",
-    ("conflict-report", "2.1"): "conflict-report.v2.1.schema.json",
-    ("final-execution-profile", "2.1"): "final-execution-profile.v2.1.schema.json",
+    (
+        route["artifact_kind"],
+        route["schema_version"],
+        route["registry_contract_version"],
+        route["authority_contract_version"],
+    ): route["schema_file"]
+    for route in _MATRIX_SOURCE["routes"]
 }
 VERSION_PATTERN = re.compile(r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)$")
 TEST_REGISTRY_SHARED_CATALOGS = (
@@ -65,6 +78,52 @@ class ArtifactContractError(ValueError):
 
 class ProfileV2DisabledError(ArtifactContractError):
     """Raised when the default-off V2 schema path is not explicitly enabled."""
+
+
+class ArtifactRouteError(ArtifactContractError):
+    """Raised before registry loading when a four-part contract route is invalid."""
+
+
+class ArtifactDagError(ArtifactContractError):
+    """Raised when artifact bindings do not form the approved acyclic graph."""
+
+
+@dataclass(frozen=True)
+class ArtifactEnvelope:
+    artifact_kind: str
+    schema_version: str
+    registry_contract_version: str | None
+    authority_contract_version: str | None
+
+
+@dataclass(frozen=True)
+class ContractRoute:
+    route_id: str
+    artifact_kind: str
+    schema_version: str
+    registry_contract_version: str
+    authority_contract_version: str
+    schema_file: str
+    schema_id: str
+    version_source: str
+
+
+@dataclass(frozen=True)
+class SchemaResourceContract:
+    schema_file: str
+    schema_id: str
+    schema_version: str
+    registry_contract_version: str
+    resource_kind: str
+    fingerprint_inventory: bool
+    version_source: str
+
+
+@dataclass(frozen=True)
+class DagValidationResult:
+    topological_order: tuple[str, ...]
+    artifact_count: int
+    runtime_eligible: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,19 +149,326 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def load_artifact_contract_matrix() -> dict[str, Any]:
+    """Load the sole editable artifact/schema/registry/authority route table."""
+
+    schema = _load_json(CONTRACT_MATRIX_SCHEMA_PATH)
+    Draft202012Validator.check_schema(schema)
+    matrix = _load_json(CONTRACT_MATRIX_PATH)
+    errors = _format_errors(Draft202012Validator(schema), matrix)
+    if errors:
+        raise ArtifactRouteError("Invalid artifact contract matrix: " + " | ".join(errors))
+    return matrix
+
+
+def _contract_routes_from_matrix(matrix: Mapping[str, Any]) -> tuple[ContractRoute, ...]:
+    routes = tuple(ContractRoute(**item) for item in matrix["routes"])
+    identities = [
+        (
+            item.artifact_kind,
+            item.schema_version,
+            item.registry_contract_version,
+            item.authority_contract_version,
+        )
+        for item in routes
+    ]
+    legacy_pairs = [
+        (item.artifact_kind, item.schema_version)
+        for item in routes
+        if item.version_source == "legacy_matrix"
+    ]
+    route_ids = [item.route_id for item in routes]
+    if len(identities) != len(set(identities)):
+        raise ArtifactRouteError("Artifact contract matrix repeats a four-part route identity.")
+    if len(legacy_pairs) != len(set(legacy_pairs)):
+        raise ArtifactRouteError("Artifact contract matrix repeats a legacy artifact/version pair.")
+    if len(route_ids) != len(set(route_ids)):
+        raise ArtifactRouteError("Artifact contract matrix repeats a route_id.")
+    return routes
+
+
+def _contract_routes() -> tuple[ContractRoute, ...]:
+    return _contract_routes_from_matrix(load_artifact_contract_matrix())
+
+
+def _schema_resource_contracts() -> tuple[SchemaResourceContract, ...]:
+    resources = tuple(
+        SchemaResourceContract(**item)
+        for item in load_artifact_contract_matrix()["schema_resources"]
+    )
+    schema_ids = [item.schema_id for item in resources]
+    schema_files = [item.schema_file for item in resources]
+    if len(schema_ids) != len(set(schema_ids)):
+        raise ArtifactRouteError("Artifact contract matrix repeats a schema resource ID.")
+    if len(schema_files) != len(set(schema_files)):
+        raise ArtifactRouteError("Artifact contract matrix repeats a schema resource file.")
+    return resources
+
+
+def schema_inventory_contract(schema_id: str) -> tuple[str, str, bool]:
+    """Return explicit schema/registry versions and inventory eligibility."""
+
+    route_matches = [item for item in _contract_routes() if item.schema_id == schema_id]
+    resource_matches = [
+        item for item in _schema_resource_contracts() if item.schema_id == schema_id
+    ]
+    if len(route_matches) + len(resource_matches) != 1:
+        raise ArtifactRouteError(
+            f"Schema ID has no unique contract-matrix classification: {schema_id}"
+        )
+    if route_matches:
+        route = route_matches[0]
+        return route.schema_version, route.registry_contract_version, True
+    resource = resource_matches[0]
+    return (
+        resource.schema_version,
+        resource.registry_contract_version,
+        resource.fingerprint_inventory,
+    )
+
+
+def read_minimal_artifact_envelope(document: Mapping[str, Any]) -> ArtifactEnvelope:
+    """Read only routing fields; this function never loads a schema or registry."""
+
+    if not isinstance(document, Mapping):
+        raise ArtifactRouteError("Artifact envelope must be a JSON object.")
+    artifact_kind = document.get("artifact_kind")
+    schema_version = document.get("schema_version")
+    if artifact_kind not in ARTIFACT_KINDS:
+        raise ArtifactRouteError(f"Unknown V2 artifact_kind: {artifact_kind}")
+    _parse_version(schema_version)
+    registry_version = document.get("registry_contract_version")
+    authority_version = document.get("authority_contract_version")
+    for field_name, value in (
+        ("registry_contract_version", registry_version),
+        ("authority_contract_version", authority_version),
+    ):
+        if value is not None and not isinstance(value, str):
+            raise ArtifactRouteError(f"{field_name} must be a string when present.")
+    return ArtifactEnvelope(
+        artifact_kind=str(artifact_kind),
+        schema_version=str(schema_version),
+        registry_contract_version=registry_version,
+        authority_contract_version=authority_version,
+    )
+
+
+def _route_artifact_contract_from_routes(
+    document: Mapping[str, Any], routes: tuple[ContractRoute, ...]
+) -> ContractRoute:
+    envelope = read_minimal_artifact_envelope(document)
+    pair_matches = [
+        route
+        for route in routes
+        if route.artifact_kind == envelope.artifact_kind
+        and route.schema_version == envelope.schema_version
+    ]
+    if not pair_matches:
+        raise ArtifactRouteError(
+            f"No route for {envelope.artifact_kind}@{envelope.schema_version}."
+        )
+    sources = {route.version_source for route in pair_matches}
+    if sources == {"artifact_fields"}:
+        if envelope.registry_contract_version is None or envelope.authority_contract_version is None:
+            raise ArtifactRouteError(
+                "New artifact contracts require explicit registry_contract_version and "
+                "authority_contract_version fields."
+            )
+        identity = (
+            envelope.artifact_kind,
+            envelope.schema_version,
+            envelope.registry_contract_version,
+            envelope.authority_contract_version,
+        )
+        exact = [
+            route
+            for route in pair_matches
+            if (
+                route.artifact_kind,
+                route.schema_version,
+                route.registry_contract_version,
+                route.authority_contract_version,
+            )
+            == identity
+        ]
+        if len(exact) != 1:
+            raise ArtifactRouteError("Artifact four-part contract does not match the route matrix.")
+        return exact[0]
+    if sources == {"legacy_matrix"}:
+        if envelope.registry_contract_version is not None or envelope.authority_contract_version is not None:
+            raise ArtifactRouteError("Legacy artifact contracts cannot self-declare route versions.")
+        if len(pair_matches) != 1:
+            raise ArtifactRouteError(
+                "Legacy artifact contracts require one exact matrix row per artifact/version pair."
+            )
+        return pair_matches[0]
+    raise ArtifactRouteError(
+        "Artifact/version pair mixes legacy and explicit route sources."
+    )
+
+
+def route_artifact_contract(document: Mapping[str, Any]) -> ContractRoute:
+    """Resolve the complete route before any registry or authority is loaded."""
+
+    return _route_artifact_contract_from_routes(document, _contract_routes())
+
+
+def verify_contract_matrix_alignment(
+    route_index: Mapping[tuple[str, str, str, str], str] | None = None,
+) -> None:
+    """Reject drift in either direction between the matrix, schemas, and Python index."""
+
+    routes = _contract_routes()
+    expected = {
+        (
+            item.artifact_kind,
+            item.schema_version,
+            item.registry_contract_version,
+            item.authority_contract_version,
+        ): item.schema_file
+        for item in routes
+    }
+    actual = dict(ARTIFACT_SCHEMA_FILES if route_index is None else route_index)
+    if expected != actual:
+        raise ArtifactRouteError("Python artifact route index differs from the contract matrix.")
+    resources = _schema_resource_contracts()
+    routed_schema_ids = {item.schema_id for item in routes}
+    resource_schema_ids = {item.schema_id for item in resources}
+    if routed_schema_ids & resource_schema_ids:
+        raise ArtifactRouteError("A schema cannot be both an artifact route and a resource.")
+    expected_files = {item.schema_file for item in routes} | {
+        item.schema_file for item in resources
+    }
+    actual_files = {path.name for path in SCHEMA_DIR.glob("*.schema.json")}
+    if expected_files != actual_files:
+        raise ArtifactRouteError(
+            "Artifact contract matrix does not classify the complete offline schema set."
+        )
+    for route in routes:
+        path = SCHEMA_DIR / route.schema_file
+        schema = _load_json(path)
+        if schema.get("$id") != route.schema_id:
+            raise ArtifactRouteError(f"Route {route.route_id} has a mismatched schema_id.")
+        properties = schema.get("properties", {})
+        if properties.get("artifact_kind", {}).get("const") != route.artifact_kind:
+            raise ArtifactRouteError(f"Route {route.route_id} has a mismatched artifact_kind.")
+        if properties.get("schema_version", {}).get("const") != route.schema_version:
+            raise ArtifactRouteError(f"Route {route.route_id} has a mismatched schema_version.")
+        if route.version_source == "artifact_fields":
+            required = set(schema.get("required", []))
+            for field_name, expected_value in (
+                ("registry_contract_version", route.registry_contract_version),
+                ("authority_contract_version", route.authority_contract_version),
+            ):
+                if field_name not in required:
+                    raise ArtifactRouteError(
+                        f"Route {route.route_id} schema does not require {field_name}."
+                    )
+                if properties.get(field_name, {}).get("const") != expected_value:
+                    raise ArtifactRouteError(
+                        f"Route {route.route_id} schema disagrees on {field_name}."
+                    )
+    for resource in resources:
+        schema = _load_json(SCHEMA_DIR / resource.schema_file)
+        if schema.get("$id") != resource.schema_id:
+            raise ArtifactRouteError(
+                f"Schema resource {resource.schema_file} has a mismatched schema_id."
+            )
+        if resource.fingerprint_inventory != (
+            resource.resource_kind == "fingerprint_shared"
+        ):
+            raise ArtifactRouteError(
+                f"Schema resource {resource.schema_file} has an inconsistent inventory class."
+            )
+        if resource.version_source == "schema_metadata":
+            if schema.get("x-profile-schema-version") != resource.schema_version:
+                raise ArtifactRouteError(
+                    f"Schema resource {resource.schema_file} has a mismatched profile version."
+                )
+            if (
+                schema.get("x-registry-contract-version")
+                != resource.registry_contract_version
+            ):
+                raise ArtifactRouteError(
+                    f"Schema resource {resource.schema_file} has a mismatched registry version."
+                )
+        if resource.resource_kind == "contract_metadata":
+            if resource.registry_contract_version != "none" or resource.fingerprint_inventory:
+                raise ArtifactRouteError(
+                    f"Contract metadata {resource.schema_file} cannot use property inventory."
+                )
+
+
+def load_routed_contracts(
+    document: Mapping[str, Any],
+) -> tuple[ContractRoute, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+    """Resolve the route first, then and only then load schema/registry/authority."""
+
+    route = route_artifact_contract(document)
+    schema = _load_json(SCHEMA_DIR / route.schema_file)
+    try:
+        registry = load_registry(version=route.registry_contract_version)
+        validate_registry_document(registry)
+        verify_committed_catalog(registry, version=route.registry_contract_version)
+    except RegistryContractError as exc:
+        raise ArtifactRouteError(str(exc)) from exc
+    authority: dict[str, Any] | None = None
+    if route.authority_contract_version != "none":
+        try:
+            authority = load_authority_contract(route.authority_contract_version)
+            verify_authority_projection(route.authority_contract_version)
+        except AuthorityContractError as exc:
+            raise ArtifactRouteError(str(exc)) from exc
+    return route, schema, registry, authority
+
+
 def profile_v2_schema_enabled(features: Mapping[str, Any] | None) -> bool:
     return bool(features and features.get("profile_v2_schema") is True)
 
 
-def load_artifact_schema(
-    artifact_kind: str, *, version: str = "2.0"
-) -> dict[str, Any]:
+def profile_v2_composer_contract_enabled(
+    manifest: dict[str, Any] | None,
+) -> bool:
+    """Return H contract eligibility without connecting it to a runtime entry point."""
+
+    if manifest is None:
+        return False
     try:
-        filename = ARTIFACT_SCHEMA_FILES[(artifact_kind, version)]
-    except KeyError as exc:
+        result = validate_artifact(
+            manifest,
+            features={"profile_v2_schema": True},
+        )
+    except ArtifactContractError:
+        return False
+    features = result.document.get("features", {})
+    return bool(
+        result.artifact_kind == "feature-activation-manifest"
+        and result.schema_version == "2.1"
+        and features.get("profile_v2_schema") is True
+        and features.get("profile_v2_composer") is True
+    )
+
+
+def load_artifact_schema(
+    artifact_kind: str,
+    *,
+    version: str = "2.0",
+    registry_contract_version: str | None = None,
+    authority_contract_version: str | None = None,
+) -> dict[str, Any]:
+    matches = [
+        (identity, filename)
+        for identity, filename in ARTIFACT_SCHEMA_FILES.items()
+        if identity[0] == artifact_kind
+        and identity[1] == version
+        and (registry_contract_version is None or identity[2] == registry_contract_version)
+        and (authority_contract_version is None or identity[3] == authority_contract_version)
+    ]
+    if len(matches) != 1:
         raise ArtifactContractError(
-            f"Unsupported V2 artifact contract: {artifact_kind}@{version}"
-        ) from exc
+            f"Unsupported or ambiguous V2 artifact contract: {artifact_kind}@{version}"
+        )
+    filename = matches[0][1]
     return _load_json(SCHEMA_DIR / filename)
 
 
@@ -286,6 +652,7 @@ def artifact_semantic_errors(
 ) -> list[str]:
     errors: list[str] = []
     properties = property_index(registry)
+    schema_version = str(document.get("schema_version"))
 
     _keyed_collection_ids(
         document.get("input_fingerprints", []),
@@ -363,6 +730,50 @@ def artifact_semantic_errors(
             errors.append(f"{context} has no valid normalized composition key: {exc}")
             return None
 
+    def inputs_by_role() -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        for item in document.get("input_fingerprints", []):
+            result.setdefault(item["role"], []).append(item["fingerprint"])
+        return result
+
+    def validate_singleton_binding(
+        role: str,
+        binding_field: str,
+        bindings: Mapping[str, Any],
+        context: str,
+    ) -> None:
+        values = inputs_by_role().get(role, [])
+        if len(values) != 1:
+            errors.append(f"{context} requires exactly one {role} input binding.")
+        elif values[0] != bindings.get(binding_field):
+            errors.append(f"{context} {role} fingerprint does not match {binding_field}.")
+
+    if artifact_kind == "feature-activation-manifest" and schema_version == "2.1":
+        features = document.get("features", {})
+        if features.get("profile_v2_composer") is True and features.get("profile_v2_schema") is not True:
+            errors.append("profile_v2_composer requires profile_v2_schema=true.")
+    elif artifact_kind == "qa-approval-artifact" and schema_version == "2.1":
+        bindings = document.get("bindings", {})
+        validate_singleton_binding("source_document", "input_fingerprint", bindings, "QA approval")
+        validate_singleton_binding("structure", "structure_fingerprint", bindings, "QA approval")
+        validate_singleton_binding("conflict_report", "composition_report_fingerprint", bindings, "QA approval")
+        decision_type = document.get("decision_type")
+        decision = document.get("decision")
+        decisions_by_type = {
+            "conflict_resolution": {"adopt_proposed", "select_candidate"},
+            "keep_original": {"keep_original"},
+            "qa_exclusion": {"exclude_candidate"},
+        }
+        if decision not in decisions_by_type.get(decision_type, set()):
+            errors.append(
+                f"QA decision_type {decision_type} is inconsistent with decision {decision}."
+            )
+        candidate_id = document.get("target", {}).get("candidate_id")
+        if decision in {"select_candidate", "exclude_candidate"} and candidate_id is None:
+            errors.append(f"QA decision {decision} requires target.candidate_id.")
+        if decision in {"adopt_proposed", "keep_original"} and candidate_id is not None:
+            errors.append(f"QA decision {decision} cannot bind a candidate_id.")
+
     if artifact_kind == "layered-rule-asset":
         layer_kind = document["layer_kind"]
         _keyed_collection_ids(
@@ -380,7 +791,7 @@ def artifact_semantic_errors(
                     validate_binding_for_layer(binding, layer_kind, registry)
                 except RegistryContractError as exc:
                     errors.append(str(exc))
-        if registry.get("schema_version") == "2.1":
+        if schema_version == "2.1":
             try:
                 from profile_v2_scope import normalize_rule_scope, validate_module_asset_scope
 
@@ -390,6 +801,96 @@ def artifact_semantic_errors(
                 validate_module_asset_scope(document)
             except ValueError as exc:
                 errors.append(str(exc))
+    elif artifact_kind == "final-execution-profile" and schema_version == "2.2":
+        if document.get("legacy_input") is not False:
+            errors.append("V2.2 final execution profiles cannot be legacy inputs.")
+        if document.get("activation") != "disabled":
+            errors.append("V2.2 final execution profiles must remain disabled.")
+        if document.get("final_ready_eligible") is not False:
+            errors.append("V2.2 final execution profiles cannot be final-ready eligible.")
+        if document.get("delivery_allowed") is not False:
+            errors.append("V2.2 final execution profiles cannot allow delivery.")
+        bindings = document.get("bindings", {})
+        for role, field in (
+            ("task", "task_fingerprint"),
+            ("source_document", "input_fingerprint"),
+            ("feature_activation", "feature_activation_fingerprint"),
+            ("property_registry", "property_registry_fingerprint"),
+            ("authority_contract", "authority_contract_fingerprint"),
+            ("structure", "structure_fingerprint"),
+            ("conflict_report", "composition_report_fingerprint"),
+        ):
+            validate_singleton_binding(role, field, bindings, "Final profile")
+        for role, field, minimum in (
+            ("rule_asset", "rule_asset_fingerprints", 1),
+            ("approval", "approval_fingerprints", 0),
+        ):
+            values = inputs_by_role().get(role, [])
+            if len(values) < minimum:
+                errors.append(f"Final profile requires at least {minimum} {role} inputs.")
+            elif len(values) != len(set(values)):
+                errors.append(f"Final profile has duplicate {role} fingerprints.")
+            elif sorted(values) != sorted(bindings.get(field, [])):
+                errors.append(f"Final profile {role} fingerprints do not match {field}.")
+        try:
+            expected_authority = authority_contract_fingerprint("1.0")
+            if bindings.get("authority_contract_fingerprint") != expected_authority:
+                errors.append("Final profile authority fingerprint is not authority contract 1.0.")
+        except AuthorityContractError as exc:
+            errors.append(str(exc))
+        _keyed_collection_ids(
+            document.get("resolved_properties", []), "resolution_id", "V2.2 resolved properties", errors
+        )
+        _keyed_collection_ids(
+            document.get("closure_evidence", []), "conflict_id", "V2.2 closure evidence", errors
+        )
+        seen_keys: set[tuple[str, str, str]] = set()
+        for resolved in document.get("resolved_properties", []):
+            key = resolved["key"]
+            normalized_key = composition_key(key, "V2.2 resolved property")
+            if normalized_key is not None and normalized_key in seen_keys:
+                errors.append("V2.2 final profile repeats a normalized composition key.")
+            if normalized_key is not None:
+                seen_keys.add(normalized_key)
+            binding = resolved["resolved_binding"]
+            if resolved["execution_mode"] != binding["mode"]:
+                errors.append("V2.2 execution_mode does not match resolved binding mode.")
+            validate_key_and_candidate(
+                key,
+                {"property_binding": binding, "layer_kind": resolved["final_layer_kind"]},
+                "V2.2 resolved property",
+            )
+            active_ids = _keyed_collection_ids(
+                resolved["candidate_chain"], "candidate_id", "V2.2 active candidates", errors
+            )
+            excluded_ids = _keyed_collection_ids(
+                resolved["excluded_candidates"], "candidate_id", "V2.2 excluded candidates", errors,
+                nested_object_field="candidate",
+            )
+            if active_ids & excluded_ids:
+                errors.append("V2.2 candidate IDs cannot be both active and excluded.")
+            final_source_matches = False
+            for candidate in resolved["candidate_chain"]:
+                validate_key_and_candidate(key, candidate, "V2.2 resolved property")
+                if candidate["scope_status"] != "applicable":
+                    errors.append("V2.2 active candidates must be applicable.")
+                if (
+                    candidate["source"] == resolved["final_source"]
+                    and candidate["layer_kind"] == resolved["final_layer_kind"]
+                    and candidate["property_binding"] == binding
+                ):
+                    final_source_matches = True
+            for item in resolved["excluded_candidates"]:
+                excluded = item["candidate"]
+                validate_key_and_candidate(key, excluded, "V2.2 excluded candidate")
+                if excluded["scope_status"] == "applicable":
+                    errors.append("V2.2 excluded candidates cannot be applicable.")
+            if set(resolved["override_chain"]) - active_ids:
+                errors.append("V2.2 override_chain references an unknown active candidate.")
+            if not final_source_matches:
+                errors.append(
+                    "V2.2 final source/layer/binding is absent from its candidate chain."
+                )
     elif artifact_kind == "final-execution-profile":
         if document.get("legacy_input") is not False:
             errors.append("V2 final execution profiles cannot be legacy inputs.")
@@ -506,6 +1007,191 @@ def artifact_semantic_errors(
                     errors.append(
                         f"Safety check references non-safety property {invariant_id}."
                     )
+    elif artifact_kind == "conflict-report" and schema_version == "2.2":
+        bindings = document.get("bindings", {})
+        for role, field in (
+            ("source_document", "input_fingerprint"),
+            ("feature_activation", "feature_activation_fingerprint"),
+            ("property_registry", "property_registry_fingerprint"),
+            ("authority_contract", "authority_contract_fingerprint"),
+            ("structure", "structure_fingerprint"),
+        ):
+            validate_singleton_binding(role, field, bindings, "Composition report")
+        rule_values = inputs_by_role().get("rule_asset", [])
+        if not rule_values or len(rule_values) != len(set(rule_values)):
+            errors.append("Composition report requires unique rule_asset inputs.")
+        elif sorted(rule_values) != sorted(bindings.get("rule_asset_fingerprints", [])):
+            errors.append("Composition report rule assets do not match bindings.")
+        try:
+            expected_authority = authority_contract_fingerprint("1.0")
+            if bindings.get("authority_contract_fingerprint") != expected_authority:
+                errors.append("Composition report authority fingerprint is not contract 1.0.")
+        except AuthorityContractError as exc:
+            errors.append(str(exc))
+        keyed = (
+            ("candidate_groups", "candidate_group_id"),
+            ("scope_partitions", "partition_id"),
+            ("proposed_resolutions", "proposed_resolution_id"),
+            ("fatal_diagnostics", "diagnostic_id"),
+            ("unresolvable_blockers", "blocker_id"),
+            ("approval_required_conflicts", "conflict_id"),
+            ("diagnostics", "diagnostic_id"),
+        )
+        for collection, key_field in keyed:
+            _keyed_collection_ids(document.get(collection, []), key_field, collection, errors)
+        composition_maps: dict[str, dict[tuple[str, str, str], dict[str, Any]]] = {}
+        for collection in ("candidate_groups", "scope_partitions", "proposed_resolutions"):
+            keyed_items: dict[tuple[str, str, str], dict[str, Any]] = {}
+            for item in document.get(collection, []):
+                normalized = composition_key(item["key"], f"Composition report {collection}")
+                if normalized is None:
+                    continue
+                if normalized in keyed_items:
+                    errors.append(
+                        f"Composition report {collection} repeats a normalized composition key."
+                    )
+                keyed_items[normalized] = item
+            composition_maps[collection] = keyed_items
+        proposal_by_id = {
+            item["proposed_resolution_id"]: item
+            for item in document.get("proposed_resolutions", [])
+        }
+        for group in document.get("candidate_groups", []):
+            key = group["key"]
+            active_ids = _keyed_collection_ids(
+                group["candidates"], "candidate_id", "candidate group", errors
+            )
+            excluded_ids = _keyed_collection_ids(
+                group["excluded_candidates"], "candidate_id", "excluded candidate group", errors,
+                nested_object_field="candidate",
+            )
+            if active_ids & excluded_ids:
+                errors.append("Candidate group active and excluded IDs overlap.")
+            for candidate in group["candidates"]:
+                validate_key_and_candidate(key, candidate, "Candidate group")
+                if candidate["scope_status"] != "applicable":
+                    errors.append("Validated candidate groups contain only applicable candidates.")
+            for item in group["excluded_candidates"]:
+                excluded = item["candidate"]
+                validate_key_and_candidate(key, excluded, "Excluded candidate group")
+                if excluded["scope_status"] == "applicable":
+                    errors.append("Excluded candidate-group candidates cannot be applicable.")
+        for proposal in document.get("proposed_resolutions", []):
+            key = proposal["key"]
+            normalized = composition_key(key, "Proposed resolution")
+            group = (
+                composition_maps["candidate_groups"].get(normalized)
+                if normalized is not None
+                else None
+            )
+            if group is None:
+                errors.append("Proposed resolution has no candidate group for its normalized key.")
+                continue
+            validate_key_and_candidate(
+                key,
+                {
+                    "property_binding": proposal["proposed_binding"],
+                    "layer_kind": proposal["final_layer_kind"],
+                },
+                "Proposed resolution",
+            )
+            if proposal["execution_mode"] != proposal["proposed_binding"]["mode"]:
+                errors.append("Proposed resolution execution_mode differs from its binding mode.")
+            group_candidates = {item["candidate_id"]: item for item in group["candidates"]}
+            chain_ids = _keyed_collection_ids(
+                proposal["candidate_chain"],
+                "candidate_id",
+                "proposed resolution candidate chain",
+                errors,
+            )
+            chain_candidates = {
+                item["candidate_id"]: item for item in proposal["candidate_chain"]
+            }
+            for candidate in proposal["candidate_chain"]:
+                validate_key_and_candidate(key, candidate, "Proposed resolution")
+                if candidate["scope_status"] != "applicable":
+                    errors.append("Proposed-resolution candidates must be applicable.")
+            if chain_ids != set(group_candidates) or any(
+                chain_candidates.get(candidate_id) != candidate
+                for candidate_id, candidate in group_candidates.items()
+            ):
+                errors.append(
+                    "Proposed resolution candidate_chain does not exactly reference its candidate group."
+                )
+            if set(proposal["override_chain"]) - chain_ids:
+                errors.append("Proposed resolution override_chain references a non-active candidate.")
+            final_source_matches = any(
+                candidate["source"] == proposal["final_source"]
+                and candidate["layer_kind"] == proposal["final_layer_kind"]
+                and candidate["property_binding"] == proposal["proposed_binding"]
+                for candidate in proposal["candidate_chain"]
+            )
+            if not final_source_matches:
+                errors.append(
+                    "Proposed resolution final source/layer/binding is absent from its candidate chain."
+                )
+        for conflict in document.get("approval_required_conflicts", []):
+            proposal = proposal_by_id.get(conflict["proposed_resolution_id"])
+            if proposal is None:
+                errors.append("Approval-required conflict references an unknown proposed resolution.")
+            else:
+                conflict_key = composition_key(conflict["key"], "Approval-required conflict")
+                proposal_key = composition_key(proposal["key"], "Conflict proposal")
+                if conflict_key is not None and proposal_key is not None and conflict_key != proposal_key:
+                    errors.append(
+                        "Approval-required conflict and proposed resolution use different normalized keys."
+                    )
+            candidate_ids = _keyed_collection_ids(
+                conflict["candidates"], "candidate_id", "approval-required candidates", errors
+            )
+            for candidate in conflict["candidates"]:
+                validate_key_and_candidate(conflict["key"], candidate, "Approval-required conflict")
+            conflict_key = composition_key(conflict["key"], "Approval-required conflict")
+            group = (
+                composition_maps["candidate_groups"].get(conflict_key)
+                if conflict_key is not None
+                else None
+            )
+            if group is None:
+                errors.append("Approval-required conflict has no candidate group for its key.")
+            else:
+                group_candidates = {item["candidate_id"]: item for item in group["candidates"]}
+                conflict_candidates = {
+                    item["candidate_id"]: item for item in conflict["candidates"]
+                }
+                if candidate_ids != set(group_candidates) or any(
+                    conflict_candidates.get(candidate_id) != candidate
+                    for candidate_id, candidate in group_candidates.items()
+                ):
+                    errors.append(
+                        "Approval-required conflict does not carry the complete candidate group."
+                    )
+            if "select_candidate" in conflict["allowed_decisions"] and not candidate_ids:
+                errors.append("select_candidate requires a non-empty candidate set.")
+        blocker_keys = {
+            normalized
+            for item in document.get("unresolvable_blockers", [])
+            if (normalized := composition_key(item["key"], "Unresolvable blocker"))
+            is not None
+        }
+        for partition in document.get("scope_partitions", []):
+            partition_key = composition_key(partition["key"], "Scope partition")
+            if (
+                partition["evidence_status"] in {"failed", "not_evaluated"}
+                and partition_key not in blocker_keys
+            ):
+                errors.append(
+                    "Failed or not-evaluated scope partitions require an unresolvable "
+                    "blocker for the same key."
+                )
+        fatal = bool(document.get("fatal_diagnostics"))
+        unresolvable = bool(document.get("unresolvable_blockers"))
+        approvals = bool(document.get("approval_required_conflicts"))
+        expected_status = (
+            "fatal" if fatal else "unresolvable" if unresolvable else "awaiting_approval" if approvals else "resolvable"
+        )
+        if document.get("proposal_status") != expected_status:
+            errors.append("Composition report proposal_status does not match its blocker collections.")
     elif artifact_kind == "conflict-report":
         _keyed_collection_ids(
             document.get("conflicts", []),
@@ -568,6 +1254,7 @@ def _validate_artifact_contract(
     *,
     features: Mapping[str, Any] | None,
     registry: dict[str, Any],
+    resolved_schema: dict[str, Any] | None = None,
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
 ) -> ProfileReadResult:
@@ -578,7 +1265,14 @@ def _validate_artifact_contract(
     artifact_kind = document.get("artifact_kind")
     if artifact_kind not in ARTIFACT_KINDS:
         raise ArtifactContractError(f"Unknown V2 artifact_kind: {artifact_kind}")
-    if schema_override is None:
+    if resolved_schema is not None and schema_override is not None:
+        raise ArtifactContractError(
+            "Resolved production schemas and test-only schema overrides are mutually exclusive."
+        )
+    if resolved_schema is not None:
+        effective_schema = resolved_schema
+        compatible_minor = False
+    elif schema_override is None:
         effective_schema = load_artifact_schema(
             artifact_kind, version=str(document.get("schema_version"))
         )
@@ -637,17 +1331,334 @@ def validate_artifact(
 ) -> ProfileReadResult:
     """Validate against the committed production registry and schema contracts."""
 
-    version = str(document.get("schema_version"))
-    try:
-        effective_registry = load_registry(version=version)
-        validate_registry_document(effective_registry)
-        verify_committed_catalog(effective_registry, version=version)
-    except RegistryContractError as exc:
-        raise ArtifactContractError(str(exc)) from exc
+    verify_contract_matrix_alignment()
+    _, effective_schema, effective_registry, _ = load_routed_contracts(document)
     return _validate_artifact_contract(
         document,
         features=features,
         registry=effective_registry,
+        resolved_schema=effective_schema,
+    )
+
+
+def _is_obvious_placeholder_fingerprint(value: Any) -> bool:
+    if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+        return False
+    digest = value.split(":", 1)[1]
+    return len(set(digest)) == 1
+
+
+def _validate_artifact_dag_with_reader(
+    documents: list[dict[str, Any]],
+    reader: Callable[[dict[str, Any]], ProfileReadResult],
+) -> DagValidationResult:
+    """Validate H bindings and closure evidence without composing any result."""
+
+    if not documents:
+        raise ArtifactDagError("Artifact DAG cannot be empty.")
+    validated: list[dict[str, Any]] = []
+    for document in documents:
+        result = reader(document)
+        validated.append(result.document)
+    by_id: dict[str, dict[str, Any]] = {}
+    by_fingerprint: dict[str, dict[str, Any]] = {}
+    for document in validated:
+        artifact_id = document["artifact_id"]
+        fingerprint = document["semantic_fingerprint"]
+        if artifact_id in by_id:
+            raise ArtifactDagError(f"Artifact DAG repeats artifact_id {artifact_id}.")
+        if fingerprint in by_fingerprint:
+            raise ArtifactDagError("Artifact DAG repeats a semantic fingerprint.")
+        if str(document.get("schema_version")) in {"2.1", "2.2"} and _is_obvious_placeholder_fingerprint(fingerprint):
+            raise ArtifactDagError("New artifact contracts reject placeholder semantic fingerprints.")
+        by_id[artifact_id] = document
+        by_fingerprint[fingerprint] = document
+
+    dependencies: dict[str, set[str]] = {artifact_id: set() for artifact_id in by_id}
+
+    def require_internal(
+        owner: dict[str, Any],
+        fingerprint: str,
+        expected_kind: str,
+        *,
+        expected_schema_version: str | None = None,
+        expected_registry_contract_version: str | None = None,
+    ) -> dict[str, Any]:
+        target = by_fingerprint.get(fingerprint)
+        if target is None:
+            raise ArtifactDagError(
+                f"{owner['artifact_id']} has a missing internal {expected_kind} fingerprint."
+            )
+        if target["artifact_kind"] != expected_kind:
+            raise ArtifactDagError(
+                f"{owner['artifact_id']} binds {expected_kind} to {target['artifact_kind']}."
+            )
+        if (
+            expected_schema_version is not None
+            and str(target.get("schema_version")) != expected_schema_version
+        ):
+            raise ArtifactDagError(
+                f"{owner['artifact_id']} requires {expected_kind} schema "
+                f"{expected_schema_version}."
+            )
+        if expected_registry_contract_version is not None:
+            target_route = route_artifact_contract(target)
+            if target_route.registry_contract_version != expected_registry_contract_version:
+                raise ArtifactDagError(
+                    f"{owner['artifact_id']} requires {expected_kind} registry contract "
+                    f"{expected_registry_contract_version}."
+                )
+        dependencies[owner["artifact_id"]].add(target["artifact_id"])
+        return target
+
+    reports: dict[str, dict[str, Any]] = {}
+    approvals: dict[str, dict[str, Any]] = {}
+    finals: list[dict[str, Any]] = []
+    for document in validated:
+        kind = document["artifact_kind"]
+        version = str(document.get("schema_version"))
+        if kind == "conflict-report" and version == "2.2":
+            reports[document["semantic_fingerprint"]] = document
+            bindings = document["bindings"]
+            feature = require_internal(
+                document,
+                bindings["feature_activation_fingerprint"],
+                "feature-activation-manifest",
+                expected_schema_version="2.1",
+                expected_registry_contract_version="2.1",
+            )
+            if (
+                feature.get("features", {}).get("profile_v2_schema") is not True
+                or feature.get("features", {}).get("profile_v2_composer") is not True
+            ):
+                raise ArtifactDagError(
+                    "Composition report requires profile_v2_schema=true and "
+                    "profile_v2_composer=true."
+                )
+            for fingerprint in bindings["rule_asset_fingerprints"]:
+                require_internal(
+                    document,
+                    fingerprint,
+                    "layered-rule-asset",
+                    expected_schema_version="2.1",
+                    expected_registry_contract_version="2.1",
+                )
+        elif kind == "qa-approval-artifact" and version == "2.1":
+            approvals[document["semantic_fingerprint"]] = document
+            require_internal(
+                document,
+                document["bindings"]["composition_report_fingerprint"],
+                "conflict-report",
+                expected_schema_version="2.2",
+                expected_registry_contract_version="2.1",
+            )
+        elif kind == "final-execution-profile" and version == "2.2":
+            finals.append(document)
+            bindings = document["bindings"]
+            require_internal(
+                document,
+                bindings["composition_report_fingerprint"],
+                "conflict-report",
+                expected_schema_version="2.2",
+                expected_registry_contract_version="2.1",
+            )
+            feature = require_internal(
+                document,
+                bindings["feature_activation_fingerprint"],
+                "feature-activation-manifest",
+                expected_schema_version="2.1",
+                expected_registry_contract_version="2.1",
+            )
+            if (
+                feature.get("features", {}).get("profile_v2_schema") is not True
+                or feature.get("features", {}).get("profile_v2_composer") is not True
+            ):
+                raise ArtifactDagError(
+                    "Final profile requires profile_v2_schema=true and "
+                    "profile_v2_composer=true."
+                )
+            for fingerprint in bindings["rule_asset_fingerprints"]:
+                require_internal(
+                    document,
+                    fingerprint,
+                    "layered-rule-asset",
+                    expected_schema_version="2.1",
+                    expected_registry_contract_version="2.1",
+                )
+            for fingerprint in bindings["approval_fingerprints"]:
+                require_internal(
+                    document,
+                    fingerprint,
+                    "qa-approval-artifact",
+                    expected_schema_version="2.1",
+                    expected_registry_contract_version="2.1",
+                )
+
+    from profile_v2_scope import normalized_property_scope_key, scope_equal
+
+    for approval in approvals.values():
+        report_fingerprint = approval["bindings"]["composition_report_fingerprint"]
+        report = reports.get(report_fingerprint)
+        if report is None:
+            raise ArtifactDagError("QA approval binds a report outside the validated DAG.")
+        if approval["bindings"]["input_fingerprint"] != report["bindings"]["input_fingerprint"]:
+            raise ArtifactDagError("QA approval input binding differs from its report.")
+        if approval["bindings"]["structure_fingerprint"] != report["bindings"]["structure_fingerprint"]:
+            raise ArtifactDagError("QA approval structure binding differs from its report.")
+        target = approval["target"]
+        conflicts = {
+            item["conflict_id"]: item for item in report["approval_required_conflicts"]
+        }
+        conflict = conflicts.get(target["conflict_id"])
+        if conflict is None:
+            fatal_ids = {item["diagnostic_id"] for item in report["fatal_diagnostics"]}
+            blocker_ids = {item["blocker_id"] for item in report["unresolvable_blockers"]}
+            if target["conflict_id"] in fatal_ids:
+                raise ArtifactDagError("Fatal diagnostics cannot accept QA closure.")
+            if target["conflict_id"] in blocker_ids:
+                raise ArtifactDagError("Unresolvable blockers cannot accept QA closure.")
+            raise ArtifactDagError("QA approval references an unknown conflict_id.")
+        if target["proposed_resolution_id"] != conflict["proposed_resolution_id"]:
+            raise ArtifactDagError("QA approval references an unknown proposed_resolution_id.")
+        if not scope_equal(target["normalized_scope"], conflict["key"]["normalized_scope"]):
+            raise ArtifactDagError("QA approval scope differs from the report conflict scope.")
+        if approval["decision"] not in conflict["allowed_decisions"]:
+            raise ArtifactDagError("QA approval decision is not allowed by the report.")
+        candidate_id = target.get("candidate_id")
+        candidate_ids = {item["candidate_id"] for item in conflict["candidates"]}
+        if candidate_id is not None and candidate_id not in candidate_ids:
+            raise ArtifactDagError("QA approval candidate_id is not part of the conflict.")
+
+    for final in finals:
+        bindings = final["bindings"]
+        report = reports.get(bindings["composition_report_fingerprint"])
+        if report is None:
+            raise ArtifactDagError("Final profile binds a report outside the validated DAG.")
+        if report["fatal_diagnostics"]:
+            raise ArtifactDagError("A report with fatal diagnostics cannot have a final profile.")
+        if report["unresolvable_blockers"]:
+            raise ArtifactDagError("A report with unresolvable blockers cannot have a final profile.")
+        if any(
+            partition["evidence_status"] in {"failed", "not_evaluated"}
+            for partition in report["scope_partitions"]
+        ):
+            raise ArtifactDagError(
+                "A report with failed or not-evaluated scope partitions cannot have a final profile."
+            )
+        for field in (
+            "input_fingerprint",
+            "feature_activation_fingerprint",
+            "property_registry_fingerprint",
+            "authority_contract_fingerprint",
+            "structure_fingerprint",
+        ):
+            if bindings[field] != report["bindings"][field]:
+                raise ArtifactDagError(
+                    f"Final profile {field} differs from its composition report."
+                )
+        if sorted(bindings["rule_asset_fingerprints"]) != sorted(
+            report["bindings"]["rule_asset_fingerprints"]
+        ):
+            raise ArtifactDagError(
+                "Final profile rule assets differ from its composition report."
+            )
+        proposals = {
+            item["proposed_resolution_id"]: item
+            for item in report["proposed_resolutions"]
+        }
+        resolved = {
+            item["resolution_id"]: item for item in final["resolved_properties"]
+        }
+        if set(resolved) != set(proposals):
+            raise ArtifactDagError(
+                "Final profile must express every and only report proposed resolution."
+            )
+        for proposed_resolution_id, proposal in proposals.items():
+            final_item = resolved[proposed_resolution_id]
+            proposal_key = normalized_property_scope_key(
+                proposal["key"]["semantic_object_kind"],
+                proposal["key"]["property_id"],
+                proposal["key"]["normalized_scope"],
+            )
+            final_key = normalized_property_scope_key(
+                final_item["key"]["semantic_object_kind"],
+                final_item["key"]["property_id"],
+                final_item["key"]["normalized_scope"],
+            )
+            if final_key != proposal_key:
+                raise ArtifactDagError(
+                    "Final resolved property key differs from its report proposal."
+                )
+        required = {item["conflict_id"]: item for item in report["approval_required_conflicts"]}
+        bound_approvals = [approvals[item] for item in bindings["approval_fingerprints"]]
+        if not required:
+            if bound_approvals or final["closure_evidence"]:
+                raise ArtifactDagError("Reports without approval-required conflicts require explicit empty approvals and closures.")
+            continue
+        approval_by_conflict: dict[str, dict[str, Any]] = {}
+        for approval in bound_approvals:
+            if (
+                approval["bindings"]["composition_report_fingerprint"]
+                != report["semantic_fingerprint"]
+            ):
+                raise ArtifactDagError(
+                    "Final profile binds an approval from another composition report."
+                )
+            conflict_id = approval["target"]["conflict_id"]
+            if conflict_id in approval_by_conflict:
+                raise ArtifactDagError("Final profile binds multiple approvals for one conflict.")
+            approval_by_conflict[conflict_id] = approval
+        closure_by_conflict = {item["conflict_id"]: item for item in final["closure_evidence"]}
+        if set(approval_by_conflict) != set(required):
+            raise ArtifactDagError("Final profile approvals do not close every and only required conflict.")
+        if set(closure_by_conflict) != set(required):
+            raise ArtifactDagError("Final profile closure evidence is not bidirectional with required conflicts.")
+        for conflict_id, conflict in required.items():
+            approval = approval_by_conflict[conflict_id]
+            closure = closure_by_conflict[conflict_id]
+            if closure["qa_decision_id"] != approval["approval_id"]:
+                raise ArtifactDagError("Closure qa_decision_id does not match the bound approval.")
+            if closure["proposed_resolution_id"] != conflict["proposed_resolution_id"]:
+                raise ArtifactDagError("Closure proposed_resolution_id does not match the report.")
+
+    order = _topological_artifact_order(dependencies)
+    return DagValidationResult(order, len(validated), runtime_eligible=False)
+
+
+def _topological_artifact_order(
+    dependencies: Mapping[str, set[str]],
+) -> tuple[str, ...]:
+    temporary: set[str] = set()
+    permanent: set[str] = set()
+    order: list[str] = []
+
+    def visit(artifact_id: str) -> None:
+        if artifact_id in permanent:
+            return
+        if artifact_id in temporary:
+            raise ArtifactDagError("Artifact bindings contain a cycle.")
+        temporary.add(artifact_id)
+        for dependency in sorted(dependencies[artifact_id]):
+            visit(dependency)
+        temporary.remove(artifact_id)
+        permanent.add(artifact_id)
+        order.append(artifact_id)
+
+    for artifact_id in sorted(dependencies):
+        visit(artifact_id)
+    return tuple(order)
+
+
+def validate_artifact_dag(
+    documents: list[dict[str, Any]],
+) -> DagValidationResult:
+    """Validate production artifact bindings without exposing contract overrides."""
+
+    return _validate_artifact_dag_with_reader(
+        documents,
+        lambda document: validate_artifact(
+            document, features={"profile_v2_schema": True}
+        ),
     )
 
 
@@ -667,6 +1678,24 @@ def _validate_artifact_for_test(
         registry=registry,
         schema_override=schema_override,
         schema_documents_override=_test_schema_overrides(registry),
+    )
+
+
+def _validate_artifact_dag_for_test(
+    documents: list[dict[str, Any]],
+    *,
+    registry: dict[str, Any],
+) -> DagValidationResult:
+    """Validate synthetic H DAGs while preserving test-only ineligibility."""
+
+    _require_test_registry(registry)
+    return _validate_artifact_dag_with_reader(
+        documents,
+        lambda document: _validate_artifact_for_test(
+            document,
+            registry=registry,
+            features={"profile_v2_schema": True},
+        ),
     )
 
 

@@ -1,0 +1,51 @@
+{
+  "base_sha": "8c728921883f144f889a8a13186544ae8d97ff5a",
+  "authority_layers": [
+    "standard_supplement",
+    "monograph_base",
+    "book_type",
+    "module",
+    "publisher_template",
+    "task_override"
+  ],
+  "route_count": 15,
+  "schema_document_count": 28,
+  "artifact_routes": {
+    "feature-activation-manifest@2.1": ["2.1", "1.0"],
+    "qa-approval-artifact@2.1": ["2.1", "1.0"],
+    "conflict-report@2.2": ["2.1", "1.0"],
+    "final-execution-profile@2.2": ["2.1", "1.0"]
+  },
+  "inventory_counts": {
+    "schema_property_nodes": 625,
+    "semantic_projected": 448,
+    "semantic_guarded": 150,
+    "fingerprint_excluded": 25,
+    "validation_guard": 2,
+    "schema_versions": {
+      "2.0->2.0": 285,
+      "2.1->2.1": 230,
+      "2.2->2.1": 110
+    },
+    "ref_types": {
+      "array": 15,
+      "object": 70,
+      "scalar": 149
+    },
+    "corrected_ref_types": {
+      "array": 15,
+      "object": 68,
+      "scalar": 0
+    }
+  },
+  "approved_all_of_guard_fields": [
+    "https://schemas.format-monograph.local/v2.1/qa-approval-artifact.schema.json#/properties/approver",
+    "https://schemas.format-monograph.local/v2/qa-approval-artifact.schema.json#/properties/approver"
+  ],
+  "non_inventory_contract_schema_ids": [
+    "https://schemas.format-monograph.local/contracts/artifact-routes/artifact-contract-matrix.schema.json",
+    "https://schemas.format-monograph.local/contracts/authority/1.0/layer.schema.json",
+    "https://schemas.format-monograph.local/contracts/authority/authority-contract.schema.json",
+    "https://schemas.format-monograph.local/contracts/canonical/canonical-composition-policy.schema.json"
+  ]
+}

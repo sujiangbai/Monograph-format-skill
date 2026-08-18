@@ -18,6 +18,30 @@ SCRIPTS = REPO / "format-monograph" / "scripts"
 FIXTURES = REPO / "tests" / "fixtures" / "v041"
 sys.path.insert(0, str(SCRIPTS))
 
+P2A_SCHEMA_IDS = frozenset(
+    {
+        "https://schemas.format-monograph.local/v2/capability-snapshot.schema.json",
+        "https://schemas.format-monograph.local/v2/common.schema.json",
+        "https://schemas.format-monograph.local/v2.1/common.schema.json",
+        "https://schemas.format-monograph.local/v2/conflict-report.schema.json",
+        "https://schemas.format-monograph.local/v2.1/conflict-report.schema.json",
+        "https://schemas.format-monograph.local/v2/execution-evidence-artifact.schema.json",
+        "https://schemas.format-monograph.local/v2/feature-activation-manifest.schema.json",
+        "https://schemas.format-monograph.local/v2/final-execution-profile.schema.json",
+        "https://schemas.format-monograph.local/v2.1/final-execution-profile.schema.json",
+        "https://schemas.format-monograph.local/v2/layered-rule-asset.schema.json",
+        "https://schemas.format-monograph.local/v2.1/layered-rule-asset.schema.json",
+        "https://schemas.format-monograph.local/v2/legacy-migration-manifest.schema.json",
+        "https://schemas.format-monograph.local/v2/property-catalog.generated.schema.json",
+        "https://schemas.format-monograph.local/v2.1/property-catalog.generated.schema.json",
+        "https://schemas.format-monograph.local/v2/property-registry.schema.json",
+        "https://schemas.format-monograph.local/v2.1/property-registry.schema.json",
+        "https://schemas.format-monograph.local/v2/qa-approval-artifact.schema.json",
+        "https://schemas.format-monograph.local/v2/typed-value.generated.schema.json",
+        "https://schemas.format-monograph.local/v2.1/typed-value.generated.schema.json",
+    }
+)
+
 import profile_v2_artifacts as artifacts  # noqa: E402
 from profile_v2_artifacts import (  # noqa: E402
     ArtifactContractError,
@@ -692,6 +716,18 @@ class CanonicalFingerprintTests(unittest.TestCase):
         )
         documents = schema_documents()
         actual = fingerprint_field_inventory(documents)
+        historical_inventory = [
+            record
+            for record in actual
+            if urldefrag(record["field_path"])[0] in P2A_SCHEMA_IDS
+        ]
+        self.assertEqual(P2A_SCHEMA_IDS, {
+            urldefrag(record["field_path"])[0] for record in historical_inventory
+        })
+        self.assertTrue(all(
+            record["schema_version"] == record["registry_contract_version"]
+            for record in historical_inventory
+        ))
         self.assertEqual(expected["inventory"], actual)
         self.assertEqual(expected["counts"]["schema_property_nodes"], len(actual))
         self.assertEqual(len(actual), len({record["field_path"] for record in actual}))
@@ -723,7 +759,7 @@ class CanonicalFingerprintTests(unittest.TestCase):
 
         ref_types = Counter()
         corrected_ref_types = Counter()
-        for record in actual:
+        for record in historical_inventory:
             if "ref" not in record["schema_features"]:
                 continue
             schema_id, _ = urldefrag(record["field_path"])
@@ -797,7 +833,7 @@ class CanonicalFingerprintTests(unittest.TestCase):
                 )
                 self.assertTrue(validator.is_valid(sample))
                 valid_samples += 1
-                registry = load_registry(version=record["schema_version"])
+                registry = load_registry(version=record["registry_contract_version"])
                 first = _semantic_projection(
                     {}, schema=container, documents=documents, registry=registry
                 )
@@ -933,7 +969,7 @@ class CanonicalFingerprintTests(unittest.TestCase):
                 )
                 self.assertTrue(validator.is_valid(sample))
                 valid_samples += 1
-                registry = load_registry(version=record["schema_version"])
+                registry = load_registry(version=record["registry_contract_version"])
                 first = _semantic_projection(
                     {}, schema=container, documents=documents, registry=registry
                 )
@@ -960,8 +996,15 @@ class CanonicalFingerprintTests(unittest.TestCase):
         self.assertTrue(
             any("generated_schema" in record["schema_features"] for record in inventory)
         )
+        historical_inventory = [
+            record
+            for record in inventory
+            if urldefrag(record["field_path"])[0] in P2A_SCHEMA_IDS
+        ]
         all_of_guards = [
-            record for record in inventory if "all_of_guard" in record["schema_features"]
+            record
+            for record in historical_inventory
+            if "all_of_guard" in record["schema_features"]
         ]
         self.assertEqual(1, len(all_of_guards))
         self.assertTrue(

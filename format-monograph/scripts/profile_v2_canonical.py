@@ -27,6 +27,10 @@ FIELD_EVIDENCE_MODES = {
     "fingerprint_excluded",
     "validation_guard",
 }
+SCHEMA_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas" / "v2"
+COMPOSITION_POLICY_PATH = SCHEMA_DIR / "canonical-composition-policy.v1.0.json"
+COMPOSITION_POLICY_SCHEMA_PATH = SCHEMA_DIR / "canonical-composition-policy.schema.json"
+LOCAL_SCHEMA_ORIGIN = "https://schemas.format-monograph.local/"
 
 
 class CanonicalizationError(ValueError):
@@ -59,6 +63,29 @@ def _schema_registry(documents: Mapping[str, dict[str, Any]]) -> Registry:
     return registry
 
 
+def _resolve_local_reference(
+    reference_value: str,
+    base_uri: str,
+    documents: Mapping[str, dict[str, Any]],
+    seen_references: set[str] | frozenset[str],
+) -> tuple[dict[str, Any], str, str]:
+    """Resolve one local reference with the shared fail-closed ref policy."""
+
+    reference = urljoin(base_uri, reference_value)
+    if reference in seen_references:
+        raise CanonicalizationError(f"Cyclic schema reference: {reference}")
+    target_uri, fragment = urldefrag(reference)
+    if not target_uri.startswith(LOCAL_SCHEMA_ORIGIN):
+        raise CanonicalizationError(f"Remote schema reference is forbidden: {target_uri}")
+    target_document = documents.get(target_uri)
+    if target_document is None:
+        raise CanonicalizationError(f"Offline schema reference is unavailable: {target_uri}")
+    target = _pointer(target_document, fragment)
+    if not isinstance(target, dict):
+        raise CanonicalizationError(f"Schema reference is not an object: {reference}")
+    return target, target_uri, reference
+
+
 def _merge_schema(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(base)
     for key, value in overlay.items():
@@ -79,19 +106,26 @@ def _resolve_schema(
     base_uri: str,
     documents: Mapping[str, dict[str, Any]],
     instance: Any,
+    seen_references: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], str]:
     current = deepcopy(schema)
     current_base = current.get("$id", base_uri)
+    fingerprint_excluded = current.get("x-semantic-fingerprint") == "exclude"
     if "$ref" in current:
-        reference = urljoin(current_base, current.pop("$ref"))
-        target_uri, fragment = urldefrag(reference)
-        target_document = documents.get(target_uri)
-        if target_document is None:
-            raise CanonicalizationError(f"Offline schema reference is unavailable: {target_uri}")
-        target = _pointer(target_document, fragment)
-        if not isinstance(target, dict):
-            raise CanonicalizationError(f"Schema reference is not an object: {reference}")
-        resolved, resolved_base = _resolve_schema(target, target_uri, documents, instance)
+        target, target_uri, reference = _resolve_local_reference(
+            current.pop("$ref"), current_base, documents, seen_references
+        )
+        resolved, resolved_base = _resolve_schema(
+            target,
+            target_uri,
+            documents,
+            instance,
+            seen_references | {reference},
+        )
+        fingerprint_excluded = (
+            fingerprint_excluded
+            or resolved.get("x-semantic-fingerprint") == "exclude"
+        )
         current = _merge_schema(resolved, current)
         current_base = resolved_base
 
@@ -100,7 +134,7 @@ def _resolve_schema(
         matches: list[dict[str, Any]] = []
         for branch in current["oneOf"]:
             resolved_branch, _ = _resolve_schema(
-                branch, current_base, documents, instance
+                branch, current_base, documents, instance, seen_references
             )
             branch_schema = {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -116,7 +150,34 @@ def _resolve_schema(
             )
         remaining = {key: value for key, value in current.items() if key != "oneOf"}
         current = _merge_schema(matches[0], remaining)
+    if fingerprint_excluded:
+        current["x-semantic-fingerprint"] = "exclude"
     return current, current_base
+
+
+def effective_fingerprint_exclusion(
+    schema: dict[str, Any],
+    base_uri: str,
+    documents: Mapping[str, dict[str, Any]],
+) -> bool:
+    """Return the monotonic exclusion value across the complete local ref chain."""
+
+    current = schema
+    current_base = base_uri
+    excluded = False
+    seen: set[str] = set()
+    while isinstance(current, dict):
+        excluded = excluded or current.get("x-semantic-fingerprint") == "exclude"
+        reference_value = current.get("$ref")
+        if not isinstance(reference_value, str):
+            break
+        target, target_uri, reference = _resolve_local_reference(
+            reference_value, current.get("$id", current_base), documents, seen
+        )
+        seen.add(reference)
+        current = target
+        current_base = target_uri
+    return excluded
 
 
 def _key_value(item: Any, dotted_path: str) -> Any:
@@ -136,6 +197,71 @@ def _raw_canonical_bytes(value: Any) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _node_digest(value: Any) -> str:
+    return FINGERPRINT_PATTERN_PREFIX + hashlib.sha256(_raw_canonical_bytes(value)).hexdigest()
+
+
+def load_canonical_composition_policy() -> dict[str, Any]:
+    try:
+        schema = json.loads(COMPOSITION_POLICY_SCHEMA_PATH.read_text(encoding="utf-8"))
+        policy = json.loads(COMPOSITION_POLICY_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        raise CanonicalizationError(f"Cannot read canonical composition policy: {exc}") from exc
+    Draft202012Validator.check_schema(schema)
+    errors = sorted(Draft202012Validator(schema).iter_errors(policy), key=lambda item: list(item.path))
+    if errors:
+        raise CanonicalizationError(
+            "Invalid canonical composition policy: "
+            + " | ".join(error.message for error in errors)
+        )
+    return policy
+
+
+def audit_schema_composition(
+    documents: Mapping[str, dict[str, Any]],
+) -> None:
+    """Fail closed for unaudited composition nodes across the full schema tree."""
+
+    policy = load_canonical_composition_policy()
+    approved = {
+        (item["schema_id"], item["json_pointer"]): item["node_digest"]
+        for item in policy["approved_all_of_nodes"]
+    }
+    observed: dict[tuple[str, str], str] = {}
+
+    def escape(value: str) -> str:
+        return value.replace("~", "~0").replace("/", "~1")
+
+    def visit(value: Any, schema_id: str, pointer: str) -> None:
+        if isinstance(value, dict):
+            if "anyOf" in value:
+                raise CanonicalizationError(
+                    "Fingerprint evidence does not support schema composition "
+                    f"anyOf: {schema_id}{pointer}/anyOf."
+                )
+            if "allOf" in value:
+                node_pointer = f"{pointer}/allOf"
+                identity = (schema_id, node_pointer)
+                digest = _node_digest(value["allOf"])
+                observed[identity] = digest
+                if approved.get(identity) != digest:
+                    raise CanonicalizationError(
+                        f"Canonical policy rejects unaudited allOf at {schema_id}{node_pointer}."
+                    )
+            for key, child in value.items():
+                visit(child, schema_id, f"{pointer}/{escape(str(key))}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, schema_id, f"{pointer}/{index}")
+
+    for schema_id, schema in sorted(documents.items()):
+        visit(schema, schema_id, "#")
+    missing = set(approved) - set(observed)
+    if missing:
+        detail = ", ".join(f"{schema_id}{pointer}" for schema_id, pointer in sorted(missing))
+        raise CanonicalizationError(f"Canonical policy references missing allOf nodes: {detail}")
 
 
 def _project(
@@ -170,7 +296,9 @@ def _project(
             child_schema = properties.get(source_key)
             if child_schema is None:
                 raise CanonicalizationError(f"Schema does not declare object field {source_key}.")
-            if child_schema.get("x-semantic-fingerprint") == "exclude":
+            if effective_fingerprint_exclusion(
+                child_schema, effective_base, documents
+            ):
                 continue
             result[normalized_key] = _project(
                 value[source_key], child_schema, effective_base, documents, registry
@@ -211,12 +339,9 @@ def _project(
 
 
 def _schema_for_document(document: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Any]]:
-    from profile_v2_artifacts import load_artifact_schema, schema_documents
+    from profile_v2_artifacts import load_routed_contracts, schema_documents
 
-    kind = document.get("artifact_kind")
-    version = document.get("schema_version")
-    schema = load_artifact_schema(kind, version=version)
-    registry = load_registry(version=version)
+    _, schema, registry, _ = load_routed_contracts(document)
     return schema, schema_documents(), registry
 
 
@@ -228,6 +353,7 @@ def _semantic_projection(
     registry: dict[str, Any],
 ) -> dict[str, Any]:
     validate_registry_document(registry)
+    audit_schema_composition(documents)
     schema_id = schema.get("$id")
     if not isinstance(schema_id, str):
         raise CanonicalizationError("Artifact schema lacks a stable $id.")
@@ -363,23 +489,10 @@ def _effective_schema_for_inventory(
     current_base = base_uri
     seen_references: set[str] = set()
     while "$ref" in current:
-        reference = urljoin(current_base, current.pop("$ref"))
-        if reference in seen_references:
-            raise CanonicalizationError(
-                f"Fingerprint evidence encountered a cyclic $ref: {reference}"
-            )
+        target, target_uri, reference = _resolve_local_reference(
+            current.pop("$ref"), current_base, documents, seen_references
+        )
         seen_references.add(reference)
-        target_uri, fragment = urldefrag(reference)
-        target_document = documents.get(target_uri)
-        if target_document is None:
-            raise CanonicalizationError(
-                f"Inventory field has an unresolved $ref: {reference}"
-            )
-        target = _pointer(target_document, fragment)
-        if not isinstance(target, dict):
-            raise CanonicalizationError(
-                f"Inventory field $ref is not a schema object: {reference}"
-            )
         current = _merge_schema(target, current)
         current_base = target_uri
     return current
@@ -405,7 +518,10 @@ def fingerprint_field_inventory(
     guarded evidence; executable projection and end-to-end cases are separate.
     """
 
+    from profile_v2_artifacts import schema_inventory_contract
+
     inventory: list[dict[str, Any]] = []
+    audit_schema_composition(documents)
 
     def escape_pointer(value: str) -> str:
         return value.replace("~", "~0").replace("/", "~1")
@@ -448,6 +564,8 @@ def fingerprint_field_inventory(
         value: Any,
         path: str,
         schema_id: str,
+        schema_version: str,
+        registry_contract_version: str,
         *,
         validation_guard: bool = False,
         inherited_guards: tuple[str, ...] = (),
@@ -500,7 +618,9 @@ def fingerprint_field_inventory(
 
                     if validation_guard:
                         classification = "validation_guard"
-                    elif child.get("x-semantic-fingerprint") == "exclude":
+                    elif effective_fingerprint_exclusion(
+                        child, schema_id, documents
+                    ):
                         classification = "fingerprint_excluded"
                     elif child_guards:
                         classification = "semantic_guarded"
@@ -531,9 +651,8 @@ def fingerprint_field_inventory(
                             "field_path": field_path,
                             "container_path": f"{schema_id}#{path}",
                             "field_name": name,
-                            "schema_version": (
-                                "2.1" if "/v2.1/" in schema_id else "2.0"
-                            ),
+                            "schema_version": schema_version,
+                            "registry_contract_version": registry_contract_version,
                             "classification": classification,
                             "guard_reasons": sorted(child_guards),
                             "schema_features": sorted(features),
@@ -552,6 +671,8 @@ def fingerprint_field_inventory(
                     child,
                     f"{path}/{escape_pointer(str(key))}",
                     schema_id,
+                    schema_version,
+                    registry_contract_version,
                     validation_guard=child_is_guard,
                     inherited_guards=tuple(sorted(context_guards)),
                 )
@@ -561,12 +682,25 @@ def fingerprint_field_inventory(
                     child,
                     f"{path}/{index}",
                     schema_id,
+                    schema_version,
+                    registry_contract_version,
                     validation_guard=validation_guard,
                     inherited_guards=inherited_guards,
                 )
 
     for schema_id, schema in sorted(documents.items()):
-        visit(schema, "", schema_id)
+        schema_version, registry_contract_version, inventory_enabled = (
+            schema_inventory_contract(schema_id)
+        )
+        if not inventory_enabled:
+            continue
+        visit(
+            schema,
+            "",
+            schema_id,
+            schema_version,
+            registry_contract_version,
+        )
     return sorted(inventory, key=lambda record: record["field_path"])
 
 
