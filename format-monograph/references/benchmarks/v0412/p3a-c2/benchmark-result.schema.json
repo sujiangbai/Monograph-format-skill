@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/benchmarks/v0412/p3a-c2/benchmark-result.schema.json",
+  "title": "P3a-C2 Non-Artifact Benchmark Result Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_kind", "contract_version", "evidence_kind", "benchmark_subject_commit",
+    "benchmark_subject_digest", "evidence_commit", "result_digest", "result_digest_basis",
+    "environment", "command_template", "parameters", "resolution_phase",
+    "expected_terminal_state", "actual_terminal_state", "raw_runs", "summary",
+    "report_determinism", "final_present", "final_bytes", "final_fingerprint",
+    "final_determinism", "subject_digest_status"
+  ],
+  "properties": {
+    "document_kind": {"const": "p3a_c2_benchmark_result"},
+    "contract_version": {"const": "1.0"},
+    "evidence_kind": {"const": "non_artifact_benchmark"},
+    "benchmark_subject_commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "benchmark_subject_digest": {"$ref": "#/$defs/sha256_digest"},
+    "evidence_commit": {"type": ["string", "null"], "pattern": "^[a-f0-9]{40}$"},
+    "result_digest": {"$ref": "#/$defs/sha256_digest"},
+    "result_digest_basis": {"const": "canonical_json_excluding_result_digest"},
+    "environment": {"$ref": "#/$defs/environment"},
+    "command_template": {
+      "type": "string", "minLength": 1, "maxLength": 500,
+      "not": {"pattern": "(?:[A-Za-z]:[\\\\/]|/(?:home|Users|tmp)/)"}
+    },
+    "parameters": {"$ref": "#/$defs/parameters"},
+    "resolution_phase": {"type": "string", "enum": ["not_applicable", "pre_approval", "post_deterministic_approval"]},
+    "expected_terminal_state": {"type": "string", "enum": ["final", "unresolvable", "awaiting_approval"]},
+    "actual_terminal_state": {"type": "string", "enum": ["final", "unresolvable", "awaiting_approval"]},
+    "raw_runs": {"type": "array", "minItems": 4, "maxItems": 4, "items": false, "prefixItems": [{"$ref": "#/$defs/warmup_run"}, {"$ref": "#/$defs/measured_run_2"}, {"$ref": "#/$defs/measured_run_3"}, {"$ref": "#/$defs/measured_run_4"}]},
+    "summary": {"$ref": "#/$defs/summary"},
+    "report_determinism": {"$ref": "#/$defs/determinism"},
+    "final_present": {"type": "boolean"},
+    "final_bytes": {"type": ["integer", "null"], "minimum": 0},
+    "final_fingerprint": {"oneOf": [{"$ref": "#/$defs/sha256_digest"}, {"type": "null"}]},
+    "final_determinism": {"type": "string", "enum": ["matched", "mismatched", "not_applicable"]},
+    "subject_digest_status": {"$ref": "#/$defs/subject_digest_status"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"parameters": {"properties": {"scenario_id": {"const": "dense-crossing"}}}}},
+      "then": {"properties": {"resolution_phase": {"const": "not_applicable"}, "expected_terminal_state": {"const": "unresolvable"}, "actual_terminal_state": {"const": "unresolvable"}, "final_present": {"const": false}, "final_bytes": {"const": null}, "final_fingerprint": {"const": null}, "final_determinism": {"const": "not_applicable"}}}
+    },
+    {
+      "if": {"properties": {"parameters": {"properties": {"scenario_id": {"enum": ["disjoint", "subset-chain"]}}}}},
+      "then": {"properties": {"resolution_phase": {"const": "not_applicable"}, "expected_terminal_state": {"const": "final"}, "actual_terminal_state": {"const": "final"}, "final_present": {"const": true}, "final_bytes": {"type": "integer", "minimum": 0}, "final_fingerprint": {"$ref": "#/$defs/sha256_digest"}, "final_determinism": {"enum": ["matched", "mismatched"]}}, "required": ["final_bytes", "final_fingerprint"]}
+    },
+    {
+      "if": {"properties": {"parameters": {"properties": {"scenario_id": {"const": "mixed-conflict-approval"}}}, "resolution_phase": {"const": "pre_approval"}}},
+      "then": {"properties": {"expected_terminal_state": {"const": "awaiting_approval"}, "actual_terminal_state": {"const": "awaiting_approval"}, "final_present": {"const": false}, "final_bytes": {"const": null}, "final_fingerprint": {"const": null}, "final_determinism": {"const": "not_applicable"}}}
+    },
+    {
+      "if": {"properties": {"parameters": {"properties": {"scenario_id": {"const": "mixed-conflict-approval"}}}, "resolution_phase": {"const": "post_deterministic_approval"}}},
+      "then": {"properties": {"expected_terminal_state": {"const": "final"}, "actual_terminal_state": {"const": "final"}, "final_present": {"const": true}, "final_bytes": {"type": "integer", "minimum": 0}, "final_fingerprint": {"$ref": "#/$defs/sha256_digest"}, "final_determinism": {"enum": ["matched", "mismatched"]}}}
+    }
+  ],
+  "$defs": {
+    "sha256_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "environment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["os_family", "os_build_class", "python_version", "cpu_architecture", "logical_cpu_count", "ram_tier"],
+      "properties": {
+        "os_family": {"type": "string", "enum": ["windows", "linux", "macos"]},
+        "os_build_class": {"type": "string", "enum": ["public_ci", "frozen_reference", "unspecified"]},
+        "python_version": {"type": "string", "pattern": "^3\\.(11|12)(?:\\.[0-9]+)?$"},
+        "cpu_architecture": {"type": "string", "enum": ["x86_64", "arm64", "other"]},
+        "logical_cpu_count": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "ram_tier": {"type": "string", "enum": ["le_8gib", "8_to_16gib", "16_to_32gib", "32_to_64gib", "gt_64gib"]}
+      }
+    },
+    "parameters": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scale_id", "scenario_id", "generation_seed", "permutation_seed", "rss_protocol"],
+      "properties": {
+        "scale_id": {"type": "string", "enum": ["0.5x", "1.0x", "1.5x", "2.0x"]},
+        "scenario_id": {"type": "string", "enum": ["disjoint", "subset-chain", "dense-crossing", "mixed-conflict-approval"]},
+        "generation_seed": {"type": "integer", "minimum": 0},
+        "permutation_seed": {"type": "integer", "minimum": 0},
+        "rss_protocol": {"const": "external_supervisor_child_peak_working_set"}
+      }
+    },
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_index", "run_phase", "wall_seconds", "peak_rss_mib", "output_json_bytes", "terminal_state"],
+      "properties": {
+        "run_index": {"type": "integer", "minimum": 1},
+        "run_phase": {"type": "string", "enum": ["warmup", "measured"]},
+        "wall_seconds": {"type": "number", "minimum": 0},
+        "peak_rss_mib": {"type": "number", "minimum": 0},
+        "output_json_bytes": {"type": "integer", "minimum": 0},
+        "terminal_state": {"type": "string", "enum": ["final", "unresolvable", "awaiting_approval"]}
+      }
+    },
+    "warmup_run": {"allOf": [{"$ref": "#/$defs/run"}, {"properties": {"run_index": {"const": 1}, "run_phase": {"const": "warmup"}}}]},
+    "measured_run": {"allOf": [{"$ref": "#/$defs/run"}, {"properties": {"run_phase": {"const": "measured"}}}]},
+    "measured_run_2": {"allOf": [{"$ref": "#/$defs/measured_run"}, {"properties": {"run_index": {"const": 2}}}]},
+    "measured_run_3": {"allOf": [{"$ref": "#/$defs/measured_run"}, {"properties": {"run_index": {"const": 3}}}]},
+    "measured_run_4": {"allOf": [{"$ref": "#/$defs/measured_run"}, {"properties": {"run_index": {"const": 4}}}]},
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["median_wall_seconds", "max_wall_seconds", "median_peak_rss_mib", "max_peak_rss_mib", "median_output_json_bytes", "max_output_json_bytes"],
+      "properties": {
+        "median_wall_seconds": {"type": "number", "minimum": 0},
+        "max_wall_seconds": {"type": "number", "minimum": 0},
+        "median_peak_rss_mib": {"type": "number", "minimum": 0},
+        "max_peak_rss_mib": {"type": "number", "minimum": 0},
+        "median_output_json_bytes": {"type": "integer", "minimum": 0},
+        "max_output_json_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "determinism": {
+      "type": "object", "additionalProperties": false,
+      "required": ["canonical_bytes_equal", "fingerprint_equal"],
+      "properties": {"canonical_bytes_equal": {"type": "boolean"}, "fingerprint_equal": {"type": "boolean"}}
+    },
+    "subject_digest_status": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "observed_subject_digest", "revalidation_required"],
+      "properties": {
+        "state": {"type": "string", "enum": ["current", "stale"]},
+        "observed_subject_digest": {"$ref": "#/$defs/sha256_digest"},
+        "revalidation_required": {"type": "boolean"}
+      },
+      "allOf": [
+        {"if": {"properties": {"state": {"const": "current"}}}, "then": {"properties": {"revalidation_required": {"const": false}}}},
+        {"if": {"properties": {"state": {"const": "stale"}}}, "then": {"properties": {"revalidation_required": {"const": true}}}}
+      ]
+    }
+  }
+}
