@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.3/final-execution-profile.schema.json",
+  "title": "Format Monograph V2.3 Disabled Intent Execution Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version",
+    "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint",
+    "task_id", "legacy_input", "activation", "runtime_eligible", "final_ready_eligible", "delivery_allowed",
+    "safety_invariants", "bindings", "resolved_properties", "closure_evidence"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "final-execution-profile"},
+    "schema_version": {"const": "2.3"},
+    "registry_contract_version": {"const": "2.2"},
+    "authority_contract_version": {"const": "1.0"},
+    "artifact_id": {"$ref": "common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "task_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "legacy_input": {"const": false},
+    "activation": {"const": "disabled"},
+    "runtime_eligible": {"const": false},
+    "final_ready_eligible": {"const": false},
+    "delivery_allowed": {"const": false},
+    "safety_invariants": {"$ref": "common.schema.json#/$defs/safety_invariants"},
+    "bindings": {"$ref": "common.schema.json#/$defs/final_profile_bindings"},
+    "resolved_properties": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "resolution_id", "items": {"$ref": "#/$defs/resolved_property"}},
+    "closure_evidence": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "conflict_id", "items": {"$ref": "#/$defs/closure_evidence"}}
+  },
+  "$defs": {
+    "resolved_property": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "resolution_id", "key", "resolved_binding", "final_layer_kind", "final_source",
+        "candidate_chain", "override_chain", "excluded_candidates", "confidence",
+        "safety_check", "execution_mode"
+      ],
+      "properties": {
+        "resolution_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "key": {"$ref": "common.schema.json#/$defs/property_key"},
+        "resolved_binding": {"$ref": "../v2.2/property-catalog.generated.schema.json"},
+        "final_layer_kind": {"$ref": "common.schema.json#/$defs/layer_kind"},
+        "final_source": {"$ref": "common.schema.json#/$defs/source_reference"},
+        "candidate_chain": {"type": "array", "x-semantic-array": "ordered", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/candidate_record"}},
+        "override_chain": {"type": "array", "x-semantic-array": "ordered", "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/stable_id"}},
+        "excluded_candidates": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "candidate.candidate_id", "items": {"$ref": "common.schema.json#/$defs/excluded_candidate"}},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "safety_check": {"$ref": "common.schema.json#/$defs/safety_check"},
+        "execution_mode": {"type": "string", "enum": ["automatic", "preserve", "qa", "report", "block"]}
+      }
+    },
+    "closure_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["conflict_id", "proposed_resolution_id", "qa_decision_id"],
+      "properties": {
+        "conflict_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "proposed_resolution_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "qa_decision_id": {"$ref": "common.schema.json#/$defs/stable_id"}
+      }
+    }
+  }
+}

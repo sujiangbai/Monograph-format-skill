@@ -1,0 +1,401 @@
+{
+  "contract_id": "format-monograph-artifact-routes",
+  "contract_version": "1.1",
+  "routes": [
+    {
+      "route_id": "route:layered-rule-asset:2.0",
+      "artifact_kind": "layered-rule-asset",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "layered-rule-asset.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/layered-rule-asset.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:final-execution-profile:2.0",
+      "artifact_kind": "final-execution-profile",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "final-execution-profile.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/final-execution-profile.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:qa-approval-artifact:2.0",
+      "artifact_kind": "qa-approval-artifact",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "qa-approval-artifact.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/qa-approval-artifact.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:legacy-migration-manifest:2.0",
+      "artifact_kind": "legacy-migration-manifest",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "legacy-migration-manifest.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/legacy-migration-manifest.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:feature-activation-manifest:2.0",
+      "artifact_kind": "feature-activation-manifest",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "feature-activation-manifest.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/feature-activation-manifest.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:capability-snapshot:2.0",
+      "artifact_kind": "capability-snapshot",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "capability-snapshot.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/capability-snapshot.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:conflict-report:2.0",
+      "artifact_kind": "conflict-report",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "conflict-report.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/conflict-report.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:execution-evidence-artifact:2.0",
+      "artifact_kind": "execution-evidence-artifact",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "authority_contract_version": "none",
+      "schema_file": "execution-evidence-artifact.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/execution-evidence-artifact.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:layered-rule-asset:2.1",
+      "artifact_kind": "layered-rule-asset",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "none",
+      "schema_file": "layered-rule-asset.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/layered-rule-asset.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:conflict-report:2.1",
+      "artifact_kind": "conflict-report",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "none",
+      "schema_file": "conflict-report.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/conflict-report.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:final-execution-profile:2.1",
+      "artifact_kind": "final-execution-profile",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "none",
+      "schema_file": "final-execution-profile.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/final-execution-profile.schema.json",
+      "version_source": "legacy_matrix",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:feature-activation-manifest:2.1",
+      "artifact_kind": "feature-activation-manifest",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "1.0",
+      "schema_file": "feature-activation-manifest.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/feature-activation-manifest.schema.json",
+      "version_source": "artifact_fields",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:qa-approval-artifact:2.1",
+      "artifact_kind": "qa-approval-artifact",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "1.0",
+      "schema_file": "qa-approval-artifact.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/qa-approval-artifact.schema.json",
+      "version_source": "artifact_fields",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:conflict-report:2.2",
+      "artifact_kind": "conflict-report",
+      "schema_version": "2.2",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "1.0",
+      "schema_file": "conflict-report.v2.2.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.2/conflict-report.schema.json",
+      "version_source": "artifact_fields",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "route_id": "route:final-execution-profile:2.2",
+      "artifact_kind": "final-execution-profile",
+      "schema_version": "2.2",
+      "registry_contract_version": "2.1",
+      "authority_contract_version": "1.0",
+      "schema_file": "final-execution-profile.v2.2.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.2/final-execution-profile.schema.json",
+      "version_source": "artifact_fields",
+      "registry_validation_context": "strict_execution"
+    },
+    {
+      "registry_contract_version": "2.2",
+      "route_id": "route:layered-rule-asset:2.2:intent",
+      "artifact_kind": "layered-rule-asset",
+      "schema_file": "layered-rule-asset.v2.2.schema.json",
+      "registry_validation_context": "declaration_intent",
+      "schema_id": "https://schemas.format-monograph.local/v2.2/layered-rule-asset.schema.json",
+      "authority_contract_version": "1.0",
+      "version_source": "artifact_fields",
+      "schema_version": "2.2"
+    },
+    {
+      "registry_contract_version": "2.2",
+      "route_id": "route:feature-activation-manifest:2.2:intent",
+      "artifact_kind": "feature-activation-manifest",
+      "schema_file": "feature-activation-manifest.v2.2.schema.json",
+      "registry_validation_context": "declaration_intent",
+      "schema_id": "https://schemas.format-monograph.local/v2.2/feature-activation-manifest.schema.json",
+      "authority_contract_version": "1.0",
+      "version_source": "artifact_fields",
+      "schema_version": "2.2"
+    },
+    {
+      "registry_contract_version": "2.2",
+      "route_id": "route:qa-approval-artifact:2.2:intent",
+      "artifact_kind": "qa-approval-artifact",
+      "schema_file": "qa-approval-artifact.v2.2.schema.json",
+      "registry_validation_context": "declaration_intent",
+      "schema_id": "https://schemas.format-monograph.local/v2.2/qa-approval-artifact.schema.json",
+      "authority_contract_version": "1.0",
+      "version_source": "artifact_fields",
+      "schema_version": "2.2"
+    },
+    {
+      "registry_contract_version": "2.2",
+      "route_id": "route:conflict-report:2.3:intent",
+      "artifact_kind": "conflict-report",
+      "schema_file": "conflict-report.v2.3.schema.json",
+      "registry_validation_context": "declaration_intent",
+      "schema_id": "https://schemas.format-monograph.local/v2.3/conflict-report.schema.json",
+      "authority_contract_version": "1.0",
+      "version_source": "artifact_fields",
+      "schema_version": "2.3"
+    },
+    {
+      "registry_contract_version": "2.2",
+      "route_id": "route:final-execution-profile:2.3:intent",
+      "artifact_kind": "final-execution-profile",
+      "schema_file": "final-execution-profile.v2.3.schema.json",
+      "registry_validation_context": "declaration_intent",
+      "schema_id": "https://schemas.format-monograph.local/v2.3/final-execution-profile.schema.json",
+      "authority_contract_version": "1.0",
+      "version_source": "artifact_fields",
+      "schema_version": "2.3"
+    },
+    {
+      "registry_contract_version": "2.2",
+      "route_id": "route:legacy-migration-manifest:2.1:intent",
+      "artifact_kind": "legacy-migration-manifest",
+      "schema_file": "legacy-migration-manifest.v2.1.schema.json",
+      "registry_validation_context": "declaration_intent",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/legacy-migration-manifest.intent.schema.json",
+      "authority_contract_version": "1.0",
+      "version_source": "artifact_fields",
+      "schema_version": "2.1"
+    }
+  ],
+  "schema_resources": [
+    {
+      "schema_file": "common.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/common.schema.json",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "common.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/common.schema.json",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "common.v2.2.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.2/common.schema.json",
+      "schema_version": "2.2",
+      "registry_contract_version": "2.1",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "schema_metadata"
+    },
+    {
+      "schema_file": "property-catalog.generated.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/property-catalog.generated.schema.json",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "property-catalog.v2.1.generated.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/property-catalog.generated.schema.json",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "property-registry.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/property-registry.schema.json",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "property-registry.v2.1.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/property-registry.schema.json",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "typed-value.generated.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2/typed-value.generated.schema.json",
+      "schema_version": "2.0",
+      "registry_contract_version": "2.0",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "typed-value.v2.1.generated.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/v2.1/typed-value.generated.schema.json",
+      "schema_version": "2.1",
+      "registry_contract_version": "2.1",
+      "resource_kind": "fingerprint_shared",
+      "fingerprint_inventory": true,
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_file": "authority-contract.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/contracts/authority/authority-contract.schema.json",
+      "schema_version": "1.0",
+      "registry_contract_version": "none",
+      "resource_kind": "contract_metadata",
+      "fingerprint_inventory": false,
+      "version_source": "contract_matrix"
+    },
+    {
+      "schema_file": "authority-layer.generated.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/contracts/authority/1.0/layer.schema.json",
+      "schema_version": "1.0",
+      "registry_contract_version": "none",
+      "resource_kind": "contract_metadata",
+      "fingerprint_inventory": false,
+      "version_source": "contract_matrix"
+    },
+    {
+      "schema_file": "artifact-contract-matrix.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/contracts/artifact-routes/artifact-contract-matrix.schema.json",
+      "schema_version": "1.0",
+      "registry_contract_version": "none",
+      "resource_kind": "contract_metadata",
+      "fingerprint_inventory": false,
+      "version_source": "contract_matrix"
+    },
+    {
+      "schema_file": "canonical-composition-policy.schema.json",
+      "schema_id": "https://schemas.format-monograph.local/contracts/canonical/canonical-composition-policy.schema.json",
+      "schema_version": "1.0",
+      "registry_contract_version": "none",
+      "resource_kind": "contract_metadata",
+      "fingerprint_inventory": false,
+      "version_source": "contract_matrix"
+    },
+    {
+      "schema_id": "https://schemas.format-monograph.local/v2.3/common.schema.json",
+      "fingerprint_inventory": true,
+      "schema_file": "common.v2.3.schema.json",
+      "resource_kind": "fingerprint_shared",
+      "registry_contract_version": "2.2",
+      "schema_version": "2.3",
+      "version_source": "schema_metadata"
+    },
+    {
+      "schema_id": "https://schemas.format-monograph.local/v2.2/property-catalog.generated.schema.json",
+      "fingerprint_inventory": true,
+      "schema_file": "property-catalog.v2.2.generated.schema.json",
+      "resource_kind": "fingerprint_shared",
+      "registry_contract_version": "2.2",
+      "schema_version": "2.2",
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_id": "https://schemas.format-monograph.local/v2.2/property-registry.schema.json",
+      "fingerprint_inventory": true,
+      "schema_file": "property-registry.v2.2.schema.json",
+      "resource_kind": "fingerprint_shared",
+      "registry_contract_version": "2.2",
+      "schema_version": "2.2",
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_id": "https://schemas.format-monograph.local/v2.2/typed-value.generated.schema.json",
+      "fingerprint_inventory": true,
+      "schema_file": "typed-value.v2.2.generated.schema.json",
+      "resource_kind": "fingerprint_shared",
+      "registry_contract_version": "2.2",
+      "schema_version": "2.2",
+      "version_source": "legacy_matrix"
+    },
+    {
+      "schema_id": "https://schemas.format-monograph.local/contracts/artifact-routes/1.1/artifact-contract-matrix.schema.json",
+      "fingerprint_inventory": false,
+      "schema_file": "artifact-contract-matrix.v1.1.schema.json",
+      "resource_kind": "contract_metadata",
+      "registry_contract_version": "none",
+      "schema_version": "1.1",
+      "version_source": "contract_matrix"
+    }
+  ]
+}

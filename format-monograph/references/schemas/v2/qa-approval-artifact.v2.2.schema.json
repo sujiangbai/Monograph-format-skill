@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.2/qa-approval-artifact.schema.json",
+  "title": "Format Monograph V2.2 Intent QA Approval Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_kind", "schema_version", "registry_contract_version", "authority_contract_version",
+    "artifact_id", "created_by_tool", "input_fingerprints", "semantic_fingerprint",
+    "approval_id", "approver", "decision_type", "decision", "reason", "created_at",
+    "bindings", "target", "previous_approval_id"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "qa-approval-artifact"},
+    "schema_version": {"const": "2.2"},
+    "registry_contract_version": {"const": "2.2"},
+    "authority_contract_version": {"const": "1.0"},
+    "artifact_id": {"$ref": "../v2.3/common.schema.json#/$defs/artifact_id"},
+    "created_by_tool": {"$ref": "../v2.3/common.schema.json#/$defs/created_by_tool"},
+    "input_fingerprints": {"$ref": "../v2.3/common.schema.json#/$defs/input_fingerprints"},
+    "semantic_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint", "x-semantic-fingerprint": "exclude"},
+    "approval_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+    "approver": {"$ref": "#/$defs/approver"},
+    "decision_type": {"type": "string", "enum": ["conflict_resolution", "keep_original", "qa_exclusion"]},
+    "decision": {"type": "string", "enum": ["adopt_proposed", "select_candidate", "keep_original", "exclude_candidate"]},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "created_at": {"type": "string", "format": "date-time", "x-semantic-fingerprint": "exclude"},
+    "bindings": {"$ref": "#/$defs/approval_bindings"},
+    "target": {"$ref": "#/$defs/approval_target"},
+    "previous_approval_id": {
+      "oneOf": [
+        {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        {"type": "null"}
+      ]
+    }
+  },
+  "$defs": {
+    "approver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "actor_role"],
+      "properties": {
+        "actor_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        "actor_role": {"type": "string", "enum": ["user", "delegated_publisher"]},
+        "authorization_reference": {"$ref": "#/$defs/authorization_reference"}
+      },
+      "oneOf": [
+        {"properties": {"actor_role": {"const": "user"}}, "required": ["actor_role"]},
+        {"properties": {"actor_role": {"const": "delegated_publisher"}}, "required": ["actor_role", "authorization_reference"]}
+      ]
+    },
+    "authorization_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id", "granted_by_actor_id", "authority_scope", "issued_at"],
+      "properties": {
+        "authorization_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        "granted_by_actor_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        "authority_scope": {"$ref": "../v2.3/common.schema.json#/$defs/normalized_scope"},
+        "issued_at": {"type": "string", "format": "date-time", "x-semantic-fingerprint": "exclude"}
+      }
+    },
+    "approval_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_fingerprint", "structure_fingerprint", "composition_report_fingerprint"],
+      "properties": {
+        "input_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint"},
+        "structure_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint"},
+        "composition_report_fingerprint": {"$ref": "../v2.3/common.schema.json#/$defs/semantic_fingerprint"}
+      }
+    },
+    "approval_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conflict_id", "proposed_resolution_id", "normalized_scope"],
+      "properties": {
+        "conflict_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        "proposed_resolution_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"},
+        "normalized_scope": {"$ref": "../v2.3/common.schema.json#/$defs/normalized_scope"},
+        "candidate_id": {"$ref": "../v2.3/common.schema.json#/$defs/stable_id"}
+      }
+    }
+  }
+}

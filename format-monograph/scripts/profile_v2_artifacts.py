@@ -35,6 +35,14 @@ from profile_v2_authority import (
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "references" / "schemas" / "v2"
 CONTRACT_MATRIX_PATH = SCHEMA_DIR / "artifact-contract-matrix.v1.0.json"
 CONTRACT_MATRIX_SCHEMA_PATH = SCHEMA_DIR / "artifact-contract-matrix.schema.json"
+CONTRACT_MATRIX_PATHS = {
+    "1.0": CONTRACT_MATRIX_PATH,
+    "1.1": SCHEMA_DIR / "artifact-contract-matrix.v1.1.json",
+}
+CONTRACT_MATRIX_SCHEMA_PATHS = {
+    "1.0": CONTRACT_MATRIX_SCHEMA_PATH,
+    "1.1": SCHEMA_DIR / "artifact-contract-matrix.v1.1.schema.json",
+}
 LEGACY_SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent / "references" / "format-profile.schema.json"
 )
@@ -106,6 +114,7 @@ class ContractRoute:
     schema_file: str
     schema_id: str
     version_source: str
+    registry_validation_context: str = "strict_execution"
 
 
 @dataclass(frozen=True)
@@ -149,12 +158,17 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def load_artifact_contract_matrix() -> dict[str, Any]:
+def load_artifact_contract_matrix(version: str = "1.0") -> dict[str, Any]:
     """Load the sole editable artifact/schema/registry/authority route table."""
 
-    schema = _load_json(CONTRACT_MATRIX_SCHEMA_PATH)
+    try:
+        schema_path = CONTRACT_MATRIX_SCHEMA_PATHS[version]
+        matrix_path = CONTRACT_MATRIX_PATHS[version]
+    except KeyError as exc:
+        raise ArtifactRouteError(f"Unsupported artifact contract matrix version: {version}") from exc
+    schema = _load_json(schema_path)
     Draft202012Validator.check_schema(schema)
-    matrix = _load_json(CONTRACT_MATRIX_PATH)
+    matrix = _load_json(matrix_path)
     errors = _format_errors(Draft202012Validator(schema), matrix)
     if errors:
         raise ArtifactRouteError("Invalid artifact contract matrix: " + " | ".join(errors))
@@ -187,14 +201,16 @@ def _contract_routes_from_matrix(matrix: Mapping[str, Any]) -> tuple[ContractRou
     return routes
 
 
-def _contract_routes() -> tuple[ContractRoute, ...]:
-    return _contract_routes_from_matrix(load_artifact_contract_matrix())
+def _contract_routes(matrix_version: str = "1.0") -> tuple[ContractRoute, ...]:
+    return _contract_routes_from_matrix(load_artifact_contract_matrix(matrix_version))
 
 
-def _schema_resource_contracts() -> tuple[SchemaResourceContract, ...]:
+def _schema_resource_contracts(
+    matrix_version: str = "1.0",
+) -> tuple[SchemaResourceContract, ...]:
     resources = tuple(
         SchemaResourceContract(**item)
-        for item in load_artifact_contract_matrix()["schema_resources"]
+        for item in load_artifact_contract_matrix(matrix_version)["schema_resources"]
     )
     schema_ids = [item.schema_id for item in resources]
     schema_files = [item.schema_file for item in resources]
@@ -205,12 +221,18 @@ def _schema_resource_contracts() -> tuple[SchemaResourceContract, ...]:
     return resources
 
 
-def schema_inventory_contract(schema_id: str) -> tuple[str, str, bool]:
+def schema_inventory_contract(
+    schema_id: str, *, matrix_version: str = "1.0"
+) -> tuple[str, str, bool]:
     """Return explicit schema/registry versions and inventory eligibility."""
 
-    route_matches = [item for item in _contract_routes() if item.schema_id == schema_id]
+    route_matches = [
+        item for item in _contract_routes(matrix_version) if item.schema_id == schema_id
+    ]
     resource_matches = [
-        item for item in _schema_resource_contracts() if item.schema_id == schema_id
+        item
+        for item in _schema_resource_contracts(matrix_version)
+        if item.schema_id == schema_id
     ]
     if len(route_matches) + len(resource_matches) != 1:
         raise ArtifactRouteError(
@@ -307,18 +329,24 @@ def _route_artifact_contract_from_routes(
     )
 
 
-def route_artifact_contract(document: Mapping[str, Any]) -> ContractRoute:
+def route_artifact_contract(
+    document: Mapping[str, Any], *, matrix_version: str = "1.0"
+) -> ContractRoute:
     """Resolve the complete route before any registry or authority is loaded."""
 
-    return _route_artifact_contract_from_routes(document, _contract_routes())
+    return _route_artifact_contract_from_routes(
+        document, _contract_routes(matrix_version)
+    )
 
 
 def verify_contract_matrix_alignment(
     route_index: Mapping[tuple[str, str, str, str], str] | None = None,
+    *,
+    matrix_version: str = "1.0",
 ) -> None:
     """Reject drift in either direction between the matrix, schemas, and Python index."""
 
-    routes = _contract_routes()
+    routes = _contract_routes(matrix_version)
     expected = {
         (
             item.artifact_kind,
@@ -328,10 +356,24 @@ def verify_contract_matrix_alignment(
         ): item.schema_file
         for item in routes
     }
-    actual = dict(ARTIFACT_SCHEMA_FILES if route_index is None else route_index)
+    if route_index is None:
+        if matrix_version == "1.0":
+            actual = dict(ARTIFACT_SCHEMA_FILES)
+        else:
+            actual = {
+                (
+                    item.artifact_kind,
+                    item.schema_version,
+                    item.registry_contract_version,
+                    item.authority_contract_version,
+                ): item.schema_file
+                for item in routes
+            }
+    else:
+        actual = dict(route_index)
     if expected != actual:
         raise ArtifactRouteError("Python artifact route index differs from the contract matrix.")
-    resources = _schema_resource_contracts()
+    resources = _schema_resource_contracts(matrix_version)
     routed_schema_ids = {item.schema_id for item in routes}
     resource_schema_ids = {item.schema_id for item in resources}
     if routed_schema_ids & resource_schema_ids:
@@ -340,10 +382,12 @@ def verify_contract_matrix_alignment(
         item.schema_file for item in resources
     }
     actual_files = {path.name for path in SCHEMA_DIR.glob("*.schema.json")}
-    if expected_files != actual_files:
+    if matrix_version == "1.1" and expected_files != actual_files:
         raise ArtifactRouteError(
             "Artifact contract matrix does not classify the complete offline schema set."
         )
+    if matrix_version == "1.0" and not expected_files.issubset(actual_files):
+        raise ArtifactRouteError("The immutable 1.0 schema subset is incomplete.")
     for route in routes:
         path = SCHEMA_DIR / route.schema_file
         schema = _load_json(path)
@@ -401,15 +445,33 @@ def verify_contract_matrix_alignment(
 
 def load_routed_contracts(
     document: Mapping[str, Any],
+    *,
+    matrix_version: str = "1.0",
 ) -> tuple[ContractRoute, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
     """Resolve the route first, then and only then load schema/registry/authority."""
 
-    route = route_artifact_contract(document)
+    route = route_artifact_contract(document, matrix_version=matrix_version)
     schema = _load_json(SCHEMA_DIR / route.schema_file)
     try:
-        registry = load_registry(version=route.registry_contract_version)
-        validate_registry_document(registry)
-        verify_committed_catalog(registry, version=route.registry_contract_version)
+        if route.registry_validation_context == "strict_execution":
+            registry = load_registry(version=route.registry_contract_version)
+            validate_registry_document(registry)
+            verify_committed_catalog(
+                registry, version=route.registry_contract_version
+            )
+        else:
+            registry = load_registry(
+                version=route.registry_contract_version,
+                validation_context=route.registry_validation_context,
+            )
+            validate_registry_document(
+                registry, validation_context=route.registry_validation_context
+            )
+            verify_committed_catalog(
+                registry,
+                version=route.registry_contract_version,
+                validation_context=route.registry_validation_context,
+            )
     except RegistryContractError as exc:
         raise ArtifactRouteError(str(exc)) from exc
     authority: dict[str, Any] | None = None
@@ -449,16 +511,48 @@ def profile_v2_composer_contract_enabled(
     )
 
 
+def profile_v2_intent_contract_enabled(
+    manifest: dict[str, Any] | None,
+) -> bool:
+    """Return C1 intent eligibility without connecting it to a runtime entry point."""
+
+    if manifest is None:
+        return False
+    try:
+        result = validate_intent_artifact_v041(manifest)
+    except ArtifactContractError:
+        return False
+    features = result.document.get("features", {})
+    return bool(
+        result.artifact_kind == "feature-activation-manifest"
+        and result.schema_version == "2.2"
+        and features.get("profile_v2_schema") is True
+        and features.get("profile_v2_composer") is True
+        and features.get("monograph_base_v041") is True
+        and features.get("final_ready_eligible") is False
+    )
+
+
 def load_artifact_schema(
     artifact_kind: str,
     *,
     version: str = "2.0",
     registry_contract_version: str | None = None,
     authority_contract_version: str | None = None,
+    matrix_version: str = "1.0",
 ) -> dict[str, Any]:
+    route_index = {
+        (
+            item.artifact_kind,
+            item.schema_version,
+            item.registry_contract_version,
+            item.authority_contract_version,
+        ): item.schema_file
+        for item in _contract_routes(matrix_version)
+    }
     matches = [
         (identity, filename)
-        for identity, filename in ARTIFACT_SCHEMA_FILES.items()
+        for identity, filename in route_index.items()
         if identity[0] == artifact_kind
         and identity[1] == version
         and (registry_contract_version is None or identity[2] == registry_contract_version)
@@ -474,9 +568,17 @@ def load_artifact_schema(
 
 def _schema_documents(
     schema_overrides: Mapping[str, dict[str, Any]] | None = None,
+    *,
+    matrix_version: str = "1.0",
 ) -> dict[str, dict[str, Any]]:
     documents: dict[str, dict[str, Any]] = {}
-    for path in sorted(SCHEMA_DIR.glob("*.schema.json")):
+    files = {
+        item.schema_file for item in _contract_routes(matrix_version)
+    } | {
+        item.schema_file for item in _schema_resource_contracts(matrix_version)
+    }
+    for filename in sorted(files):
+        path = SCHEMA_DIR / filename
         schema = _load_json(path)
         Draft202012Validator.check_schema(schema)
         schema_id = schema.get("$id")
@@ -495,25 +597,29 @@ def _schema_documents(
     return documents
 
 
-def schema_documents() -> dict[str, dict[str, Any]]:
+def schema_documents(*, matrix_version: str = "1.0") -> dict[str, dict[str, Any]]:
     """Return only the repository's committed offline schema set."""
 
-    return _schema_documents()
+    return _schema_documents(matrix_version=matrix_version)
 
 
 def _offline_schema_registry(
     schema_overrides: Mapping[str, dict[str, Any]] | None = None,
+    *,
+    matrix_version: str = "1.0",
 ) -> Registry:
     registry = Registry()
-    for schema_id, schema in _schema_documents(schema_overrides).items():
+    for schema_id, schema in _schema_documents(
+        schema_overrides, matrix_version=matrix_version
+    ).items():
         registry = registry.with_resource(schema_id, Resource.from_contents(schema))
     return registry
 
 
-def offline_schema_registry() -> Registry:
+def offline_schema_registry(*, matrix_version: str = "1.0") -> Registry:
     """Build the production resolver from committed local schemas only."""
 
-    return _offline_schema_registry()
+    return _offline_schema_registry(matrix_version=matrix_version)
 
 
 def _format_errors(validator: Draft202012Validator, value: Any) -> list[str]:
@@ -529,17 +635,22 @@ def _schema_errors(
     *,
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
+    matrix_version: str = "1.0",
 ) -> list[str]:
     try:
         schema = schema_override or load_artifact_schema(
-            artifact_kind, version=str(document.get("schema_version"))
+            artifact_kind,
+            version=str(document.get("schema_version")),
+            matrix_version=matrix_version,
         )
     except ArtifactContractError as exc:
         return [str(exc)]
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(
         schema,
-        registry=_offline_schema_registry(schema_documents_override),
+        registry=_offline_schema_registry(
+            schema_documents_override, matrix_version=matrix_version
+        ),
         format_checker=FormatChecker(),
     )
     return _format_errors(validator, document)
@@ -688,7 +799,7 @@ def artifact_semantic_errors(
     def validate_key_and_candidate(
         key: dict[str, Any], candidate: dict[str, Any], context: str
     ) -> None:
-        if registry.get("schema_version") == "2.1":
+        if registry.get("schema_version") in {"2.1", "2.2"}:
             try:
                 from profile_v2_scope import normalize_scope
 
@@ -748,11 +859,11 @@ def artifact_semantic_errors(
         elif values[0] != bindings.get(binding_field):
             errors.append(f"{context} {role} fingerprint does not match {binding_field}.")
 
-    if artifact_kind == "feature-activation-manifest" and schema_version == "2.1":
+    if artifact_kind == "feature-activation-manifest" and schema_version in {"2.1", "2.2"}:
         features = document.get("features", {})
         if features.get("profile_v2_composer") is True and features.get("profile_v2_schema") is not True:
             errors.append("profile_v2_composer requires profile_v2_schema=true.")
-    elif artifact_kind == "qa-approval-artifact" and schema_version == "2.1":
+    elif artifact_kind == "qa-approval-artifact" and schema_version in {"2.1", "2.2"}:
         bindings = document.get("bindings", {})
         validate_singleton_binding("source_document", "input_fingerprint", bindings, "QA approval")
         validate_singleton_binding("structure", "structure_fingerprint", bindings, "QA approval")
@@ -776,6 +887,34 @@ def artifact_semantic_errors(
 
     if artifact_kind == "layered-rule-asset":
         layer_kind = document["layer_kind"]
+        if schema_version == "2.2":
+            from profile_v2_canonical import canonical_data_digest
+
+            registry_binding = document.get("property_registry_binding", {})
+            registry_fingerprint = registry_binding.get("registry_fingerprint")
+            expected_registry_fingerprint = canonical_data_digest(registry)
+            if registry_fingerprint != expected_registry_fingerprint:
+                errors.append(
+                    "Layered intent asset property registry fingerprint does not match "
+                    "the routed registry."
+                )
+            if registry_binding.get("required_completeness") != registry.get(
+                "registry_completeness"
+            ):
+                errors.append(
+                    "Layered intent asset registry completeness does not match the "
+                    "routed registry."
+                )
+            registry_inputs = [
+                item.get("fingerprint")
+                for item in document.get("input_fingerprints", [])
+                if item.get("role") == "property_registry"
+            ]
+            if registry_inputs != [registry_fingerprint]:
+                errors.append(
+                    "Layered intent asset requires exactly one matching property_registry "
+                    "input fingerprint."
+                )
         _keyed_collection_ids(
             document.get("rules", []), "rule_id", "layered rules", errors
         )
@@ -791,7 +930,7 @@ def artifact_semantic_errors(
                     validate_binding_for_layer(binding, layer_kind, registry)
                 except RegistryContractError as exc:
                     errors.append(str(exc))
-        if schema_version == "2.1":
+        if schema_version in {"2.1", "2.2"}:
             try:
                 from profile_v2_scope import normalize_rule_scope, validate_module_asset_scope
 
@@ -801,7 +940,7 @@ def artifact_semantic_errors(
                 validate_module_asset_scope(document)
             except ValueError as exc:
                 errors.append(str(exc))
-    elif artifact_kind == "final-execution-profile" and schema_version == "2.2":
+    elif artifact_kind == "final-execution-profile" and schema_version in {"2.2", "2.3"}:
         if document.get("legacy_input") is not False:
             errors.append("V2.2 final execution profiles cannot be legacy inputs.")
         if document.get("activation") != "disabled":
@@ -1007,7 +1146,7 @@ def artifact_semantic_errors(
                     errors.append(
                         f"Safety check references non-safety property {invariant_id}."
                     )
-    elif artifact_kind == "conflict-report" and schema_version == "2.2":
+    elif artifact_kind == "conflict-report" and schema_version in {"2.2", "2.3"}:
         bindings = document.get("bindings", {})
         for role, field in (
             ("source_document", "input_fingerprint"),
@@ -1184,6 +1323,174 @@ def artifact_semantic_errors(
                     "Failed or not-evaluated scope partitions require an unresolvable "
                     "blocker for the same key."
                 )
+        if schema_version == "2.3":
+            from profile_v2_canonical import canonical_data_digest
+            from profile_v2_scope import scope_equal, scope_subset
+
+            coverage = document.get("coverage_evidence", {})
+            expected_items = coverage.get("expected_bindings", [])
+            consumed_items = coverage.get("consumed_bindings", [])
+            expected_ids = _keyed_collection_ids(
+                expected_items, "binding_id", "coverage expected bindings", errors
+            )
+            consumed_ids = _keyed_collection_ids(
+                consumed_items, "binding_id", "coverage consumed bindings", errors
+            )
+            if coverage.get("expected_binding_count") != len(expected_items):
+                errors.append("Coverage expected_binding_count does not match its inventory.")
+            if coverage.get("consumed_binding_count") != len(consumed_items):
+                errors.append("Coverage consumed_binding_count does not match its inventory.")
+            if expected_ids != consumed_ids:
+                errors.append(
+                    "Coverage consumed bindings must close every and only expected binding."
+                )
+            ordered_expected = sorted(
+                expected_items, key=lambda item: item.get("binding_id", "")
+            )
+            ordered_consumed = sorted(
+                consumed_items, key=lambda item: item.get("binding_id", "")
+            )
+            if coverage.get("expected_inventory_digest") != canonical_data_digest(
+                ordered_expected
+            ):
+                errors.append("Coverage expected inventory digest is inconsistent.")
+            if coverage.get("consumed_inventory_digest") != canonical_data_digest(
+                ordered_consumed
+            ):
+                errors.append("Coverage consumed inventory digest is inconsistent.")
+
+            expected_by_id = {
+                item["binding_id"]: item
+                for item in expected_items
+                if isinstance(item, dict) and "binding_id" in item
+            }
+            artifact_fingerprints: dict[str, str] = {}
+            bound_rule_fingerprints = set(
+                bindings.get("rule_asset_fingerprints", [])
+            )
+            for item in expected_items:
+                key = item.get("key", {})
+                if (
+                    key.get("semantic_object_kind") != item.get("semantic_object_kind")
+                    or key.get("property_id") != item.get("property_id")
+                    or not scope_equal(
+                        key.get("normalized_scope", {}),
+                        item.get("normalized_scope", {}),
+                    )
+                ):
+                    errors.append(
+                        "Coverage expected binding key differs from its object/property/scope."
+                    )
+                source_id = item.get("source_artifact_id")
+                source_fingerprint = item.get("source_artifact_fingerprint")
+                previous = artifact_fingerprints.setdefault(source_id, source_fingerprint)
+                if previous != source_fingerprint:
+                    errors.append(
+                        "Coverage maps one source artifact to multiple fingerprints."
+                    )
+                if source_fingerprint not in bound_rule_fingerprints:
+                    errors.append(
+                        "Coverage expected binding references an unbound rule asset fingerprint."
+                    )
+
+            candidate_locations: dict[str, dict[str, set[str]]] = {}
+            proposals_by_key = composition_maps.get("proposed_resolutions", {})
+            for group in document.get("candidate_groups", []):
+                group_key = composition_key(group["key"], "Coverage candidate group")
+                proposal = proposals_by_key.get(group_key)
+                if proposal is None:
+                    errors.append("Coverage candidate group has no proposed resolution.")
+                    continue
+                for candidate in group.get("candidates", []):
+                    candidate_id = candidate["candidate_id"]
+                    expected = expected_by_id.get(candidate_id)
+                    if expected is None:
+                        errors.append("Coverage candidate has no expected binding source.")
+                        continue
+                    if (
+                        candidate["source"].get("source_artifact_id")
+                        != expected.get("source_artifact_id")
+                        or candidate["source"].get("source_rule_id")
+                        != expected.get("source_rule_id")
+                        or candidate.get("layer_kind") != expected.get("layer_kind")
+                        or candidate["property_binding"].get("property_id")
+                        != expected.get("property_id")
+                        or canonical_data_digest(candidate["property_binding"])
+                        != expected.get("property_binding_digest")
+                    ):
+                        errors.append(
+                            "Coverage candidate provenance/layer/property/binding is inconsistent."
+                        )
+                    if (
+                        group["key"].get("semantic_object_kind")
+                        != expected.get("semantic_object_kind")
+                        or group["key"].get("property_id")
+                        != expected.get("property_id")
+                        or not scope_subset(
+                            group["key"].get("normalized_scope", {}),
+                            expected.get("normalized_scope", {}),
+                        )
+                    ):
+                        errors.append(
+                            "Coverage candidate group key is outside its expected binding scope."
+                        )
+                    location = candidate_locations.setdefault(
+                        candidate_id,
+                        {"candidate_group_ids": set(), "proposed_resolution_ids": set()},
+                    )
+                    location["candidate_group_ids"].add(group["candidate_group_id"])
+                    location["proposed_resolution_ids"].add(
+                        proposal["proposed_resolution_id"]
+                    )
+
+            blocker_locations: dict[str, set[str]] = {}
+            for blocker in document.get("unresolvable_blockers", []):
+                for candidate_id in blocker.get("candidate_ids", []):
+                    if candidate_id not in expected_by_id:
+                        errors.append("Coverage blocker references an unexpected binding.")
+                    blocker_locations.setdefault(candidate_id, set()).add(
+                        blocker["blocker_id"]
+                    )
+            if set(candidate_locations) & set(blocker_locations):
+                errors.append(
+                    "Coverage binding cannot be both candidate/proposal and blocker consumed."
+                )
+            if any(len(values) != 1 for values in blocker_locations.values()):
+                errors.append("Coverage binding cannot be consumed by multiple blockers.")
+
+            computed_consumed: dict[str, dict[str, Any]] = {}
+            for binding_id in sorted(expected_by_id):
+                if binding_id in candidate_locations:
+                    location = candidate_locations[binding_id]
+                    computed_consumed[binding_id] = {
+                        "binding_id": binding_id,
+                        "classification": "candidate_proposal",
+                        "candidate_group_ids": sorted(location["candidate_group_ids"]),
+                        "proposed_resolution_ids": sorted(
+                            location["proposed_resolution_ids"]
+                        ),
+                        "blocker_ids": [],
+                    }
+                elif binding_id in blocker_locations:
+                    computed_consumed[binding_id] = {
+                        "binding_id": binding_id,
+                        "classification": "unresolvable_blocker",
+                        "candidate_group_ids": [],
+                        "proposed_resolution_ids": [],
+                        "blocker_ids": sorted(blocker_locations[binding_id]),
+                    }
+            if set(computed_consumed) != set(expected_by_id):
+                errors.append("Coverage has expected bindings with no consumption record.")
+            supplied_consumed = {
+                item["binding_id"]: item
+                for item in consumed_items
+                if isinstance(item, dict) and "binding_id" in item
+            }
+            if supplied_consumed != computed_consumed:
+                errors.append(
+                    "Coverage consumed classifications do not match report candidates, "
+                    "proposals, and blockers."
+                )
         fatal = bool(document.get("fatal_diagnostics"))
         unresolvable = bool(document.get("unresolvable_blockers"))
         approvals = bool(document.get("approval_required_conflicts"))
@@ -1257,6 +1564,7 @@ def _validate_artifact_contract(
     resolved_schema: dict[str, Any] | None = None,
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
+    matrix_version: str = "1.0",
 ) -> ProfileReadResult:
     if not profile_v2_schema_enabled(features):
         raise ProfileV2DisabledError(
@@ -1274,7 +1582,9 @@ def _validate_artifact_contract(
         compatible_minor = False
     elif schema_override is None:
         effective_schema = load_artifact_schema(
-            artifact_kind, version=str(document.get("schema_version"))
+            artifact_kind,
+            version=str(document.get("schema_version")),
+            matrix_version=matrix_version,
         )
         compatible_minor = False
     else:
@@ -1286,6 +1596,7 @@ def _validate_artifact_contract(
         document,
         schema_override=effective_schema,
         schema_documents_override=schema_documents_override,
+        matrix_version=matrix_version,
     )
     if not errors:
         errors.extend(artifact_semantic_errors(artifact_kind, document, registry))
@@ -1306,9 +1617,16 @@ def _validate_artifact_contract(
                         "semantic_fingerprint does not match canonical test semantics."
                     )
             else:
-                from profile_v2_canonical import verify_semantic_fingerprint
+                if matrix_version == "1.1":
+                    from profile_v2_canonical import (
+                        verify_intent_semantic_fingerprint_v041,
+                    )
 
-                verify_semantic_fingerprint(document)
+                    verify_intent_semantic_fingerprint_v041(document)
+                else:
+                    from profile_v2_canonical import verify_semantic_fingerprint
+
+                    verify_semantic_fingerprint(document)
         except ValueError as exc:
             errors.append(str(exc))
     if errors:
@@ -1341,6 +1659,22 @@ def validate_artifact(
     )
 
 
+def validate_intent_artifact_v041(document: dict[str, Any]) -> ProfileReadResult:
+    """Validate one append-only P3 declaration/intent artifact contract."""
+
+    verify_contract_matrix_alignment(matrix_version="1.1")
+    _, effective_schema, effective_registry, _ = load_routed_contracts(
+        document, matrix_version="1.1"
+    )
+    return _validate_artifact_contract(
+        document,
+        features={"profile_v2_schema": True},
+        registry=effective_registry,
+        resolved_schema=effective_schema,
+        matrix_version="1.1",
+    )
+
+
 def _is_obvious_placeholder_fingerprint(value: Any) -> bool:
     if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
         return False
@@ -1351,6 +1685,8 @@ def _is_obvious_placeholder_fingerprint(value: Any) -> bool:
 def _validate_artifact_dag_with_reader(
     documents: list[dict[str, Any]],
     reader: Callable[[dict[str, Any]], ProfileReadResult],
+    *,
+    matrix_version: str = "1.0",
 ) -> DagValidationResult:
     """Validate H bindings and closure evidence without composing any result."""
 
@@ -1369,7 +1705,7 @@ def _validate_artifact_dag_with_reader(
             raise ArtifactDagError(f"Artifact DAG repeats artifact_id {artifact_id}.")
         if fingerprint in by_fingerprint:
             raise ArtifactDagError("Artifact DAG repeats a semantic fingerprint.")
-        if str(document.get("schema_version")) in {"2.1", "2.2"} and _is_obvious_placeholder_fingerprint(fingerprint):
+        if str(document.get("schema_version")) in {"2.1", "2.2", "2.3"} and _is_obvious_placeholder_fingerprint(fingerprint):
             raise ArtifactDagError("New artifact contracts reject placeholder semantic fingerprints.")
         by_id[artifact_id] = document
         by_fingerprint[fingerprint] = document
@@ -1402,7 +1738,9 @@ def _validate_artifact_dag_with_reader(
                 f"{expected_schema_version}."
             )
         if expected_registry_contract_version is not None:
-            target_route = route_artifact_contract(target)
+            target_route = route_artifact_contract(
+                target, matrix_version=matrix_version
+            )
             if target_route.registry_contract_version != expected_registry_contract_version:
                 raise ArtifactDagError(
                     f"{owner['artifact_id']} requires {expected_kind} registry contract "
@@ -1417,81 +1755,104 @@ def _validate_artifact_dag_with_reader(
     for document in validated:
         kind = document["artifact_kind"]
         version = str(document.get("schema_version"))
-        if kind == "conflict-report" and version == "2.2":
+        if kind == "conflict-report" and version in {"2.2", "2.3"}:
             reports[document["semantic_fingerprint"]] = document
             bindings = document["bindings"]
+            intent_route = version == "2.3"
+            feature_version = "2.2" if intent_route else "2.1"
+            registry_version = "2.2" if intent_route else "2.1"
+            asset_version = "2.2" if intent_route else "2.1"
             feature = require_internal(
                 document,
                 bindings["feature_activation_fingerprint"],
                 "feature-activation-manifest",
-                expected_schema_version="2.1",
-                expected_registry_contract_version="2.1",
+                expected_schema_version=feature_version,
+                expected_registry_contract_version=registry_version,
             )
             if (
                 feature.get("features", {}).get("profile_v2_schema") is not True
                 or feature.get("features", {}).get("profile_v2_composer") is not True
+                or (
+                    intent_route
+                    and feature.get("features", {}).get("monograph_base_v041")
+                    is not True
+                )
             ):
                 raise ArtifactDagError(
                     "Composition report requires profile_v2_schema=true and "
-                    "profile_v2_composer=true."
+                    "profile_v2_composer=true; intent reports also require "
+                    "monograph_base_v041=true."
                 )
             for fingerprint in bindings["rule_asset_fingerprints"]:
                 require_internal(
                     document,
                     fingerprint,
                     "layered-rule-asset",
-                    expected_schema_version="2.1",
-                    expected_registry_contract_version="2.1",
+                    expected_schema_version=asset_version,
+                    expected_registry_contract_version=registry_version,
                 )
-        elif kind == "qa-approval-artifact" and version == "2.1":
+        elif kind == "qa-approval-artifact" and version in {"2.1", "2.2"}:
             approvals[document["semantic_fingerprint"]] = document
+            intent_route = version == "2.2"
             require_internal(
                 document,
                 document["bindings"]["composition_report_fingerprint"],
                 "conflict-report",
-                expected_schema_version="2.2",
-                expected_registry_contract_version="2.1",
+                expected_schema_version="2.3" if intent_route else "2.2",
+                expected_registry_contract_version="2.2" if intent_route else "2.1",
             )
-        elif kind == "final-execution-profile" and version == "2.2":
+        elif kind == "final-execution-profile" and version in {"2.2", "2.3"}:
             finals.append(document)
             bindings = document["bindings"]
+            intent_route = version == "2.3"
+            report_version = "2.3" if intent_route else "2.2"
+            feature_version = "2.2" if intent_route else "2.1"
+            approval_version = "2.2" if intent_route else "2.1"
+            asset_version = "2.2" if intent_route else "2.1"
+            registry_version = "2.2" if intent_route else "2.1"
             require_internal(
                 document,
                 bindings["composition_report_fingerprint"],
                 "conflict-report",
-                expected_schema_version="2.2",
-                expected_registry_contract_version="2.1",
+                expected_schema_version=report_version,
+                expected_registry_contract_version=registry_version,
             )
             feature = require_internal(
                 document,
                 bindings["feature_activation_fingerprint"],
                 "feature-activation-manifest",
-                expected_schema_version="2.1",
-                expected_registry_contract_version="2.1",
+                expected_schema_version=feature_version,
+                expected_registry_contract_version=registry_version,
             )
             if (
                 feature.get("features", {}).get("profile_v2_schema") is not True
                 or feature.get("features", {}).get("profile_v2_composer") is not True
+                or (
+                    intent_route
+                    and feature.get("features", {}).get("monograph_base_v041")
+                    is not True
+                )
             ):
                 raise ArtifactDagError(
                     "Final profile requires profile_v2_schema=true and "
-                    "profile_v2_composer=true."
+                    "profile_v2_composer=true; intent profiles also require "
+                    "monograph_base_v041=true."
                 )
             for fingerprint in bindings["rule_asset_fingerprints"]:
                 require_internal(
                     document,
                     fingerprint,
                     "layered-rule-asset",
-                    expected_schema_version="2.1",
-                    expected_registry_contract_version="2.1",
+                    expected_schema_version=asset_version,
+                    expected_registry_contract_version=registry_version,
                 )
             for fingerprint in bindings["approval_fingerprints"]:
                 require_internal(
                     document,
                     fingerprint,
                     "qa-approval-artifact",
-                    expected_schema_version="2.1",
-                    expected_registry_contract_version="2.1",
+                    expected_schema_version=approval_version,
+                    expected_registry_contract_version=registry_version,
                 )
 
     from profile_v2_scope import normalized_property_scope_key, scope_equal
@@ -1659,6 +2020,19 @@ def validate_artifact_dag(
         lambda document: validate_artifact(
             document, features={"profile_v2_schema": True}
         ),
+        matrix_version="1.0",
+    )
+
+
+def validate_intent_artifact_dag_v041(
+    documents: list[dict[str, Any]],
+) -> DagValidationResult:
+    """Validate the explicit matrix-1.1 declaration-intent DAG without upgrading legacy routes."""
+
+    return _validate_artifact_dag_with_reader(
+        documents,
+        validate_intent_artifact_v041,
+        matrix_version="1.1",
     )
 
 

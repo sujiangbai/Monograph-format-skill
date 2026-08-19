@@ -1,0 +1,84 @@
+{
+  "schema_version": "2.2",
+  "registry_id": "registry:profile-v2-intent-contract-core",
+  "registry_scope": "production",
+  "registry_completeness": "contract_core",
+  "data_types": [
+    {"data_type_id": "boolean", "json_type": "boolean"},
+    {"data_type_id": "string", "json_type": "string", "max_length": 1000},
+    {"data_type_id": "integer", "json_type": "integer"},
+    {"data_type_id": "decimal", "json_type": "string", "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"}
+  ],
+  "units": [
+    {"unit_id": "unit.none", "dimension": "none", "symbol": null, "canonical_unit_id": "unit.none", "to_canonical_numerator": 1, "to_canonical_denominator": 1},
+    {"unit_id": "unit.pt", "dimension": "length", "symbol": "pt", "canonical_unit_id": "unit.pt", "to_canonical_numerator": 1, "to_canonical_denominator": 1},
+    {"unit_id": "unit.mm", "dimension": "length", "symbol": "mm", "canonical_unit_id": "unit.pt", "to_canonical_numerator": 360, "to_canonical_denominator": 127},
+    {"unit_id": "unit.percent", "dimension": "ratio", "symbol": "%", "canonical_unit_id": "unit.percent", "to_canonical_numerator": 1, "to_canonical_denominator": 1},
+    {"unit_id": "unit.char", "dimension": "character", "symbol": "char", "canonical_unit_id": "unit.char", "to_canonical_numerator": 1, "to_canonical_denominator": 1}
+  ],
+  "normalizers": [
+    {"normalizer_id": "normalizer.identity", "description": "Preserve an NFC-normalized declared scalar value."},
+    {"normalizer_id": "normalizer.decimal", "description": "Convert an exact decimal value to its canonical unit and precision."}
+  ],
+  "comparators": [
+    {"comparator_id": "comparator.exact", "description": "Compare canonical typed scalar values exactly."},
+    {"comparator_id": "comparator.decimal", "description": "Compare canonical fixed-point decimal values exactly."}
+  ],
+  "executor_capabilities": [
+    {"capability_id": "executor.none", "availability": "unavailable", "description": "No execution capability is available."},
+    {"capability_id": "executor.intent-reserved", "availability": "reserved", "description": "Reserved declaration intent; not an executable implementation."}
+  ],
+  "auditor_capabilities": [
+    {"capability_id": "auditor.content-integrity", "availability": "reserved", "description": "Reserved content-integrity audit capability ID."},
+    {"capability_id": "auditor.intent-reserved", "availability": "reserved", "description": "Reserved declaration intent; not an implemented auditor."}
+  ],
+  "constraints": [],
+  "properties": [
+    {
+      "property_id": "security.author-content-immutable",
+      "test_only": false,
+      "semantic_object_kinds": ["document"],
+      "allowed_layers": ["safety"],
+      "data_type_id": "boolean",
+      "canonical_unit_id": null,
+      "allowed_unit_ids": [],
+      "comparison_precision": null,
+      "normalizer_id": "normalizer.identity",
+      "comparator_id": "comparator.exact",
+      "executor_capability_id": "executor.none",
+      "auditor_capability_id": "auditor.content-integrity",
+      "overridable": false,
+      "safety_invariant": true,
+      "qa_required": false,
+      "missing_strategy": "blocked_qa",
+      "unknown_object_strategy": "blocked_qa",
+      "value_constraints": {"enum_values": [true], "numeric_range": null},
+      "constraint_ids": [],
+      "test_ids": ["T41-REG-CORE-007"],
+      "modes": ["block", "report"]
+    },
+    {
+      "property_id": "contract.intent-probe",
+      "test_only": false,
+      "semantic_object_kinds": ["paragraph"],
+      "allowed_layers": ["monograph_base", "publisher_template", "task_override"],
+      "data_type_id": "string",
+      "canonical_unit_id": null,
+      "allowed_unit_ids": [],
+      "comparison_precision": null,
+      "normalizer_id": "normalizer.identity",
+      "comparator_id": "comparator.exact",
+      "executor_capability_id": "executor.intent-reserved",
+      "auditor_capability_id": "auditor.intent-reserved",
+      "overridable": true,
+      "safety_invariant": false,
+      "qa_required": false,
+      "missing_strategy": "blocked_qa",
+      "unknown_object_strategy": "blocked_qa",
+      "value_constraints": {"enum_values": [], "numeric_range": null},
+      "constraint_ids": [],
+      "test_ids": ["T412-C1-CTX-001"],
+      "modes": ["automatic", "preserve", "report"]
+    }
+  ]
+}

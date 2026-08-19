@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.format-monograph.local/v2.2/property-registry.schema.json",
+  "title": "Format Monograph V2.2 Property Registry Declaration Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "registry_id", "registry_scope", "registry_completeness", "data_types", "units",
+    "normalizers", "comparators", "executor_capabilities", "auditor_capabilities",
+    "constraints", "properties"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.2"},
+    "registry_id": {"type": "string", "pattern": "^registry:[a-z][a-z0-9-]{2,63}$"},
+    "registry_scope": {"type": "string", "enum": ["production", "test"]},
+    "registry_completeness": {"type": "string", "enum": ["contract_core", "full_production"]},
+    "data_types": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "data_type_id", "minItems": 1, "items": {"$ref": "#/$defs/data_type"}},
+    "units": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "unit_id", "minItems": 1, "items": {"$ref": "#/$defs/unit"}},
+    "normalizers": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "normalizer_id", "minItems": 1, "items": {"$ref": "#/$defs/normalizer"}},
+    "comparators": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "comparator_id", "minItems": 1, "items": {"$ref": "#/$defs/comparator"}},
+    "executor_capabilities": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "capability_id", "minItems": 1, "items": {"$ref": "#/$defs/executor_capability"}},
+    "auditor_capabilities": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "capability_id", "minItems": 1, "items": {"$ref": "#/$defs/auditor_capability"}},
+    "constraints": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "constraint_id", "items": {"$ref": "#/$defs/cross_property_constraint"}},
+    "properties": {"type": "array", "x-semantic-array": "set_by_key", "x-semantic-key": "property_id", "minItems": 1, "items": {"$ref": "#/$defs/property"}}
+  },
+  "$defs": {
+    "description": {"type": "string", "minLength": 1, "maxLength": 500},
+    "property_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}(?:\\.[a-z][a-z0-9-]{1,31})+$"},
+    "test_id": {"type": "string", "pattern": "^T(?:41|412)-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
+    "data_type": {
+      "type": "object", "additionalProperties": false,
+      "required": ["data_type_id", "json_type"],
+      "properties": {
+        "data_type_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "json_type": {"type": "string", "enum": ["boolean", "string", "integer"]},
+        "pattern": {"type": "string", "minLength": 1, "maxLength": 200},
+        "max_length": {"type": "integer", "minimum": 1, "maximum": 100000}
+      }
+    },
+    "unit": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "unit_id", "dimension", "symbol", "canonical_unit_id",
+        "to_canonical_numerator", "to_canonical_denominator"
+      ],
+      "properties": {
+        "unit_id": {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"},
+        "dimension": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "symbol": {"type": ["string", "null"], "maxLength": 16},
+        "canonical_unit_id": {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"},
+        "to_canonical_numerator": {"type": "integer", "minimum": 1},
+        "to_canonical_denominator": {"type": "integer", "minimum": 1}
+      }
+    },
+    "normalizer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["normalizer_id", "description"],
+      "properties": {
+        "normalizer_id": {"type": "string", "pattern": "^normalizer\\.[a-z][a-z0-9-]{1,31}$"},
+        "description": {"$ref": "#/$defs/description"}
+      }
+    },
+    "comparator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["comparator_id", "description"],
+      "properties": {
+        "comparator_id": {"type": "string", "pattern": "^comparator\\.[a-z][a-z0-9-]{1,31}$"},
+        "description": {"$ref": "#/$defs/description"}
+      }
+    },
+    "executor_capability": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capability_id", "availability", "description"],
+      "properties": {
+        "capability_id": {"type": "string", "pattern": "^executor\\.[a-z][a-z0-9-]{1,31}$"},
+        "availability": {"type": "string", "enum": ["unavailable", "reserved", "implemented"]},
+        "description": {"$ref": "#/$defs/description"}
+      }
+    },
+    "auditor_capability": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capability_id", "availability", "description"],
+      "properties": {
+        "capability_id": {"type": "string", "pattern": "^auditor\\.[a-z][a-z0-9-]{1,31}$"},
+        "availability": {"type": "string", "enum": ["unavailable", "reserved", "implemented"]},
+        "description": {"$ref": "#/$defs/description"}
+      }
+    },
+    "comparison_precision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "decimal_places"},
+        "value": {"type": "integer", "minimum": 0, "maximum": 12}
+      }
+    },
+    "numeric_range": {
+      "type": "object", "additionalProperties": false,
+      "required": ["minimum", "maximum", "minimum_inclusive", "maximum_inclusive"],
+      "properties": {
+        "minimum": {"oneOf": [{"type": "string", "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"}, {"type": "null"}]},
+        "maximum": {"oneOf": [{"type": "string", "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"}, {"type": "null"}]},
+        "minimum_inclusive": {"type": "boolean"},
+        "maximum_inclusive": {"type": "boolean"}
+      }
+    },
+    "value_constraints": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enum_values", "numeric_range"],
+      "properties": {
+        "enum_values": {
+          "type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true,
+          "items": {"oneOf": [{"type": "boolean"}, {"type": "string", "maxLength": 1000}, {"type": "integer"}]}
+        },
+        "numeric_range": {"oneOf": [{"$ref": "#/$defs/numeric_range"}, {"type": "null"}]}
+      }
+    },
+    "cross_property_constraint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["constraint_id", "constraint_kind", "property_ids", "enforcement", "description"],
+      "properties": {
+        "constraint_id": {"type": "string", "pattern": "^constraint\\.[a-z][a-z0-9-]{1,63}$"},
+        "constraint_kind": {"type": "string", "enum": ["requires", "excludes", "same_scope", "mutually_exclusive", "ordered_with"]},
+        "property_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/property_id"}},
+        "enforcement": {"type": "string", "enum": ["schema", "validator", "qa"]},
+        "description": {"$ref": "#/$defs/description"}
+      }
+    },
+    "property": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "property_id", "test_only", "semantic_object_kinds", "allowed_layers",
+        "data_type_id", "canonical_unit_id", "allowed_unit_ids", "comparison_precision",
+        "normalizer_id", "comparator_id", "executor_capability_id", "auditor_capability_id",
+        "overridable", "safety_invariant", "qa_required", "missing_strategy",
+        "unknown_object_strategy", "value_constraints", "constraint_ids", "test_ids", "modes"
+      ],
+      "properties": {
+        "property_id": {"$ref": "#/$defs/property_id"},
+        "test_only": {"type": "boolean"},
+        "semantic_object_kinds": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$"}},
+        "allowed_layers": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["safety", "task_override", "publisher_template", "module", "book_type", "monograph_base", "standard_supplement"]}},
+        "data_type_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+        "canonical_unit_id": {"oneOf": [{"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"}, {"type": "null"}]},
+        "allowed_unit_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true, "items": {"type": "string", "pattern": "^unit\\.[a-z][a-z0-9-]{1,31}$"}},
+        "comparison_precision": {"oneOf": [{"$ref": "#/$defs/comparison_precision"}, {"type": "null"}]},
+        "normalizer_id": {"type": "string", "pattern": "^normalizer\\.[a-z][a-z0-9-]{1,31}$"},
+        "comparator_id": {"type": "string", "pattern": "^comparator\\.[a-z][a-z0-9-]{1,31}$"},
+        "executor_capability_id": {"type": "string", "pattern": "^executor\\.[a-z][a-z0-9-]{1,31}$"},
+        "auditor_capability_id": {"type": "string", "pattern": "^auditor\\.[a-z][a-z0-9-]{1,31}$"},
+        "overridable": {"type": "boolean"},
+        "safety_invariant": {"type": "boolean"},
+        "qa_required": {"type": "boolean"},
+        "missing_strategy": {"type": "string", "enum": ["preserve", "report", "blocked_qa"]},
+        "unknown_object_strategy": {"type": "string", "enum": ["preserve", "report", "blocked_qa"]},
+        "value_constraints": {"$ref": "#/$defs/value_constraints"},
+        "constraint_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "uniqueItems": true, "items": {"type": "string", "pattern": "^constraint\\.[a-z][a-z0-9-]{1,63}$"}},
+        "test_ids": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/test_id"}},
+        "modes": {"type": "array", "x-semantic-array": "set_by_scalar", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["automatic", "preserve", "qa", "report", "block"]}}
+      }
+    }
+  }
+}
