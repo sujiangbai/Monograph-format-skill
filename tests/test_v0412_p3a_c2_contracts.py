@@ -6,7 +6,7 @@ from jsonschema import Draft202012Validator
 ROOT=Path(__file__).resolve().parents[1]; B=ROOT/'format-monograph/references/benchmarks/v0412/p3a-c2'; F=ROOT/'tests/fixtures/v0412/p3a_c2'; M=ROOT/'format-monograph/scripts/profile_v2_benchmark.py'
 spec=importlib.util.spec_from_file_location('b',M); b=importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 S={k:json.loads((B/f).read_text()) for k,f in {'C':'benchmark-config.schema.json','R':'benchmark-result.schema.json','E':'projected-envelope.schema.json'}.items()}; V={k:Draft202012Validator(v) for k,v in S.items()}
-XR=tuple(f'T412-C2A-XR-{i:03d}' for i in range(1,111)); PM=tuple(f'T412-C2A-PM2-{i:03d}' for i in range(1,37)); IR=tuple(f'T412-C2A-IR3-{i:03d}' for i in range(1,49))
+XR=tuple(f'T412-C2A-XR-{i:03d}' for i in range(1,111)); PM=tuple(f'T412-C2A-PM2-{i:03d}' for i in range(1,37)); IR=tuple(f'T412-C2A-IR3-{i:03d}' for i in range(1,49)); IR4=tuple(f'T412-C2A-IR4-{i:03d}' for i in range(1,13))
 def load(n): return json.loads((F/n).read_text())
 def schema(k,d): return not list(V[k].iter_errors(d))
 def ok(fn,*a):
@@ -51,6 +51,10 @@ def interrupted(base,status='timeout',point='early'):
  r['timings']['end_to_end']={'status':'measured','wall_seconds':30.0}; return settle(d)
 def complete_suite():
  c=load('benchmark-config.valid.json'); out=[coverage(s,sc) for s in b.SCALES for sc in b.SCENARIOS]; ps={(s,sc):perf(s,sc) for s,sc in b.PERFORMANCE_CELLS}; one,two=pair(); ps[('1.0x','mixed-conflict-approval')]=one; ps[('2.0x','mixed-conflict-approval')]=two; out.extend(ps.values()); out.extend(determinism(s,seed,sc) for s in b.DETERMINISM_SCALES for sc in b.SCENARIOS for seed in c['generation']['permutation_seeds']); return out
+def rebind_suite(results,c):
+ out=copy.deepcopy(results)
+ for r in out: r['benchmark_config_digest']=c['config_digest']; stamp(r,'result_digest')
+ return out
 def placeholder_count():
  src=Path(__file__).read_text(); pats=(r'\[\s*True\s*\]\s*\*\s*\d+',r'assertTrue\(\s*True\s*\)',r'\bor\s+True\b'); return sum(len(re.findall(p,src)) for p in pats)
 class Base(unittest.TestCase):
@@ -136,12 +140,34 @@ class IR3Tests(Base):
   c=load('benchmark-config.valid.json'); timeout=interrupted(perf('2.0x','mixed-conflict-approval'),'timeout','early'); crash=interrupted(perf('2.0x','mixed-conflict-approval'),'process_crash','early'); one=perf('1.0x','mixed-conflict-approval'); two=perf('2.0x','mixed-conflict-approval'); fake=copy.deepcopy(timeout); fake['ratio_evidence']['wall']={'status':'measured','baseline_1x':1,'observed_2x':2,'ratio':2}; settle(fake); good1,good2=pair()
   self.run8(17,[ok(b.validate_benchmark_result_against_config,timeout,c),all(x['status']=='not_applicable' for x in timeout['ratio_evidence'].values()),timeout['summary'] is None and timeout['stop_reasons']==['timeout'],ok(b.validate_benchmark_result_against_config,crash,c),ok(b.validate_benchmark_result_against_config,two,c),not ok(b.validate_benchmark_result_set,[one,two],c),ok(b.validate_ratio_evidence,good1,good2,c),not ok(b.validate_benchmark_result_against_config,fake,c)])
  def test_ir3_004_suite_completeness(self):
-  c=load('benchmark-config.valid.json'); full=complete_suite(); miss_cov=full[1:]; miss_perf=[x for x in full if not(x['parameters']['measurement_kind']=='performance' and x['parameters']['scale_id']=='0.5x')]; target=next(x for x in full if x['parameters']['measurement_kind']=='determinism'); miss_det=[x for x in full if x is not target]; dup=full+[copy.deepcopy(full[0])]; outcome=b.validate_complete_benchmark_suite(full,c)
-  self.run8(25,[not ok(b.validate_complete_benchmark_suite,[],c),not ok(b.validate_complete_benchmark_suite,miss_cov,c),not ok(b.validate_complete_benchmark_suite,miss_perf,c),not ok(b.validate_complete_benchmark_suite,miss_det,c),not ok(b.validate_complete_benchmark_suite,dup,c),outcome['structurally_complete'] is True,outcome['overall_gate']=='go',len(full)==16+10+40])
+  c=load('benchmark-config.valid.json'); e=envelope(); full=complete_suite(); miss_cov=full[1:]; miss_perf=[x for x in full if not(x['parameters']['measurement_kind']=='performance' and x['parameters']['scale_id']=='0.5x')]; target=next(x for x in full if x['parameters']['measurement_kind']=='determinism'); miss_det=[x for x in full if x is not target]; dup=full+[copy.deepcopy(full[0])]; outcome=b.validate_complete_benchmark_suite(full,c,e)
+  self.run8(25,[not ok(b.validate_complete_benchmark_suite,[],c,e),not ok(b.validate_complete_benchmark_suite,miss_cov,c,e),not ok(b.validate_complete_benchmark_suite,miss_perf,c,e),not ok(b.validate_complete_benchmark_suite,miss_det,c,e),not ok(b.validate_complete_benchmark_suite,dup,c,e),outcome['structurally_complete'] is True,outcome['overall_gate']=='go',len(full)==16+10+40])
  def test_ir3_005_complete_suite_stop(self):
-  c=load('benchmark-config.valid.json'); timed=complete_suite(); timed[0]=interrupted(timed[0],'timeout','early'); to=b.validate_complete_benchmark_suite(timed,c); threshold=complete_suite(); threshold[0]['runs'][0]['timings']['end_to_end']['wall_seconds']=61; settle(threshold[0]); th=b.validate_complete_benchmark_suite(threshold,c)
+  c=load('benchmark-config.valid.json'); e=envelope(); timed=complete_suite(); timed[0]=interrupted(timed[0],'timeout','early'); to=b.validate_complete_benchmark_suite(timed,c,e); threshold=complete_suite(); threshold[0]['runs'][0]['timings']['end_to_end']['wall_seconds']=61; settle(threshold[0]); th=b.validate_complete_benchmark_suite(threshold,c,e)
   self.run8(33,[to['structurally_complete'] is True,to['overall_gate']=='stop','timeout' in timed[0]['stop_reasons'],th['structurally_complete'] is True,th['overall_gate']=='stop','threshold_exceeded' in threshold[0]['stop_reasons'],ok(b.validate_benchmark_result_set,[],c),callable(b.validate_complete_benchmark_suite)])
  def test_ir3_006_integrity_and_closed_contracts(self):
   c=load('benchmark-config.valid.json'); e=envelope(); r=load('benchmark-result.valid.json'); ctx=b.validate_benchmark_result_context(r,c,e); one,two=pair(); other=copy.deepcopy(two); other['environment']['os_family']='linux'; stamp(other,'result_digest')
   self.run8(41,[placeholder_count()==0,len(XR)==110,len(PM)==36,len(IR)==48,ok(b.validate_benchmark_config_against_envelope,c,e) and ctx['production_representative'] is False and ctx['compose_projection_strategy']=='single_core_probe',not ok(b.validate_ratio_evidence,one,other,c),ok(b.validate_benchmark_result_against_config,r,c),'subprocess' not in M.read_text() and 'def main(' not in M.read_text()])
+class IR4Tests(Base):
+ seen=set()
+ def run12(self,vals): self.checks(IR4,vals); type(self).seen.update(IR4)
+ @classmethod
+ def tearDownClass(cls): assert cls.seen==set(IR4)
+ def test_ir4_suite_acceptance_bindings(self):
+  c=load('benchmark-config.valid.json'); e=envelope(); full=complete_suite(); base=b.validate_complete_benchmark_suite(full,c,e)
+  stale=copy.deepcopy(e); stale['entries'][0]['projected_counts']['candidate']+=1; stamp(stale,'envelope_digest')
+  fake=copy.deepcopy(c); fake['projection_binding']['projected_envelope_digest']='sha256:'+'e'*64; stamp(fake,'config_digest'); fake_results=rebind_suite(full,fake)
+  variants=[]
+  for mut in ('commit','subject','os','arch','python','command'):
+   suite=copy.deepcopy(full); x=suite[0] if mut in {'commit','subject','command'} else next(r for r in suite if r['parameters']['measurement_kind']=='determinism')
+   if mut=='commit': x['benchmark_subject_commit']='f'*40
+   elif mut=='subject': x['subject_manifest'][0]['sha256']='sha256:'+'9'*64; h=b.recompute_subject_digest(x['subject_manifest']); x['benchmark_subject_digest']=h; x['subject_digest_status']={'state':'current','observed_subject_digest':h,'revalidation_required':False}
+   elif mut=='os': x['environment']['os_family']='linux'
+   elif mut=='arch': x['environment']['cpu_architecture']='arm64'
+   elif mut=='python': x['environment']['python_version']='3.12.14'
+   else: x['command_template']='python -m internal_benchmark --config alternate.json'
+   stamp(x,'result_digest'); variants.append((suite,x))
+  stopped=copy.deepcopy(full); stopped[0]=interrupted(stopped[0],'timeout','early'); stop_out=b.validate_complete_benchmark_suite(stopped,c,e); wrong_stop=copy.deepcopy(stopped); wrong_stop[0]['environment']['os_family']='linux'; stamp(wrong_stop[0],'result_digest')
+  counts={'coverage':sum(r['parameters']['measurement_kind']=='coverage' for r in full),'performance':sum(r['parameters']['measurement_kind']=='performance' for r in full),'determinism':sum(r['parameters']['measurement_kind']=='determinism' for r in full)}
+  self.run12([base=={'structurally_complete':True,'overall_gate':'go'},not ok(b.validate_complete_benchmark_suite,full,c,stale),not ok(b.validate_complete_benchmark_suite,fake_results,fake,e),all(ok(b.validate_benchmark_result_against_config,x,c) and not ok(b.validate_complete_benchmark_suite,s,c,e) for s,x in variants[:2]),all(ok(b.validate_benchmark_result_against_config,x,c) and not ok(b.validate_complete_benchmark_suite,s,c,e) for s,x in variants[2:]),stop_out=={'structurally_complete':True,'overall_gate':'stop'},not ok(b.validate_complete_benchmark_suite,wrong_stop,c,e),counts=={'coverage':16,'performance':10,'determinism':40},len({r['parameters']['permutation_seed'] for r in full if r['parameters']['measurement_kind']=='determinism'})==5,all(r['benchmark_config_digest']==c['config_digest'] for r in full),ok(b.validate_ratio_evidence,*pair(),c),placeholder_count()==0])
 if __name__=='__main__': unittest.main()

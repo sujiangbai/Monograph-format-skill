@@ -274,8 +274,13 @@ def validate_benchmark_result_set(results,c):
   if one is not None:
    if one["execution_status"]=="completed" and two["execution_status"]=="completed": validate_ratio_evidence(one,two,c)
    elif any(e["status"]=="measured" for e in two["ratio_evidence"].values()): raise BenchmarkContractError("ratio evidence requires completed pair")
-def validate_complete_benchmark_suite(results,c):
- validate_benchmark_config_semantics(c); rs=list(results); validate_benchmark_result_set(rs,c); idx={_logical_key(r):r for r in rs}; cov,perf,det=_matrix_sets(c)
+def validate_complete_benchmark_suite(results,c,e):
+ validate_benchmark_config_against_envelope(c,e); rs=list(results); validate_benchmark_result_set(rs,c)
+ if rs:
+  identity=benchmark_comparison_identity(rs[0])
+  for r in rs[1:]:
+   if benchmark_comparison_identity(r)!=identity: raise BenchmarkContractError("benchmark suite campaign identity mismatch")
+ idx={_logical_key(r):r for r in rs}; cov,perf,det=_matrix_sets(c)
  required={("coverage",s,sc,None) for s,sc in cov}|{("performance",s,sc,None) for s,sc in perf}|{("determinism",s,sc,seed) for s,sc,seed in det}
  if set(idx)!=required: raise BenchmarkContractError("benchmark suite incomplete")
  for sc in {x for x in SCENARIOS if ("1.0x",x) in perf and ("2.0x",x) in perf}:
