@@ -149,36 +149,71 @@ def _runs_ok(d):
  rs=list(d["runs"]); k=d["parameters"]["measurement_kind"]; seed=d["parameters"]["permutation_seed"]
  if [r["run_index"] for r in rs]!=list(range(1,len(rs)+1)): raise BenchmarkContractError("run indices")
  intr=[i for i,r in enumerate(rs) if r["run_status"] in {"timeout","process_crash"}]
- if intr and (intr!=[len(rs)-1] or d["execution_status"]!="stopped" or d["composer_terminal_state"]!="not_reached"): raise BenchmarkContractError("interrupt sequence")
+ if intr and (intr!=[len(rs)-1] or d["execution_status"]!="stopped"): raise BenchmarkContractError("interrupt sequence")
  if k=="determinism" and (isinstance(seed,bool) or not isinstance(seed,int) or len(rs)>1 or any(r["run_kind"]!="determinism" for r in rs) or (d["execution_status"]=="completed" and len(rs)!=1)): raise BenchmarkContractError("det run shape")
  if k!="determinism" and seed is not None: raise BenchmarkContractError("unexpected seed")
  if k=="performance":
   exp=["performance_warmup","performance_measured","performance_measured","performance_measured"]; act=[r["run_kind"] for r in rs]
   if act!=exp[:len(act)] or (d["execution_status"]=="completed" and act!=exp): raise BenchmarkContractError("perf run shape")
  if k=="coverage" and (any(r["run_kind"]!="coverage" for r in rs) or (d["execution_status"]=="completed" and not rs)): raise BenchmarkContractError("coverage run shape")
+def _timing_statuses(r): return {x:r["timings"][x]["status"] for x in TIMING_STAGES}
+def _interrupted_terminal_expectation(r,scenario):
+ st=_timing_statuses(r)
+ if st["compose"]!="measured": return ("not_reached",{"pre_approval":"not_reached","post_approval":"not_reached"},False)
+ e=FROZEN_SCENARIO_SEMANTICS[scenario]
+ if scenario=="mixed-conflict-approval" and st["approval_generation"]!="measured": return ("awaiting_approval",{"pre_approval":"awaiting_approval","post_approval":"not_reached"},False)
+ return (e["terminal_state"],{"pre_approval":e["pre_approval_terminal"],"post_approval":e["post_approval_terminal"]},e["terminal_state"]=="final")
+def _validate_interrupted_timing(r,scenario):
+ st=_timing_statuses(r)
+ if st["end_to_end"]!="measured": raise BenchmarkContractError("interrupt elapsed timing")
+ if scenario=="mixed-conflict-approval":
+  if st["approval_generation"] not in {"measured","not_reached"}: raise BenchmarkContractError("mixed interrupt approval timing")
+ elif st["approval_generation"]!="not_applicable": raise BenchmarkContractError("interrupt approval NA")
+ for x in ("synthetic_generation","schema_registry_validation","compose","canonical_serialization"):
+  if st[x]=="not_applicable": raise BenchmarkContractError("applicable interrupt stage marked NA")
+ if scenario!="dense-crossing" and st["apply"]=="not_applicable": raise BenchmarkContractError("applicable interrupt apply marked NA")
+ seen=False
+ for x in TIMING_STAGES[:-1]:
+  status=st[x]
+  if status not in {"measured","not_applicable","not_reached"}: raise BenchmarkContractError("interrupt timing status")
+  if status=="not_reached": seen=True
+  elif status=="measured" and seen: raise BenchmarkContractError("interrupt timing resumed")
+def _validate_metrics(m):
+ if not isinstance(m,Mapping) or set(m)!=set(C1_METRIC_FIELDS) or any(isinstance(v,bool) or not isinstance(v,int) or v<0 for v in m.values()): raise BenchmarkContractError("metrics")
+def _validate_bytes(v,label,required):
+ if v is None and not required: return
+ if isinstance(v,bool) or not isinstance(v,int) or v<0: raise BenchmarkContractError(label+" byte evidence")
 def _run_evidence_ok(d):
  scenario=d["parameters"]["scenario_id"]; kind=d["parameters"]["measurement_kind"]
  for r in d["runs"]:
   if set(r["timings"])!=set(TIMING_STAGES): raise BenchmarkContractError("timing keys")
   rss=r["rss"]
   if rss["status"]=="available" and (Decimal(str(rss["peak_rss_mib"]))<Decimal(str(rss["baseline_rss_mib"])) or Decimal(str(rss["delta_peak_rss_mib"]))!=_round(Decimal(str(rss["peak_rss_mib"]))-Decimal(str(rss["baseline_rss_mib"])),"0.001")): raise BenchmarkContractError("rss delta")
-  st={x:r["timings"][x]["status"] for x in TIMING_STAGES}
+  st=_timing_statuses(r)
   if r["run_status"]=="completed":
    if any(st[x]!="measured" for x in ("synthetic_generation","schema_registry_validation","compose","canonical_serialization","end_to_end")): raise BenchmarkContractError("timing evidence")
-   if r["final_profile_present"] and st["apply"]!="measured": raise BenchmarkContractError("apply timing")
+   if r["final_profile_present"]:
+    if st["apply"]!="measured": raise BenchmarkContractError("apply timing")
+   elif st["apply"] not in {"measured","not_applicable"}: raise BenchmarkContractError("non-final apply timing")
    if scenario=="mixed-conflict-approval" and st["approval_generation"]!="measured": raise BenchmarkContractError("approval timing")
    if scenario!="mixed-conflict-approval" and st["approval_generation"]!="not_applicable": raise BenchmarkContractError("approval NA")
-   m=r["metrics"]
-   if not isinstance(m,Mapping) or set(m)!=set(C1_METRIC_FIELDS) or any(isinstance(v,bool) or not isinstance(v,int) or v<0 for v in m.values()): raise BenchmarkContractError("metrics")
+   _validate_metrics(r["metrics"]); _validate_bytes(r["input_json_bytes"],"input",True); _validate_bytes(r["output_json_bytes"],"output",True)
    if r["coverage_conservation"] not in {"passed","failed"} or r["stable_id_status"] not in {"stable","drift"}: raise BenchmarkContractError("mandatory evidence")
    if kind=="determinism" and (r["canonical_determinism"] not in {"matched","mismatched"} or r["fingerprint_determinism"] not in {"matched","mismatched"}): raise BenchmarkContractError("det evidence")
    if kind!="determinism" and (r["canonical_determinism"]!="not_applicable" or r["fingerprint_determinism"]!="not_applicable"): raise BenchmarkContractError("det NA")
   else:
-   vals=[st[x] for x in TIMING_STAGES[:-1]]; seen=False
-   for x in vals:
-    if x=="not_reached": seen=True
-    elif seen or x not in {"measured","not_reached"}: raise BenchmarkContractError("interrupt timing")
-   if st["end_to_end"]!="measured" or r["terminal_state"]!="not_reached" or r["terminal_trace"]!={"pre_approval":"not_reached","post_approval":"not_reached"} or r["final_profile_present"] or r["final_profile_fingerprint"] is not None or r["metrics"] is not None or r["input_json_bytes"] is not None or r["output_json_bytes"] is not None or r["coverage_conservation"]!="not_reached" or r["stable_id_status"]!="not_reached" or r["canonical_determinism"]!="not_reached" or r["fingerprint_determinism"]!="not_reached": raise BenchmarkContractError("interrupted evidence")
+   _validate_interrupted_timing(r,scenario); terminal,trace,final=_interrupted_terminal_expectation(r,scenario); fp=isinstance(r["final_profile_fingerprint"],str) and bool(SHA256_RE.fullmatch(str(r["final_profile_fingerprint"])))
+   if r["terminal_state"]!=terminal or r["terminal_trace"]!=trace or r["final_profile_present"]!=final or fp!=final or d["composer_terminal_state"]!=terminal: raise BenchmarkContractError("interrupted terminal evidence")
+   _validate_bytes(r["input_json_bytes"],"input",False); _validate_bytes(r["output_json_bytes"],"output",False)
+   if st["compose"]=="measured":
+    _validate_metrics(r["metrics"])
+    if r["coverage_conservation"] not in {"passed","failed"} or r["stable_id_status"] not in {"stable","drift"}: raise BenchmarkContractError("reached interrupted evidence")
+   elif r["metrics"] is not None or r["coverage_conservation"]!="not_reached" or r["stable_id_status"]!="not_reached": raise BenchmarkContractError("future interrupted evidence")
+   if kind=="determinism":
+    reached=st["canonical_serialization"]=="measured"
+    if reached and (r["canonical_determinism"] not in {"matched","mismatched"} or r["fingerprint_determinism"] not in {"matched","mismatched"}): raise BenchmarkContractError("reached determinism evidence")
+    if not reached and (r["canonical_determinism"]!="not_reached" or r["fingerprint_determinism"]!="not_reached"): raise BenchmarkContractError("future determinism evidence")
+   elif r["canonical_determinism"]!="not_applicable" or r["fingerprint_determinism"]!="not_applicable": raise BenchmarkContractError("interrupted det NA")
 def _summary_ok(d):
  s=d["summary"]
  if d["parameters"]["measurement_kind"]!="performance" or d["execution_status"]!="completed":
@@ -191,6 +226,7 @@ def _summary_ok(d):
 def validate_benchmark_result_semantics(d):
  if not COMMIT_RE.fullmatch(d["benchmark_subject_commit"]) or d["benchmark_subject_digest_basis"]!="canonical_subject_manifest_v1" or d["rss_protocol"]!=FROZEN_RSS_PROTOCOL or d["thresholds"]!=FROZEN_THRESHOLDS or d["reference_budget"]["limit_hours"]!=3: raise BenchmarkContractError("result frozen fields")
  _subject_ok(d); _runs_ok(d); _run_evidence_ok(d); _summary_ok(d)
+ if d["execution_status"]!="completed" and any(e["status"]=="measured" for e in d["ratio_evidence"].values()): raise BenchmarkContractError("stopped result cannot claim ratio evidence")
  for e in d["ratio_evidence"].values():
   if e["status"]=="measured" and Decimal(str(e["ratio"]))!=_ratio(e["observed_2x"],e["baseline_1x"]): raise BenchmarkContractError("ratio arithmetic")
  reasons=derive_stop_reasons(d)
@@ -206,7 +242,6 @@ def validate_benchmark_result_against_config(r,c):
  if k=="performance":
   exp=["performance_warmup"]*c["repetitions"]["performance_warmup_runs_per_cell"]+["performance_measured"]*c["repetitions"]["performance_measured_runs_per_cell"]; act=[x["run_kind"] for x in r["runs"]]
   if act!=exp[:len(act)] or (r["execution_status"]=="completed" and act!=exp): raise BenchmarkContractError("perf repetitions")
-  if p["scale_id"]=="2.0x" and ("1.0x",p["scenario_id"]) in perf and any(e["status"]!="measured" for e in r["ratio_evidence"].values()): raise BenchmarkContractError("ratio required")
  if k=="determinism" and r["execution_status"]=="completed" and len(r["runs"])!=c["repetitions"]["determinism_runs_per_seed"]: raise BenchmarkContractError("det repetitions")
  if k=="coverage" and r["execution_status"]=="completed" and len(r["runs"])<c["repetitions"]["coverage_min_runs_per_cell"]: raise BenchmarkContractError("coverage repetitions")
 def benchmark_comparison_identity(r):
@@ -223,17 +258,31 @@ def validate_ratio_evidence(one,two,c):
   if e["status"]!="measured" or Decimal(str(e["baseline_1x"]))!=Decimal(str(base)) or Decimal(str(e["observed_2x"]))!=Decimal(str(obs)) or Decimal(str(e["ratio"]))!=ratio: raise BenchmarkContractError("ratio binding")
  expected_reasons={RATIO_STOP_REASONS[m] for m,(_,_,ratio) in expected.items() if ratio>Decimal(str(c["thresholds"][RATIO_THRESHOLD_FIELDS[m]]))}; actual=set(two["stop_reasons"])&set(RATIO_STOP_REASONS.values())
  if actual!=expected_reasons or (expected_reasons and two["overall_gate"]!="stop") or (not expected_reasons and two["overall_gate"]=="stop" and not(set(two["stop_reasons"])-set(RATIO_STOP_REASONS.values()))): raise BenchmarkContractError("ratio gate")
+def _logical_key(r):
+ p=r["parameters"]; return (p["measurement_kind"],p["scale_id"],p["scenario_id"],p["permutation_seed"])
 def validate_benchmark_result_set(results,c):
+ """Validate partial collection consistency; this is not a completeness gate."""
  validate_benchmark_config_semantics(c); idx={}
  for r in results:
-  validate_benchmark_result_against_config(r,c); p=r["parameters"]; k=(p["measurement_kind"],p["scale_id"],p["scenario_id"],p["permutation_seed"])
+  validate_benchmark_result_against_config(r,c); k=_logical_key(r)
   if k in idx: raise BenchmarkContractError("duplicate result key")
   idx[k]=r
  perf=_matrix_sets(c)[1]
  for s in {x for x in SCENARIOS if ("1.0x",x) in perf and ("2.0x",x) in perf}:
   one=idx.get(("performance","1.0x",s,None)); two=idx.get(("performance","2.0x",s,None))
   if (one is None)!=(two is None): raise BenchmarkContractError("missing pair")
-  if one is not None: validate_ratio_evidence(one,two,c)
+  if one is not None:
+   if one["execution_status"]=="completed" and two["execution_status"]=="completed": validate_ratio_evidence(one,two,c)
+   elif any(e["status"]=="measured" for e in two["ratio_evidence"].values()): raise BenchmarkContractError("ratio evidence requires completed pair")
+def validate_complete_benchmark_suite(results,c):
+ validate_benchmark_config_semantics(c); rs=list(results); validate_benchmark_result_set(rs,c); idx={_logical_key(r):r for r in rs}; cov,perf,det=_matrix_sets(c)
+ required={("coverage",s,sc,None) for s,sc in cov}|{("performance",s,sc,None) for s,sc in perf}|{("determinism",s,sc,seed) for s,sc,seed in det}
+ if set(idx)!=required: raise BenchmarkContractError("benchmark suite incomplete")
+ for sc in {x for x in SCENARIOS if ("1.0x",x) in perf and ("2.0x",x) in perf}:
+  one=idx[("performance","1.0x",sc,None)]; two=idx[("performance","2.0x",sc,None)]
+  if one["execution_status"]=="completed" and two["execution_status"]=="completed": validate_ratio_evidence(one,two,c)
+  elif any(e["status"]=="measured" for e in two["ratio_evidence"].values()): raise BenchmarkContractError("incomplete comparison cannot carry ratio evidence")
+ return {"structurally_complete":True,"overall_gate":"stop" if any(r["overall_gate"]=="stop" for r in rs) else "go"}
 def validate_benchmark_result_context(r,c,e):
  validate_benchmark_config_against_envelope(c,e); validate_benchmark_result_against_config(r,c)
  return {"projection_kind":e["projection_kind"],"compose_projection_strategy":e["compose_projection_strategy"],"unmodeled_dimensions":tuple(sorted(e["unmodeled_dimensions"])),"base_scale_id":c["projection_binding"]["base_scale_id"],"aggregate_counts":copy.deepcopy(c["projection_binding"]["aggregate_counts"]),"representativeness_scope":REPRESENTATIVENESS_SCOPE,"production_representative":False,"revalidation_required":True}
