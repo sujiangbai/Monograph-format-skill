@@ -82,6 +82,8 @@ SUBJECT_PATHS = (
     "format-monograph/references/benchmarks/v0412/p3a-c2/benchmark-config.schema.json",
     "format-monograph/references/benchmarks/v0412/p3a-c2/benchmark-result.schema.json",
 )
+if any(Path(path).suffix not in {".py", ".json"} for path in SUBJECT_PATHS):
+    raise RuntimeError("C2B subject identity permits only UTF-8 Python or JSON text")
 
 
 def _sha(data: bytes) -> str:
@@ -295,7 +297,16 @@ def validate_subject_manifest_worktree(manifest: list[dict[str, str]]) -> None:
         try:
             if not stat.S_ISREG(candidate.stat().st_mode):
                 raise BenchmarkRunnerError("subject path is not a regular file")
-            actual = _sha(candidate.read_bytes())
+            raw = candidate.read_bytes()
+            try:
+                raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise BenchmarkRunnerError("subject worktree file is not UTF-8") from exc
+            # The only permitted checkout equivalence is standard CRLF -> LF.
+            normalized = raw.replace(b"\r\n", b"\n")
+            if b"\r" in normalized:
+                raise BenchmarkRunnerError("subject worktree contains lone CR")
+            actual = _sha(normalized)
         except OSError as exc:
             raise BenchmarkRunnerError("subject worktree file unavailable") from exc
         if actual != expected:
