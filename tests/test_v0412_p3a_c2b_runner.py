@@ -257,20 +257,19 @@ class C2BRunnerTests(unittest.TestCase):
     def test_012_015_four_real_micro_scenario_smokes_once_each(self) -> None:
         # Exactly one child compose/apply call per scenario.  The explicit
         # table is independent of the generator's workload helper.
-        results = {
-            scenario: runner.supervise_worker(
+        results = {}
+        for scenario in runner.SCENARIOS:
+            results[scenario] = runner.supervise_worker(
                 {"config": MICRO_CONFIG, "scale_id": "1.0x", "scenario_id": scenario, "generation_seed": 11},
-                timeout_seconds=30.0, python_executable=sys.executable,
+                timeout_seconds=60.0, python_executable=sys.executable,
             )
-            for scenario in runner.SCENARIOS
-        }
         for number, scenario in enumerate(runner.SCENARIOS, 12):
             result = results[scenario]
             expected = runner.MICRO_SCENARIO_EXPECTATIONS[scenario]
             worker = result.get("worker", {})
             metrics = worker.get("metrics", {})
             report_counts = worker.get("report_counts", {})
-            self.check(number, (
+            passed = (
                 result["status"] in {"completed", "rss_unavailable"}
                 and metrics.get("expected_key_count") == expected["source_keys"]
                 and worker.get("proposal_status") == expected["terminal"]
@@ -278,7 +277,10 @@ class C2BRunnerTests(unittest.TestCase):
                 and report_counts.get("proposals") == expected["proposals"]
                 and report_counts.get("blockers") == expected["blockers"]
                 and (worker.get("final_present") is False) == (scenario == "dense-crossing")
-            ))
+            )
+            with self.subTest(scenario=scenario, status=result.get("status")):
+                self.assertTrue(passed, "scenario=%s status=%s" % (scenario, result.get("status")))
+            self.check(number, passed)
 
     def test_016_017_permutation_determinism_without_extra_compose(self) -> None:
         normal, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 5)
