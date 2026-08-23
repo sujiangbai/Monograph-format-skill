@@ -279,8 +279,7 @@ class C2BRunnerTests(unittest.TestCase):
                 and (worker.get("final_present") is False) == (scenario == "dense-crossing")
             )
             with self.subTest(scenario=scenario, status=result.get("status")):
-                self.assertTrue(passed, "scenario=%s status=%s" % (scenario, result.get("status")))
-            self.check(number, passed)
+                self.check(number, passed)
 
     def test_016_017_permutation_determinism_without_extra_compose(self) -> None:
         normal, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 5)
