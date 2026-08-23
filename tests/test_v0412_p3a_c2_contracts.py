@@ -16,6 +16,10 @@ def dig(d,k):
  x=copy.deepcopy(d); x.pop(k,None); return 'sha256:'+hashlib.sha256(json.dumps(x,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
 def stamp(d,k): d[k]=dig(d,k); return d
 def settle(d): d['stop_reasons']=b.derive_stop_reasons(d); d['overall_gate']='stop' if d['stop_reasons'] else 'go'; return stamp(d,'result_digest')
+INDEPENDENT_STOP_CASES=(
+ ('timeout',lambda:interrupted(perf(),'timeout','early'),['timeout']),
+ ('scale_threshold',lambda:coverage(),['threshold_exceeded']),
+)
 def envelope():
  r=load('projected-envelope.valid.json'); es=[]
  for i in range(1,151):
@@ -170,4 +174,46 @@ class IR4Tests(Base):
   stopped=copy.deepcopy(full); stopped[0]=interrupted(stopped[0],'timeout','early'); stop_out=b.validate_complete_benchmark_suite(stopped,c,e); wrong_stop=copy.deepcopy(stopped); wrong_stop[0]['environment']['os_family']='linux'; stamp(wrong_stop[0],'result_digest')
   counts={'coverage':sum(r['parameters']['measurement_kind']=='coverage' for r in full),'performance':sum(r['parameters']['measurement_kind']=='performance' for r in full),'determinism':sum(r['parameters']['measurement_kind']=='determinism' for r in full)}
   self.run12([base=={'structurally_complete':True,'overall_gate':'go'},not ok(b.validate_complete_benchmark_suite,full,c,stale),not ok(b.validate_complete_benchmark_suite,fake_results,fake,e),all(ok(b.validate_benchmark_result_against_config,x,c) and not ok(b.validate_complete_benchmark_suite,s,c,e) for s,x in variants[:2]),all(ok(b.validate_benchmark_result_against_config,x,c) and not ok(b.validate_complete_benchmark_suite,s,c,e) for s,x in variants[2:]),stop_out=={'structurally_complete':True,'overall_gate':'stop'},not ok(b.validate_complete_benchmark_suite,wrong_stop,c,e),counts=={'coverage':16,'performance':10,'determinism':40},len({r['parameters']['permutation_seed'] for r in full if r['parameters']['measurement_kind']=='determinism'})==5,all(r['benchmark_config_digest']==c['config_digest'] for r in full),ok(b.validate_ratio_evidence,*pair(),c),placeholder_count()==0])
+
+class FinalReviewP1Tests(unittest.TestCase):
+ def test_key_stop_cases_have_table_driven_expected_reasons(self):
+  for name,build,expected in INDEPENDENT_STOP_CASES:
+   with self.subTest(name=name):
+    result=build()
+    if name=='scale_threshold': result['runs'][0]['timings']['end_to_end']['wall_seconds']=61
+    result['stop_reasons']=expected; result['overall_gate']='stop'; stamp(result,'result_digest')
+    self.assertTrue(ok(b.validate_benchmark_result_semantics,result))
+
+ def test_complete_suite_rejects_schema_invalid_envelope_config_and_result(self):
+  c=load('benchmark-config.valid.json'); e=envelope(); full=complete_suite()
+  bad_e=copy.deepcopy(e); bad_e['forbidden_envelope_field']=True; stamp(bad_e,'envelope_digest')
+  bad_c=copy.deepcopy(c); bad_c['forbidden_config_field']=True; stamp(bad_c,'config_digest')
+  bad_r=copy.deepcopy(full); bad_r[0]['forbidden_result_field']=True; stamp(bad_r[0],'result_digest')
+  self.assertFalse(schema('E',bad_e)); self.assertFalse(schema('C',bad_c)); self.assertFalse(schema('R',bad_r[0]))
+  self.assertFalse(ok(b.validate_complete_benchmark_suite,full,c,bad_e))
+  self.assertFalse(ok(b.validate_complete_benchmark_suite,full,bad_c,e))
+  self.assertFalse(ok(b.validate_complete_benchmark_suite,bad_r,c,e))
+
+ def test_nonblocking_v041_aggregate_cannot_be_zero_after_rebinding(self):
+  c=load('benchmark-config.valid.json'); e=envelope(); full=complete_suite()
+  all_zero=copy.deepcopy(e)
+  for entry in all_zero['entries']:
+   if entry['primary_version']=='V0.4.1':
+    entry['projected_counts']={key:0 for key in entry['projected_counts']}
+    entry['blocked_projection']=False
+    entry['zero_load_reason']='no_base_appearance'
+  stamp(all_zero,'envelope_digest')
+  zero_config=copy.deepcopy(c); zero_config['projection_binding']['projected_envelope_digest']=all_zero['envelope_digest']; zero_config['projection_binding']['aggregate_counts']={key:0 for key in zero_config['projection_binding']['aggregate_counts']}; stamp(zero_config,'config_digest')
+  rebound=rebind_suite(full,zero_config)
+  self.assertTrue(schema('E',all_zero)); self.assertTrue(schema('C',zero_config)); self.assertTrue(all(schema('R',result) for result in rebound))
+  self.assertFalse(ok(b.validate_projected_envelope_semantics,all_zero))
+  self.assertFalse(ok(b.validate_complete_benchmark_suite,rebound,zero_config,all_zero))
+  original_bypass=copy.deepcopy(all_zero)
+  for entry in original_bypass['entries']:
+   if entry['primary_version']=='V0.4.1': entry['zero_load_reason']='synthetic_not_representative'
+  stamp(original_bypass,'envelope_digest')
+  self.assertTrue(schema('E',original_bypass)); self.assertFalse(ok(b.validate_projected_envelope_semantics,original_bypass))
+  permitted=copy.deepcopy(e); entry=next(item for item in permitted['entries'] if item['primary_version']=='V0.4.1' and not item['blocked_projection'])
+  entry['projected_counts']={key:0 for key in entry['projected_counts']}; entry['zero_load_reason']='no_base_appearance'; stamp(permitted,'envelope_digest')
+  self.assertTrue(ok(b.validate_projected_envelope_semantics,permitted))
 if __name__=='__main__': unittest.main()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 import copy, hashlib, json, math, re
 from decimal import Decimal, ROUND_HALF_EVEN
+from pathlib import Path
 from statistics import median
 from collections.abc import Mapping
 
@@ -32,6 +33,11 @@ RATIO_STOP_REASONS={"wall":"wall_ratio_exceeded","rss":"rss_ratio_exceeded","out
 PROJECTION_COUNT_FIELDS=("rule_fragment","binding","key","candidate")
 REQUIRED_UNMODELED_DIMENSIONS={"full_production_property_registry","multi_property_production_distribution","real_monograph_base_assets","docx_runtime"}
 REPRESENTATIVENESS_SCOPE="non_production_single_core_probe"
+_SCHEMA_FILES={
+ "envelope":"projected-envelope.schema.json",
+ "config":"benchmark-config.schema.json",
+ "result":"benchmark-result.schema.json",
+}
 
 def _finite(v):
  if isinstance(v,float) and not math.isfinite(v): raise BenchmarkContractError("non-finite JSON")
@@ -45,6 +51,24 @@ def _self_digest(d,k): x=copy.deepcopy(dict(d)); x.pop(k,None); return canonical
 def recompute_config_digest(d): return _self_digest(d,"config_digest")
 def recompute_envelope_digest(d): return _self_digest(d,"envelope_digest")
 def recompute_result_digest(d): return _self_digest(d,"result_digest")
+
+def _validate_contract_schema(kind, document):
+ """Apply the committed C2A JSON Schema before any suite semantics."""
+ try:
+  from jsonschema import Draft202012Validator
+ except ImportError as exc:
+  raise BenchmarkContractError("jsonschema dependency unavailable") from exc
+ try:
+  filename=_SCHEMA_FILES[kind]
+ except KeyError as exc:
+  raise BenchmarkContractError("unknown contract schema") from exc
+ schema_path=Path(__file__).resolve().parents[1] / "references" / "benchmarks" / "v0412" / "p3a-c2" / filename
+ try:
+  schema=json.loads(schema_path.read_text(encoding="utf-8"))
+  errors=sorted(Draft202012Validator(schema).iter_errors(document),key=lambda error:list(error.absolute_path))
+ except (OSError,json.JSONDecodeError) as exc:
+  raise BenchmarkContractError("contract schema unavailable") from exc
+ if errors: raise BenchmarkContractError("%s schema invalid" % kind)
 
 def canonical_subject_path(p):
  if not isinstance(p,str) or not p or "\\" in p or DRIVE_RE.match(p) or p.startswith("/") or p.endswith("/") or "//" in p or any(x in {"",".",".."} for x in p.split("/")): raise BenchmarkContractError("noncanonical subject path")
@@ -94,9 +118,13 @@ def validate_projected_envelope_semantics(d):
    if not(_zero(c) and e["implementation_owner"]=="future_primary" and e["requirement_kind"]=="protected_boundary" and e["scope_topology"]=="unmodeled" and e["conflict_approval_assumption"]=="unmodeled" and e["zero_load_reason"]=="protected_boundary" and not e["blocked_projection"]): raise BenchmarkContractError("protected boundary")
   elif e["blocked_projection"]:
    if not _zero(c) or e["zero_load_reason"]!="none" or e["scope_topology"]!="unmodeled" or e["conflict_approval_assumption"]!="unmodeled": raise BenchmarkContractError("blocked projection")
-  elif _zero(c)==(e["zero_load_reason"]=="none"): raise BenchmarkContractError("zero-load reason")
+  elif _zero(c):
+   if not(e["zero_load_reason"]=="no_base_appearance" and e["implementation_owner"] in {"p3a_c","p3a_r","p3b_b","p3b_o","p4","p5","p6","p7"} and e["requirement_kind"] in {"base_appearance","system_projection"}): raise BenchmarkContractError("zero-load V041 entry")
+  elif e["zero_load_reason"]!="none": raise BenchmarkContractError("zero-load reason")
  actual={"v041_primary":versions["V0.4.1"],"v042_protected":versions["V0.4.2"],"v043_protected":versions["V0.4.3"]}
  if actual!={"v041_primary":150,"v042_protected":20,"v043_protected":1} or d["decision_population_summary"]!=actual: raise BenchmarkContractError("population")
+ aggregate={k:sum(e["projected_counts"][k] for e in es if e["primary_version"]=="V0.4.1" and not e["blocked_projection"]) for k in PROJECTION_COUNT_FIELDS}
+ if any(value<=0 for value in aggregate.values()): raise BenchmarkContractError("nonblocking V041 aggregate")
  if d["projection_kind"]=="synthetic_contract_fixture" and not all(_synthetic(e) for e in es): raise BenchmarkContractError("synthetic namespace")
  if d["projection_kind"]=="formal_planning_projection" and any(_formal_bad(e) for e in es): raise BenchmarkContractError("formal namespace")
  if d["compose_projection_strategy"]!="single_core_probe": raise BenchmarkContractError("strategy")
@@ -275,7 +303,13 @@ def validate_benchmark_result_set(results,c):
    if one["execution_status"]=="completed" and two["execution_status"]=="completed": validate_ratio_evidence(one,two,c)
    elif any(e["status"]=="measured" for e in two["ratio_evidence"].values()): raise BenchmarkContractError("ratio evidence requires completed pair")
 def validate_complete_benchmark_suite(results,c,e):
- validate_benchmark_config_against_envelope(c,e); rs=list(results); validate_benchmark_result_set(rs,c)
+ # This is the one public closure point for C2B: structure precedes digests,
+ # semantics, collection completeness, and the suite gate.
+ _validate_contract_schema("envelope",e)
+ _validate_contract_schema("config",c)
+ rs=list(results)
+ for r in rs: _validate_contract_schema("result",r)
+ validate_benchmark_config_against_envelope(c,e); validate_benchmark_result_set(rs,c)
  if rs:
   identity=benchmark_comparison_identity(rs[0])
   for r in rs[1:]:
