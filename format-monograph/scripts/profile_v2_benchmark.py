@@ -322,6 +322,15 @@ def validate_complete_benchmark_suite(results,c,e):
   if one["execution_status"]=="completed" and two["execution_status"]=="completed": validate_ratio_evidence(one,two,c)
   elif any(e["status"]=="measured" for e in two["ratio_evidence"].values()): raise BenchmarkContractError("incomplete comparison cannot carry ratio evidence")
  return {"structurally_complete":True,"overall_gate":"stop" if any(r["overall_gate"]=="stop" for r in rs) else "go"}
+def validate_benchmark_campaign_context(c,e):
+ """Schema-first C2A validation for a C2B campaign before any worker starts."""
+ _validate_contract_schema("envelope",e)
+ _validate_contract_schema("config",c)
+ validate_benchmark_config_against_envelope(c,e)
+ return {"config_digest":c["config_digest"],"envelope_digest":e["envelope_digest"]}
 def validate_benchmark_result_context(r,c,e):
+ _validate_contract_schema("result",r)
+ _validate_contract_schema("config",c)
+ _validate_contract_schema("envelope",e)
  validate_benchmark_config_against_envelope(c,e); validate_benchmark_result_against_config(r,c)
  return {"projection_kind":e["projection_kind"],"compose_projection_strategy":e["compose_projection_strategy"],"unmodeled_dimensions":tuple(sorted(e["unmodeled_dimensions"])),"base_scale_id":c["projection_binding"]["base_scale_id"],"aggregate_counts":copy.deepcopy(c["projection_binding"]["aggregate_counts"]),"representativeness_scope":REPRESENTATIVENESS_SCOPE,"production_representative":False,"revalidation_required":True}
