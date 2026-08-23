@@ -684,15 +684,23 @@ def supervise_worker(
     thread.start()
     started = clock()
     deadline = started + timeout_seconds
+
+    def cleanup() -> None:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream is not None:
+                stream.close()
+        thread.join(timeout=0.1)
+
     try:
         first = output.get(timeout=max(0.0, deadline - clock()))
     except queue.Empty:
-        child.kill()
-        child.wait()
+        cleanup()
         return {"status": "timeout"}
     if first != b"READY\n":
-        child.kill()
-        child.wait()
+        cleanup()
         return {"status": "process_crash"}
     try:
         # READY is emitted after imports and before worker input is read.  Take
@@ -759,12 +767,7 @@ def supervise_worker(
             },
         }
     finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait()
-        for stream in (child.stdin, child.stdout, child.stderr):
-            if stream is not None:
-                stream.close()
+        cleanup()
 
 
 def validate_campaign_inputs(config: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
