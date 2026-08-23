@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from statistics import median
 from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_EVEN
 from pathlib import Path
@@ -361,7 +362,9 @@ def build_result(
     scenario = parameters["scenario_id"]
     input_bytes = len(canonical_json_bytes(cell["assets"])) if cell else (worker or {}).get("input_json_bytes")
     output_bytes = len(canonical_json_bytes({"report": cell["report"], "final_profile": cell["final_profile"]})) if cell else (worker or {}).get("output_json_bytes")
-    run_count = 4 if parameters["measurement_kind"] == "performance" and supervised["status"] == "completed" else 1
+    # Multi-run performance evidence is assembled only from the supervisor's
+    # actual observations in _result_from_observations.
+    run_count = 1
     runs = [_run_record(ordinal=index, measurement_kind=parameters["measurement_kind"], scenario_id=scenario, supervised=supervised, worker=worker, elapsed_seconds=elapsed_seconds, input_json_bytes=input_bytes, output_json_bytes=output_bytes, determinism=determinism) for index in range(1, run_count + 1)]
     result = {
         "document_kind": "p3a_c2_benchmark_result", "contract_version": "1.0",
@@ -386,7 +389,7 @@ def build_result(
         "thresholds": FROZEN_THRESHOLDS,
         "output_json_bytes_basis": config["output_json_bytes_basis"],
         "input_json_bytes_basis": config["input_json_bytes_basis"], "runs": runs,
-        "summary": _summary_from_runs(runs) if parameters["measurement_kind"] == "performance" and supervised["status"] == "completed" else None, "ratio_evidence": {name: {"status": "not_applicable"} for name in ("wall", "rss", "output_json")},
+        "summary": None, "ratio_evidence": {name: {"status": "not_applicable"} for name in ("wall", "rss", "output_json")},
         "reference_budget": {"elapsed_hours": 0.0, "limit_hours": config["total_reference_budget_hours"]},
     }
     result["stop_reasons"] = derive_stop_reasons(result)
@@ -564,7 +567,7 @@ def run_benchmark_campaign(
         key = logical_key(parameters)
         if key in results:
             continue
-        if clock() - started > config["total_reference_budget_hours"] * 3600:
+        if clock() - started >= config["total_reference_budget_hours"] * 3600:
             # C2A has no serializable "not started due to campaign budget"
             # result.  Keep already validated evidence and fail closed without
             # manufacturing timeout/crash records or a complete suite.

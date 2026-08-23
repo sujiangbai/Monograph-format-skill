@@ -267,17 +267,78 @@ class C2BRunnerTests(unittest.TestCase):
         performance = [(scale, "mixed-conflict-approval") for scale in scales] + [(scale, scenario) for scale in ("1.5x", "2.0x") for scenario in scenarios if scenario != "mixed-conflict-approval"]
         config = {"matrices": {"coverage_cells": [{"scale_id": s, "scenario_id": c} for s in scales for c in scenarios], "performance_cells": [{"scale_id": s, "scenario_id": c} for s, c in performance], "determinism_cells": [{"scale_id": s, "scenario_id": c, "permutation_seed": seed} for s in ("1.5x", "2.0x") for c in scenarios for seed in range(5)]}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
         manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
-        calls, written = [], []
+        calls, written, logical, observations = [], [], [], []
         def fake_supervisor(request, **kwargs):
             calls.append((request["scale_id"], request["scenario_id"], request.get("permutation_seed")))
             return {"status": "completed", "worker": {"canonical_output_digest": "same", "report_fingerprint": "report", "final_fingerprint": None}}
         def fake_result(**kwargs):
             p = kwargs["parameters"]
+            logical.append(p)
+            observations.append((p["measurement_kind"], len(kwargs["observations"])))
             return {"parameters": p, "execution_status": "completed", "reference_budget": {"elapsed_hours": 0.0}, "summary": {}, "ratio_evidence": {"wall": {"status": "not_applicable"}, "rss": {"status": "not_applicable"}, "output_json": {"status": "not_applicable"}}, "result_digest": "x"}
-        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations", side_effect=fake_result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result", side_effect=lambda d, r: written.append(r)), patch.object(runner, "_ratio_evidence"), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}) as close:
+        def ratio(one, two): two["ratio_before_write"] = True
+        def write(_, value):
+            if value["parameters"]["measurement_kind"] == "performance" and value["parameters"]["scale_id"] == "2.0x" and value["parameters"]["scenario_id"] == "mixed-conflict-approval": self.assertTrue(value.get("ratio_before_write"))
+            written.append(value)
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations", side_effect=fake_result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result", side_effect=write), patch.object(runner, "_ratio_evidence", side_effect=ratio), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}) as close:
             runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=fake_supervisor, clock=lambda: 0)
         self.assertEqual(len(written), 66); self.assertEqual(len({runner.logical_key(x["parameters"]) for x in written}), 66)
         self.assertEqual(len(calls), 104); close.assert_called_once()
+        self.assertEqual(sum(x["measurement_kind"] == "coverage" for x in logical), 16)
+        self.assertEqual(sum(x["measurement_kind"] == "performance" for x in logical), 10)
+        self.assertEqual(sum(x["measurement_kind"] == "determinism" for x in logical), 40)
+        self.assertEqual(sum(kind == "performance" and count == 4 for kind, count in observations), 10)
+
+    def test_campaign_fail_closed_control_paths(self) -> None:
+        parameters = {"measurement_kind": "performance", "scale_id": "1.0x", "scenario_id": "disjoint", "generation_seed": 1, "permutation_seed": None}
+        with patch.object(runner, "derive_stop_reasons", return_value=["timeout"]), patch.object(runner, "recompute_result_digest", return_value=_sha("r")):
+            stopped = runner._result_from_observations(config={"config_digest": _sha("c"), "output_json_bytes_basis": "x", "input_json_bytes_basis": "y", "total_reference_budget_hours": 3}, subject_commit="a" * 40, subject_manifest=[{"path": "x", "sha256": _sha("x")}], parameters=parameters, observations=[({"status": "completed", "worker": {"final_present": True, "final_fingerprint": _sha("f"), "metrics": {}, "input_json_bytes": 1, "output_json_bytes": 1, "stage_seconds": {"synthetic_generation": 0, "schema_registry_validation": 0, "compose": 0, "approval_generation": 0, "apply": 0, "canonical_serialization": 0}}}, 0.0), ({"status": "timeout"}, 0.0)])
+        self.assertEqual(stopped["execution_status"], "stopped")
+        self.assertEqual(len(stopped["runs"]), 2)
+
+    def test_checkpoint_resume_skips_already_persisted_key(self) -> None:
+        config = {"matrices": {"coverage_cells": [{"scale_id": "0.5x", "scenario_id": "disjoint"}, {"scale_id": "1.0x", "scenario_id": "disjoint"}], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        stored, calls = {}, []
+        def supervisor(request, **kwargs):
+            calls.append(request["scale_id"]); return {"status": "completed", "worker": {}}
+        def result(**kwargs):
+            return {"parameters": kwargs["parameters"], "execution_status": "completed", "reference_budget": {"elapsed_hours": 0.0}, "result_digest": "x"}
+        def write(_, value):
+            key = runner.logical_key(value["parameters"]); stored[key] = value
+            if len(stored) == 2: raise runner.BenchmarkRunnerError("injected write failure")
+        common = [patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "_result_from_observations", side_effect=result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x")]
+        with tempfile.TemporaryDirectory() as name:
+            with common[0], common[1], patch.object(runner, "scan_cache", return_value={}), common[2], common[3], common[4], common[5], patch.object(runner, "atomic_write_result", side_effect=write), self.assertRaises(runner.BenchmarkRunnerError):
+                runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=supervisor, clock=lambda: 0)
+            first = next(iter(stored.values())); calls.clear()
+            with patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={runner.logical_key(first["parameters"]): first}), patch.object(runner, "_result_from_observations", side_effect=result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result"), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}):
+                runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=supervisor, clock=lambda: 0)
+        self.assertEqual(calls, ["1.0x"])
+
+    def test_cached_elapsed_budget_stops_without_supervisor_or_close(self) -> None:
+        config = {"matrices": {"coverage_cells": [{"scale_id": "0.5x", "scenario_id": "disjoint"}, {"scale_id": "1.0x", "scenario_id": "disjoint"}], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        cached = {"coverage-0.5x-disjoint-none": {"parameters": {"measurement_kind": "coverage", "scale_id": "0.5x", "scenario_id": "disjoint", "permutation_seed": None}, "reference_budget": {"elapsed_hours": 3.0}}}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value=cached), patch.object(runner, "close_campaign") as close:
+            result = runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=lambda *_args, **_kwargs: self.fail("supervisor called"), clock=lambda: 0)
+        self.assertEqual(result["status"], "incomplete_budget_exceeded")
+        self.assertEqual(result["results"], list(cached.values()))
+        close.assert_not_called()
+
+    def test_determinism_baseline_timeout_does_not_persist_or_close(self) -> None:
+        config = {"matrices": {"coverage_cells": [], "performance_cells": [], "determinism_cells": [{"scale_id": "1.5x", "scenario_id": "disjoint", "permutation_seed": 7}]}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        calls = []
+        def supervisor(request, **kwargs):
+            calls.append(request.get("permutation_seed"))
+            return {"status": "completed", "worker": {"canonical_output_digest": "permuted", "report_fingerprint": "report", "final_fingerprint": None}} if request.get("permutation_seed") == 7 else {"status": "timeout"}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations"), patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign") as close:
+            result = runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=supervisor, clock=lambda: 0)
+        self.assertEqual(result["status"], "incomplete_baseline_failed")
+        self.assertEqual(result["overall_gate"], "stop")
+        self.assertEqual(calls, [7, None])
+        write.assert_not_called(); close.assert_not_called()
 
 
 if __name__ == "__main__":
