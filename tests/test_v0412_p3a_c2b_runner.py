@@ -38,6 +38,33 @@ MICRO_CONFIG = {
         "aggregate_counts": {"rule_fragment": 2, "binding": 4, "key": 2, "candidate": 4}
     }
 }
+APPROVED_SUBJECT_PATHS = (
+    "format-monograph/scripts/profile_v2_benchmark_runner.py",
+    "format-monograph/scripts/profile_v2_benchmark.py",
+    "format-monograph/scripts/profile_v2_composer.py",
+    "format-monograph/scripts/profile_v2_artifacts.py",
+    "format-monograph/scripts/profile_v2_authority.py",
+    "format-monograph/scripts/profile_v2_canonical.py",
+    "format-monograph/scripts/profile_v2_registry.py",
+    "format-monograph/scripts/profile_v2_scope.py",
+    "format-monograph/scripts/profile_v2_values.py",
+    "format-monograph/references/schemas/v2/artifact-contract-matrix.v1.1.json",
+    "format-monograph/references/schemas/v2/artifact-contract-matrix.v1.1.schema.json",
+    "format-monograph/references/schemas/v2/authority-contract.v1.0.json",
+    "format-monograph/references/schemas/v2/common.v2.3.schema.json",
+    "format-monograph/references/schemas/v2/conflict-report.v2.3.schema.json",
+    "format-monograph/references/schemas/v2/feature-activation-manifest.v2.2.schema.json",
+    "format-monograph/references/schemas/v2/final-execution-profile.v2.3.schema.json",
+    "format-monograph/references/schemas/v2/layered-rule-asset.v2.2.schema.json",
+    "format-monograph/references/schemas/v2/property-catalog.v2.2.generated.schema.json",
+    "format-monograph/references/schemas/v2/property-registry.v2.2.core.json",
+    "format-monograph/references/schemas/v2/property-registry.v2.2.schema.json",
+    "format-monograph/references/schemas/v2/qa-approval-artifact.v2.2.schema.json",
+    "format-monograph/references/schemas/v2/typed-value.v2.2.generated.schema.json",
+    "format-monograph/references/benchmarks/v0412/p3a-c2/projected-envelope.schema.json",
+    "format-monograph/references/benchmarks/v0412/p3a-c2/benchmark-config.schema.json",
+    "format-monograph/references/benchmarks/v0412/p3a-c2/benchmark-result.schema.json",
+)
 
 
 class _Input(io.BytesIO):
@@ -66,9 +93,15 @@ class _Process:
 
 
 class _DelayedEmpty:
+    def __init__(self) -> None:
+        self.closed_by_runner = False
+
     def readline(self) -> bytes:
         time.sleep(0.02)
         return b""
+
+    def close(self) -> None:
+        self.closed_by_runner = True
 
 
 def _sha(text: str) -> str:
@@ -84,7 +117,7 @@ class C2BRunnerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        assert len(CHECK_IDS) == 32 and cls.seen == set(CHECK_IDS)
+        assert len(CHECK_IDS) == 32 and len(cls.seen) == len(set(cls.seen))
 
     def check(self, number: int, condition: bool) -> None:
         identifier = CHECK_IDS[number - 1]
@@ -111,7 +144,7 @@ class C2BRunnerTests(unittest.TestCase):
                 self.stdout = path.encode("ascii")
         with patch.object(runner.subprocess, "run", side_effect=lambda args, **kwargs: Completed(args[-1])):
             manifest = runner.build_subject_manifest("a" * 40, repository=ROOT)
-        self.check(4, [entry["path"] for entry in manifest] == sorted(runner.SUBJECT_PATHS))
+            self.check(4, tuple(entry["path"] for entry in manifest) == tuple(sorted(APPROVED_SUBJECT_PATHS)))
         self.check(5, len(manifest) == len(set(runner.SUBJECT_PATHS)) and runner.recompute_subject_digest(manifest).startswith("sha256:"))
         with self.assertRaises(runner.BenchmarkRunnerError):
             runner.build_subject_manifest("A" * 40, repository=ROOT)
@@ -170,17 +203,17 @@ class C2BRunnerTests(unittest.TestCase):
         response = json.dumps({"status": "ok", "metrics": {}, "final_present": False}).encode("utf-8")
         completed = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"READY\n" + response + b"\n"), sampler=lambda pid: 1024)
         self.check(18, completed["status"] == "completed" and completed["rss"]["status"] == "available")
-        delayed = _Process(b"")
+        delayed = _Process(b"", None)
         delayed.stdout = _DelayedEmpty()
         with patch.object(runner, "_reader", lambda stream, output: None):
             timeout = runner.supervise_worker({}, timeout_seconds=0.001, process_factory=lambda *args, **kwargs: delayed)
-        self.check(19, timeout["status"] == "timeout" and delayed.killed and getattr(delayed.stdin, "closed_by_runner", False))
+        self.check(19, timeout["status"] == "timeout" and delayed.killed and getattr(delayed.stdin, "closed_by_runner", False) and delayed.stdout.closed_by_runner)
         crash = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"BROKEN\n", 1))
         self.check(20, crash["status"] == "process_crash")
         contract = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"READY\n{\"status\":\"error\"}\n"), sampler=lambda pid: 1024)
         self.check(21, contract["status"] == "contract_error")
         unavailable = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"READY\n" + response + b"\n"), sampler=lambda pid: (_ for _ in ()).throw(OSError("rss")))
-        self.check(22, unavailable["status"] == "rss_unavailable")
+        self.check(22, unavailable["status"] == "rss_unavailable" and runner._reported_rss_delta(1048601, 1049101) == 0.001)
 
     def test_023_budget(self) -> None:
         with self.assertRaises(runner.BenchmarkRunnerError):
@@ -198,6 +231,10 @@ class C2BRunnerTests(unittest.TestCase):
             self.check(25, True)
             with self.assertRaises(runner.BenchmarkRunnerError):
                 runner.load_cached_result(directory / "missing.tmp", {}, {})
+            (directory / "interrupted.tmp").write_text("partial", encoding="utf-8")
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner.scan_cache(directory, {}, {}, subject_digest=_sha("subject"))
+            (directory / "interrupted.tmp").unlink()
             self.check(26, True)
             (directory / "corrupt.json").write_text("{", encoding="utf-8")
             with self.assertRaises(runner.BenchmarkRunnerError):
@@ -215,9 +252,32 @@ class C2BRunnerTests(unittest.TestCase):
         with patch.object(runner, "validate_complete_benchmark_suite", return_value={"overall_gate": "stop"}) as close:
             self.check(30, runner.close_campaign([], {}, {}) == {"overall_gate": "stop"})
             close.assert_called_once()
+        campaign_config = {"matrices": {"coverage_cells": [], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}) as closed:
+            self.assertEqual(runner.run_benchmark_campaign(campaign_config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1.0), {"overall_gate": "stop"})
+            closed.assert_called_once_with([], campaign_config, {})
         self.check(31, "validate_complete_benchmark_suite" in (SCRIPTS / "profile_v2_benchmark_runner.py").read_text(encoding="utf-8"))
         runtime = (ROOT / "format-monograph" / "scripts" / "run_monograph.py").read_text(encoding="utf-8")
         self.check(32, "profile_v2_benchmark_runner" not in runtime and "profile_v2_composer" not in runtime and set().union(*map(set, ASSERTION_ID_MAP.values())) == set(CHECK_IDS))
+
+    def test_campaign_control_flow_uses_all_66_logical_keys(self) -> None:
+        scales = ["0.5x", "1.0x", "1.5x", "2.0x"]
+        scenarios = list(runner.SCENARIOS)
+        performance = [(scale, "mixed-conflict-approval") for scale in scales] + [(scale, scenario) for scale in ("1.5x", "2.0x") for scenario in scenarios if scenario != "mixed-conflict-approval"]
+        config = {"matrices": {"coverage_cells": [{"scale_id": s, "scenario_id": c} for s in scales for c in scenarios], "performance_cells": [{"scale_id": s, "scenario_id": c} for s, c in performance], "determinism_cells": [{"scale_id": s, "scenario_id": c, "permutation_seed": seed} for s in ("1.5x", "2.0x") for c in scenarios for seed in range(5)]}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        calls, written = [], []
+        def fake_supervisor(request, **kwargs):
+            calls.append((request["scale_id"], request["scenario_id"], request.get("permutation_seed")))
+            return {"status": "completed", "worker": {"canonical_output_digest": "same", "report_fingerprint": "report", "final_fingerprint": None}}
+        def fake_result(**kwargs):
+            p = kwargs["parameters"]
+            return {"parameters": p, "execution_status": "completed", "reference_budget": {"elapsed_hours": 0.0}, "summary": {}, "ratio_evidence": {"wall": {"status": "not_applicable"}, "rss": {"status": "not_applicable"}, "output_json": {"status": "not_applicable"}}, "result_digest": "x"}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations", side_effect=fake_result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result", side_effect=lambda d, r: written.append(r)), patch.object(runner, "_ratio_evidence"), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}) as close:
+            runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=fake_supervisor, clock=lambda: 0)
+        self.assertEqual(len(written), 66); self.assertEqual(len({runner.logical_key(x["parameters"]) for x in written}), 66)
+        self.assertEqual(len(calls), 104); close.assert_called_once()
 
 
 if __name__ == "__main__":

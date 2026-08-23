@@ -509,7 +509,7 @@ def _result_from_observations(
     first, elapsed = observations[0]
     result = build_result(cell=None, supervised=first, config=config, subject_commit=subject_commit, subject_manifest=subject_manifest, parameters=parameters, elapsed_seconds=elapsed, determinism=determinism)
     if parameters["measurement_kind"] == "performance" and first["status"] == "completed":
-        if len(observations) != 4:
+        if all(item["status"] == "completed" for item, _ in observations) and len(observations) != 4:
             raise BenchmarkRunnerError("performance requires warmup plus three measured observations")
         scenario = parameters["scenario_id"]
         result["runs"] = [
@@ -546,7 +546,8 @@ def run_benchmark_campaign(
     manifest = build_subject_manifest(benchmark_subject_commit)
     subject_digest = recompute_subject_digest(manifest)
     cached = scan_cache(cache_directory, config, envelope, subject_digest=subject_digest) if cache_directory.exists() else {}
-    started = clock()
+    elapsed_offset = max((Decimal(str(item["reference_budget"]["elapsed_hours"])) * Decimal("3600") for item in cached.values()), default=Decimal("0"))
+    started = clock() - float(elapsed_offset)
     requests: list[dict[str, Any]] = []
     for item in config["matrices"]["coverage_cells"]:
         requests.append(_parameters("coverage", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
@@ -556,7 +557,8 @@ def run_benchmark_campaign(
         requests.append(_parameters("determinism", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"], item["permutation_seed"]))
     results: dict[str, dict[str, Any]] = dict(cached)
     newly_created: dict[str, dict[str, Any]] = {}
-    requests.sort(key=logical_key)
+    kind_order = {"coverage": 0, "performance": 1, "determinism": 2}
+    requests.sort(key=lambda item: (kind_order[item["measurement_kind"]], SCALES[item["scale_id"]], item["scenario_id"], item["permutation_seed"] if item["permutation_seed"] is not None else -1))
     baselines: dict[tuple[str, str], dict[str, Any]] = {}
     for parameters in requests:
         key = logical_key(parameters)
@@ -578,6 +580,8 @@ def run_benchmark_campaign(
             if baseline is None:
                 baseline = _actual_observations(baseline_request, 1, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock)[0][0]
                 baselines[baseline_key] = baseline
+            if baseline.get("status") != "completed":
+                return {"status": "incomplete_baseline_failed", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
             if baseline.get("status") == "completed":
                 matched = baseline["worker"]["canonical_output_digest"] == observations[0][0]["worker"]["canonical_output_digest"]
                 fingerprint_matched = (baseline["worker"]["report_fingerprint"], baseline["worker"]["final_fingerprint"]) == (observations[0][0]["worker"]["report_fingerprint"], observations[0][0]["worker"]["final_fingerprint"])
@@ -587,20 +591,16 @@ def run_benchmark_campaign(
         result["stop_reasons"] = derive_stop_reasons(result)
         result["overall_gate"] = "stop" if result["stop_reasons"] else "go"
         result["result_digest"] = recompute_result_digest(result)
-        # Do not persist until all cross-scale evidence has been reconstructed.
         results[key] = result
+        if parameters["measurement_kind"] == "performance" and parameters["scale_id"] == "2.0x":
+            one = results.get(logical_key(_parameters("performance", "1.0x", parameters["scenario_id"], config["generation"]["generation_seed"])))
+            if one is not None and one["execution_status"] == result["execution_status"] == "completed":
+                _ratio_evidence(one, result)
+        validate_benchmark_result_context(result, config, envelope)
+        atomic_write_result(cache_directory, result)
         newly_created[key] = result
     ordered = [results[logical_key(parameters)] for parameters in requests]
     by_key = {logical_key(result["parameters"]): result for result in ordered}
-    for scenario in SCENARIOS:
-        one = by_key.get(logical_key(_parameters("performance", "1.0x", scenario, config["generation"]["generation_seed"])))
-        two = by_key.get(logical_key(_parameters("performance", "2.0x", scenario, config["generation"]["generation_seed"])))
-        if one and two and one["execution_status"] == two["execution_status"] == "completed":
-            _ratio_evidence(one, two)
-            validate_benchmark_result_context(two, config, envelope)
-    for key, result in newly_created.items():
-        validate_benchmark_result_context(result, config, envelope)
-        atomic_write_result(cache_directory, result)
     return close_campaign(ordered, config, envelope)
 
 
@@ -622,6 +622,13 @@ def worker_payload(request: dict[str, Any]) -> dict[str, Any]:
 
 def _round_mib(value: int | float) -> float:
     return float((Decimal(str(value)) / Decimal("1048576")).quantize(
+        Decimal("0.001"), rounding=ROUND_HALF_EVEN
+    ))
+
+
+def _reported_rss_delta(baseline_bytes: int | float, peak_bytes: int | float) -> float:
+    """C2A subtracts reported values, rather than raw bytes, before rounding."""
+    return float((Decimal(str(_round_mib(peak_bytes))) - Decimal(str(_round_mib(baseline_bytes)))).quantize(
         Decimal("0.001"), rounding=ROUND_HALF_EVEN
     ))
 
@@ -690,8 +697,13 @@ def supervise_worker(
             child.kill()
             child.wait()
         for stream in (child.stdin, child.stdout, child.stderr):
-            if stream is not None:
-                stream.close()
+            close = getattr(stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except OSError:
+                    # Cleanup must not replace the timeout/crash result.
+                    pass
         thread.join(timeout=0.1)
 
     try:
@@ -763,7 +775,7 @@ def supervise_worker(
             "rss": {
                 "status": "available", "baseline_rss_mib": _round_mib(baseline or 0),
                 "peak_rss_mib": _round_mib(peak),
-                "delta_peak_rss_mib": _round_mib(max(0, peak - (baseline or 0))),
+                "delta_peak_rss_mib": _reported_rss_delta(baseline or 0, peak),
             },
         }
     finally:
