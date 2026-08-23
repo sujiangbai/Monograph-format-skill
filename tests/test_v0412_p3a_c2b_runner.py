@@ -168,7 +168,8 @@ class C2BRunnerTests(unittest.TestCase):
         self.check(18, completed["status"] == "completed" and completed["rss"]["status"] == "available")
         delayed = _Process(b"")
         delayed.stdout = _DelayedEmpty()
-        timeout = runner.supervise_worker({}, timeout_seconds=0.001, process_factory=lambda *args, **kwargs: delayed)
+        with patch.object(runner, "_reader", lambda stream, output: None):
+            timeout = runner.supervise_worker({}, timeout_seconds=0.001, process_factory=lambda *args, **kwargs: delayed)
         self.check(19, timeout["status"] == "timeout")
         crash = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"BROKEN\n", 1))
         self.check(20, crash["status"] == "process_crash")
