@@ -179,11 +179,14 @@ class C2BRunnerTests(unittest.TestCase):
         )
         manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
         for config in configs:
-            times = iter((0.0, 0.0, 3 * 3600.0))
+            # started, logical precheck, first child gate/start/end all remain
+            # below 3h; only the second child or determinism baseline gate hits it.
+            times = iter((0.0, 0.0, 0.0, 0.0, 1.0, 3 * 3600.0))
+            calls = []
             with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "_runtime_environment", return_value=CAMPAIGN_ENVIRONMENT), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign") as close:
-                result = runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: {"status": "completed", "worker": {}}, clock=lambda: next(times))
+                result = runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: calls.append(1) or {"status": "completed", "worker": {}}, clock=lambda: next(times))
             self.assertEqual(result["status"], "incomplete_budget_exceeded")
-            write.assert_not_called(); close.assert_not_called()
+            self.assertEqual(calls, [1]); write.assert_not_called(); close.assert_not_called()
 
     def test_001_003_schema_first_campaign_context(self) -> None:
         valid_config = {"config_digest": "sha256:" + "0" * 64}
@@ -462,6 +465,17 @@ class C2BRunnerTests(unittest.TestCase):
         self.assertEqual(result["overall_gate"], "stop")
         self.assertEqual(calls, [7, None])
         write.assert_not_called(); close.assert_not_called()
+
+    def test_determinism_rss_worker_still_compares_baseline_and_persists_stop(self) -> None:
+        config = {"matrices": {"coverage_cells": [], "performance_cells": [], "determinism_cells": [{"scale_id": "1.5x", "scenario_id": "disjoint", "permutation_seed": 7}]}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        worker = {"canonical_output_digest": "same", "report_fingerprint": "report", "final_fingerprint": None}
+        constructed = {"parameters": {"measurement_kind": "determinism", "scale_id": "1.5x", "scenario_id": "disjoint", "permutation_seed": 7}, "execution_status": "stopped", "reference_budget": {"elapsed_hours": 0.0}, "ratio_evidence": {"wall": {"status": "not_applicable"}, "rss": {"status": "not_applicable"}, "output_json": {"status": "not_applicable"}}, "result_digest": "x"}
+        calls = iter(({"status": "rss_unavailable", "worker": worker}, {"status": "completed", "worker": worker}))
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "_runtime_environment", return_value=CAMPAIGN_ENVIRONMENT), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations", return_value=copy.deepcopy(constructed)) as construct, patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=["rss_unavailable"]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}):
+            runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: next(calls), clock=lambda: 0)
+        self.assertEqual(construct.call_args.kwargs["determinism"], ("matched", "matched"))
+        write.assert_called_once()
 
 
 if __name__ == "__main__":
