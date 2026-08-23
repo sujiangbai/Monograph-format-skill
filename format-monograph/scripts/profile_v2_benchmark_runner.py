@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+import stat
 from statistics import median
 from copy import deepcopy
 from decimal import Decimal, ROUND_HALF_EVEN
@@ -29,7 +30,6 @@ from profile_v2_benchmark import (
     recompute_subject_digest,
     validate_benchmark_campaign_context,
     validate_benchmark_result_context,
-    validate_benchmark_result_semantics,
     validate_complete_benchmark_suite,
 )
 from profile_v2_canonical import canonical_data_digest, stamp_intent_semantic_fingerprint_v041
@@ -278,6 +278,28 @@ def build_subject_manifest(benchmark_subject_commit: str, *, repository: Path | 
     if recompute_subject_digest(manifest) != recompute_subject_digest(sorted(manifest, key=lambda item: item["path"])):
         raise BenchmarkRunnerError("subject manifest mismatch")
     return manifest
+
+
+def validate_subject_manifest_worktree(manifest: list[dict[str, str]]) -> None:
+    """Fail closed unless the executing worktree exactly matches its subject."""
+    root = Path(__file__).resolve().parents[2]
+    if len(manifest) != len(SUBJECT_PATHS) or tuple(item.get("path") for item in manifest) != tuple(sorted(SUBJECT_PATHS)):
+        raise BenchmarkRunnerError("subject manifest path set mismatch")
+    if len({item.get("path") for item in manifest}) != len(manifest):
+        raise BenchmarkRunnerError("subject manifest duplicate path")
+    for item in manifest:
+        path, expected = item.get("path"), item.get("sha256")
+        if not isinstance(path, str) or not isinstance(expected, str):
+            raise BenchmarkRunnerError("invalid subject manifest entry")
+        candidate = root / path
+        try:
+            if not stat.S_ISREG(candidate.stat().st_mode):
+                raise BenchmarkRunnerError("subject path is not a regular file")
+            actual = _sha(candidate.read_bytes())
+        except OSError as exc:
+            raise BenchmarkRunnerError("subject worktree file unavailable") from exc
+        if actual != expected:
+            raise BenchmarkRunnerError("subject worktree differs from commit")
 
 
 def logical_key(parameters: dict[str, Any]) -> str:
@@ -621,9 +643,10 @@ def run_benchmark_campaign(
     responsible for a formal/reference invocation and evidence publication.
     """
     validate_campaign_inputs(config, envelope)
-    environment = _runtime_environment(os_build_class)
     supervisor = supervisor or supervise_worker
     manifest = build_subject_manifest(benchmark_subject_commit)
+    validate_subject_manifest_worktree(manifest)
+    environment = _runtime_environment(os_build_class)
     subject_digest = recompute_subject_digest(manifest)
     cached = scan_cache(cache_directory, config, envelope, subject_digest=subject_digest) if cache_directory.exists() else {}
     requests = _campaign_requests(config)

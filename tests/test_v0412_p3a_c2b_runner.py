@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
 import tempfile
 import time
 import sys
@@ -212,6 +213,19 @@ class C2BRunnerTests(unittest.TestCase):
         with self.assertRaises(runner.BenchmarkRunnerError):
             runner.build_subject_manifest("A" * 40, repository=ROOT)
         self.check(6, True)
+
+    def test_subject_manifest_binds_executing_worktree_before_campaign(self) -> None:
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        manifest = runner.build_subject_manifest(head, repository=ROOT)
+        runner.validate_subject_manifest_worktree(manifest)
+        bad = copy.deepcopy(manifest); bad[0]["sha256"] = _sha("old")
+        with self.assertRaises(runner.BenchmarkRunnerError):
+            runner.validate_subject_manifest_worktree(bad)
+        config = {"matrices": {"coverage_cells": [], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=bad), patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign") as close:
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner.run_benchmark_campaign(config, {}, benchmark_subject_commit=head, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: self.fail("worker called"))
+        write.assert_not_called(); close.assert_not_called()
 
     def test_007_011_workload_and_normalized_source_key_contract(self) -> None:
         self.check(7, runner.scaled_workload(MICRO_CONFIG, "1.0x") == MICRO_CONFIG["projection_binding"]["aggregate_counts"])
