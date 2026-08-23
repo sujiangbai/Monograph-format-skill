@@ -20,6 +20,10 @@ SPEC = importlib.util.spec_from_file_location("c2b_runner", SCRIPTS / "profile_v
 runner = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(runner)
+C2A_SPEC = importlib.util.spec_from_file_location("c2a_contracts", ROOT / "tests" / "test_v0412_p3a_c2_contracts.py")
+c2a_contracts = importlib.util.module_from_spec(C2A_SPEC)
+assert C2A_SPEC.loader is not None
+C2A_SPEC.loader.exec_module(c2a_contracts)
 
 CHECK_IDS = tuple("T412-P3AC-BENCH-C2B-%03d" % number for number in range(1, 33))
 ASSERTION_ID_MAP = {
@@ -125,6 +129,61 @@ class C2BRunnerTests(unittest.TestCase):
         self.assertNotIn(identifier, self.seen)
         self.seen.add(identifier)
         self.assertTrue(condition, identifier)
+
+    def _runner_result(self, kind: str, *, scenario: str = "disjoint", statuses: list[str] | None = None, deterministic=("not_applicable", "not_applicable")):
+        config = c2a_contracts.load("benchmark-config.valid.json")
+        base = c2a_contracts.coverage("0.5x", scenario) if kind != "performance" else c2a_contracts.perf("1.5x", scenario)
+        run = base["runs"][0]
+        worker = {"final_present": run["final_profile_present"], "final_fingerprint": run["final_profile_fingerprint"], "metrics": run["metrics"], "input_json_bytes": run["input_json_bytes"], "output_json_bytes": run["output_json_bytes"], "stage_seconds": {name: (value.get("wall_seconds", 0.0)) for name, value in run["timings"].items() if name != "end_to_end"}}
+        parameters = {"measurement_kind": kind, "scale_id": "1.5x" if kind != "coverage" else "0.5x", "scenario_id": scenario, "generation_seed": config["generation"]["generation_seed"], "permutation_seed": 7 if kind == "determinism" else None}
+        statuses = statuses or ["completed"] * (4 if kind == "performance" else 1)
+        observations = []
+        for status in statuses:
+            item = {"status": status, "worker": copy.deepcopy(worker)}
+            if status == "completed": item["rss"] = {"status": "available", "baseline_rss_mib": 1.0, "peak_rss_mib": 1.0, "delta_peak_rss_mib": 0.0}
+            observations.append((item, 0.01))
+        result = runner._result_from_observations(config=config, subject_commit=base["benchmark_subject_commit"], subject_manifest=base["subject_manifest"], parameters=parameters, observations=observations, environment=base["environment"], determinism=deterministic)
+        return result, config, c2a_contracts.envelope()
+
+    def test_runner_constructed_results_pass_unpatched_context(self) -> None:
+        coverage, config, envelope = self._runner_result("coverage")
+        performance, _, _ = self._runner_result("performance")
+        timeout, _, _ = self._runner_result("performance", statuses=["completed", "timeout"])
+        matched, _, _ = self._runner_result("determinism", deterministic=("matched", "matched"))
+        mismatched, _, _ = self._runner_result("determinism", deterministic=("mismatched", "mismatched"))
+        for result in (coverage, performance, timeout, matched, mismatched):
+            runner.validate_benchmark_result_context(result, config, envelope)
+
+    def test_runner_constructs_rss_stopped_performance(self) -> None:
+        result, config, envelope = self._runner_result("performance", statuses=["completed", "rss_unavailable"])
+        self.assertEqual([run["run_status"] for run in result["runs"]], ["completed", "completed"])
+        self.assertEqual(result["execution_status"], "stopped")
+        self.assertIsNone(result["summary"])
+        self.assertEqual(result["stop_reasons"], ["rss_unavailable"])
+        runner.validate_benchmark_result_context(result, config, envelope)
+
+    def test_campaign_rejects_late_unrepresentable_observations_without_write(self) -> None:
+        config = {"matrices": {"coverage_cells": [], "performance_cells": [{"scale_id": "1.5x", "scenario_id": "disjoint"}], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        for failure in ("contract_error", "rss_unavailable"):
+            calls = iter(({"status": "completed", "worker": {}}, {"status": failure}))
+            with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "_runtime_environment", return_value=CAMPAIGN_ENVIRONMENT), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations") as construct, patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign") as close:
+                result = runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: next(calls), clock=lambda: 0)
+            self.assertEqual(result["status"], "incomplete_" + failure)
+            construct.assert_not_called(); write.assert_not_called(); close.assert_not_called()
+
+    def test_campaign_deadline_applies_before_later_worker_and_baseline(self) -> None:
+        configs = (
+            {"matrices": {"coverage_cells": [], "performance_cells": [{"scale_id": "1.5x", "scenario_id": "disjoint"}], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3},
+            {"matrices": {"coverage_cells": [], "performance_cells": [], "determinism_cells": [{"scale_id": "1.5x", "scenario_id": "disjoint", "permutation_seed": 7}]}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3},
+        )
+        manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
+        for config in configs:
+            times = iter((0.0, 0.0, 3 * 3600.0))
+            with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "_runtime_environment", return_value=CAMPAIGN_ENVIRONMENT), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign") as close:
+                result = runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: {"status": "completed", "worker": {}}, clock=lambda: next(times))
+            self.assertEqual(result["status"], "incomplete_budget_exceeded")
+            write.assert_not_called(); close.assert_not_called()
 
     def test_001_003_schema_first_campaign_context(self) -> None:
         valid_config = {"config_digest": "sha256:" + "0" * 64}
