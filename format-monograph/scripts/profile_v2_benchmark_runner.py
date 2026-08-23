@@ -43,6 +43,10 @@ class BenchmarkRunnerError(ValueError):
     pass
 
 
+class _CampaignBudgetStopped(Exception):
+    """Internal signal: a child must not start after the campaign deadline."""
+
+
 SCALES = {"0.5x": Decimal("0.5"), "1.0x": Decimal("1"), "1.5x": Decimal("1.5"), "2.0x": Decimal("2")}
 SCENARIOS = ("disjoint", "subset-chain", "dense-crossing", "mixed-conflict-approval")
 MICRO_SCENARIO_EXPECTATIONS = {
@@ -504,9 +508,12 @@ def _ratio_evidence(one: dict[str, Any], two: dict[str, Any]) -> None:
 
 def _actual_observations(
     request: dict[str, Any], count: int, *, timeout_seconds: float, supervisor: Any, clock: Any,
+    before_call: Any | None = None,
 ) -> list[tuple[dict[str, Any], float]]:
     observations = []
     for _ in range(count):
+        if before_call is not None:
+            before_call()
         started = clock()
         observation = supervisor(request, timeout_seconds=timeout_seconds)
         observations.append((observation, max(0.0, clock() - started)))
@@ -524,6 +531,8 @@ def _runtime_environment(os_build_class: str) -> dict[str, Any]:
     if family is None:
         raise BenchmarkRunnerError("unsupported OS family")
     machine = platform.machine().lower().replace("-", "_")
+    if not machine:
+        raise BenchmarkRunnerError("CPU architecture unavailable")
     architecture = "x86_64" if machine in {"amd64", "x86_64", "x64"} else "arm64" if machine in {"arm64", "aarch64"} else "other"
     cpus = os.cpu_count()
     if not isinstance(cpus, int) or cpus < 1:
@@ -585,9 +594,10 @@ def _result_from_observations(
                         output_json_bytes=supervised.get("worker", {}).get("output_json_bytes"))
             for index, (supervised, duration) in enumerate(observations, 1)
         ]
-        if any(item["status"] != "completed" for item, _ in observations):
+        interrupted = next((index for index, item in enumerate(observations) if item[0]["status"] in {"timeout", "process_crash"}), None)
+        if interrupted is not None:
             result["execution_status"] = "stopped"
-            result["runs"] = result["runs"][:next(index for index, run in enumerate(result["runs"]) if run["run_status"] != "completed") + 1]
+            result["runs"] = result["runs"][:interrupted + 1]
             result["summary"] = None
         elif any(run["rss"]["status"] != "available" for run in result["runs"]):
             result["execution_status"] = "stopped"
@@ -603,7 +613,7 @@ def _result_from_observations(
 
 def run_benchmark_campaign(
     config: dict[str, Any], envelope: dict[str, Any], *, benchmark_subject_commit: str, cache_directory: Path,
-    timeout_seconds: float, supervisor: Any | None = None, clock: Any = time.monotonic, os_build_class: str = "unspecified",
+    timeout_seconds: float, os_build_class: str, supervisor: Any | None = None, clock: Any = time.monotonic,
 ) -> dict[str, Any]:
     """Internal serial orchestration; only complete-suite validation can close it.
 
@@ -619,8 +629,14 @@ def run_benchmark_campaign(
     requests = _campaign_requests(config)
     elapsed_offset = Decimal("0") if not cached else Decimal(str(cached[logical_key(requests[len(cached) - 1])]["reference_budget"]["elapsed_hours"])) * Decimal("3600")
     started = clock() - float(elapsed_offset)
+    if any(item.get("environment") != environment for item in cached.values()):
+        raise BenchmarkRunnerError("cached evidence environment differs from campaign")
     results: dict[str, dict[str, Any]] = dict(cached)
     baselines: dict[tuple[str, str], dict[str, Any]] = {}
+    def require_budget_before_child() -> None:
+        if clock() - started >= config["total_reference_budget_hours"] * 3600:
+            raise _CampaignBudgetStopped()
+
     for parameters in requests:
         key = logical_key(parameters)
         if key in results:
@@ -632,19 +648,26 @@ def run_benchmark_campaign(
             return {"status": "incomplete_budget_exceeded", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
         request = {"config": config, "scale_id": parameters["scale_id"], "scenario_id": parameters["scenario_id"], "generation_seed": parameters["generation_seed"], "permutation_seed": parameters["permutation_seed"], "measurement_kind": parameters["measurement_kind"]}
         count = 4 if parameters["measurement_kind"] == "performance" else 1
-        observations = _actual_observations(request, count, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock)
+        try:
+            observations = _actual_observations(request, count, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock, before_call=require_budget_before_child)
+        except _CampaignBudgetStopped:
+            return {"status": "incomplete_budget_exceeded", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
         # C2A has no legal run shape for a missing worker/contract-error RSS
         # failure.  Preserve prior checkpoints and stop before fabricating one.
-        first_status, first_worker = observations[0][0].get("status"), observations[0][0].get("worker")
-        if first_status in {"rss_unavailable", "contract_error"} and first_worker is None:
-            return {"status": "incomplete_" + first_status, "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
+        for observed, _ in observations:
+            status, worker = observed.get("status"), observed.get("worker")
+            if status == "contract_error" or (status == "rss_unavailable" and worker is None):
+                return {"status": "incomplete_" + status, "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
         deterministic = ("not_applicable", "not_applicable")
-        if parameters["measurement_kind"] == "determinism" and observations[0][0].get("status") == "completed":
+        if parameters["measurement_kind"] == "determinism" and observations[0][0].get("status") in {"completed", "rss_unavailable"} and observations[0][0].get("worker") is not None:
             baseline_request = dict(request); baseline_request["permutation_seed"] = None
             baseline_key = (parameters["scale_id"], parameters["scenario_id"])
             baseline = baselines.get(baseline_key)
             if baseline is None:
-                baseline = _actual_observations(baseline_request, 1, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock)[0][0]
+                try:
+                    baseline = _actual_observations(baseline_request, 1, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock, before_call=require_budget_before_child)[0][0]
+                except _CampaignBudgetStopped:
+                    return {"status": "incomplete_budget_exceeded", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
                 baselines[baseline_key] = baseline
             if baseline.get("status") != "completed":
                 return {"status": "incomplete_baseline_failed", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
