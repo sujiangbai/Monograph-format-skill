@@ -31,6 +31,7 @@ from profile_v2_benchmark import (
 )
 from profile_v2_canonical import canonical_data_digest, stamp_intent_semantic_fingerprint_v041
 from profile_v2_composer import apply_intent_resolutions_v041, compose_intent_profile_v041
+from profile_v2_artifacts import validate_intent_artifact_v041
 from profile_v2_registry import load_registry
 from profile_v2_scope import normalize_scope, normalized_property_scope_key
 
@@ -151,7 +152,21 @@ def normalized_source_key_count(assets: Iterable[dict[str, Any]]) -> int:
     return len(keys)
 
 
-def generate_assets(config: dict[str, Any], scale_id: str, scenario_id: str, seed: int, *, permuted: bool = False) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _permutation_order(items: list[dict[str, Any]], seed: int | None) -> list[dict[str, Any]]:
+    """Apply a stable, seed-specific permutation without changing semantics."""
+    if seed is None:
+        return items
+    def stable_id(item: dict[str, Any]) -> str:
+        value = item.get("artifact_id", item.get("rule_id"))
+        if not isinstance(value, str) or not value:
+            raise BenchmarkRunnerError("permutation input lacks stable identity")
+        return value
+    return sorted(items, key=lambda item: hashlib.sha256(
+        (str(seed) + "\0" + stable_id(item)).encode("utf-8")
+    ).hexdigest())
+
+
+def generate_assets(config: dict[str, Any], scale_id: str, scenario_id: str, seed: int, *, permutation_seed: int | None = None) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Generate only C1's contract.intent-probe assets; never a base rule asset."""
     if scenario_id not in SCENARIOS:
         raise BenchmarkRunnerError("unknown scenario")
@@ -180,12 +195,10 @@ def generate_assets(config: dict[str, Any], scale_id: str, scenario_id: str, see
         assets.append(stamp_intent_semantic_fingerprint_v041(asset))
     if normalized_source_key_count(assets) != work["key"]:
         raise BenchmarkRunnerError("generated source keys do not conserve scaled(key)")
-    if permuted:
-        for index, asset in enumerate(assets):
-            asset["rules"].reverse()
-            assets[index] = stamp_intent_semantic_fingerprint_v041(asset)
-        assets.reverse()
-    return assets, work
+    for index, asset in enumerate(assets):
+        asset["rules"] = _permutation_order(asset["rules"], permutation_seed)
+        assets[index] = stamp_intent_semantic_fingerprint_v041(asset)
+    return _permutation_order(assets, permutation_seed), work
 
 
 def _approval(report: dict[str, Any], ordinal: int) -> dict[str, Any]:
@@ -196,9 +209,18 @@ def _approval(report: dict[str, Any], ordinal: int) -> dict[str, Any]:
 
 def compose_cell(config: dict[str, Any], *, scale_id: str, scenario_id: str, generation_seed: int, permutation_seed: int | None = None) -> dict[str, Any]:
     """Pure worker core: compose one C2B logical cell without a supervisor or GO."""
-    assets, expected = generate_assets(config, scale_id, scenario_id, generation_seed, permuted=permutation_seed is not None)
+    generated_at = time.perf_counter()
+    assets, expected = generate_assets(config, scale_id, scenario_id, generation_seed, permutation_seed=permutation_seed)
+    generation_seconds = time.perf_counter() - generated_at
     manifest = feature_manifest()
+    validation_at = time.perf_counter()
+    for asset in assets:
+        validate_intent_artifact_v041(asset)
+    validate_intent_artifact_v041(manifest)
+    validation_seconds = time.perf_counter() - validation_at
+    composed_at = time.perf_counter()
     composed = compose_intent_profile_v041(assets, manifest, input_fingerprint=_sha(b"c2b-source"), structure_fingerprint=_sha(b"c2b-structure"), artifact_id="conflict-report:c2b-%s-%s" % (scale_id, scenario_id), created_by_tool=_tool(), generated_at="2026-08-23T00:00:00Z", include_metrics=True)
+    compose_seconds = time.perf_counter() - composed_at
     metrics = composed.metrics
     metric_expectations = {"input_asset_count": expected["rule_fragment"], "input_rule_count": expected["binding"], "input_binding_count": expected["binding"], "expected_key_count": expected["key"], "candidate_count": expected["candidate"]}
     if metrics is None or any(getattr(metrics, field) != value for field, value in metric_expectations.items()):
@@ -207,16 +229,22 @@ def compose_cell(config: dict[str, Any], *, scale_id: str, scenario_id: str, gen
     pre_status = composed.status
     status = pre_status
     if scenario_id != "dense-crossing":
+        approvals_at = time.perf_counter()
         approvals = [_approval(composed.report, index) for index in range(len(composed.report["approval_required_conflicts"]))]
+        approval_seconds = time.perf_counter() - approvals_at
+        apply_at = time.perf_counter()
         applied = apply_intent_resolutions_v041(composed.report, approvals, manifest, task_id="task:c2b", task_fingerprint=_sha(b"c2b-task"), artifact_id="final-execution-profile:c2b", created_by_tool=_tool(), metrics=metrics)
+        apply_seconds = time.perf_counter() - apply_at
         status, final = applied.status, applied.final_profile
+    else:
+        approval_seconds, apply_seconds = 0.0, 0.0
     if scenario_id in {"disjoint", "subset-chain"} and (status != "profile_generated" or final is None):
         raise BenchmarkRunnerError("unexpected final-state boundary")
     if scenario_id == "dense-crossing" and (status != "unresolvable" or final is not None):
         raise BenchmarkRunnerError("dense crossing boundary")
     if scenario_id == "mixed-conflict-approval" and (status != "profile_generated" or final is None):
         raise BenchmarkRunnerError("mixed approval boundary")
-    return {"assets": assets, "report": composed.report, "final_profile": final, "metrics": metrics, "status": status, "pre_status": pre_status, "expected": expected}
+    return {"assets": assets, "report": composed.report, "final_profile": final, "metrics": metrics, "status": status, "pre_status": pre_status, "expected": expected, "stage_seconds": {"synthetic_generation": generation_seconds, "schema_registry_validation": validation_seconds, "compose": compose_seconds, "approval_generation": approval_seconds, "apply": apply_seconds}}
 
 
 def build_subject_manifest(benchmark_subject_commit: str, *, repository: Path | None = None) -> list[dict[str, str]]:
@@ -250,6 +278,73 @@ def _not_applicable() -> dict[str, str]:
     return {"status": "not_applicable"}
 
 
+def _not_reached() -> dict[str, str]:
+    return {"status": "not_reached"}
+
+
+def _run_kind(measurement_kind: str, ordinal: int) -> str:
+    if measurement_kind == "performance":
+        return "performance_warmup" if ordinal == 1 else "performance_measured"
+    return measurement_kind
+
+
+def _run_record(
+    *,
+    ordinal: int,
+    measurement_kind: str,
+    scenario_id: str,
+    supervised: dict[str, Any],
+    worker: dict[str, Any] | None,
+    elapsed_seconds: float,
+    input_json_bytes: int | None,
+    output_json_bytes: int | None,
+    determinism: tuple[str, str] = ("not_applicable", "not_applicable"),
+) -> dict[str, Any]:
+    """Turn one supervisor observation into the C2A run shape.
+
+    All result arithmetic is reconstructed from these records; callers never
+    supply summary, ratio, or determinism values as placeholders.
+    """
+    completed = supervised["status"] == "completed" and worker is not None
+    final_present = bool(worker and worker["final_present"])
+    terminal = FROZEN_SCENARIO_SEMANTICS[scenario_id]
+    timed = _measured(elapsed_seconds)
+    if completed:
+        stages = worker["stage_seconds"]
+        approval = _measured(stages["approval_generation"]) if scenario_id == "mixed-conflict-approval" else _not_applicable()
+        apply = _measured(stages["apply"]) if final_present else _not_applicable()
+        state = terminal["terminal_state"]
+        trace = {"pre_approval": terminal["pre_approval_terminal"], "post_approval": terminal["post_approval_terminal"]}
+        metrics = worker["metrics"]
+        conservation, stable, contract = "passed", "stable", "valid"
+    else:
+        approval = _not_reached() if scenario_id == "mixed-conflict-approval" else _not_applicable()
+        apply = _not_reached() if scenario_id != "dense-crossing" else _not_applicable()
+        state, trace, final_present = "not_reached", {"pre_approval": "not_reached", "post_approval": "not_reached"}, False
+        metrics, conservation, stable, contract = None, "not_reached", "not_reached", "error"
+        determinism = ("not_reached", "not_reached") if measurement_kind == "determinism" else determinism
+    return {
+        "run_index": ordinal, "run_kind": _run_kind(measurement_kind, ordinal),
+        "run_status": "completed" if completed else ("timeout" if supervised["status"] == "timeout" else "process_crash"),
+        "timings": {
+            "synthetic_generation": _measured(stages["synthetic_generation"]) if completed else _not_reached(),
+            "schema_registry_validation": _measured(stages["schema_registry_validation"]) if completed else _not_reached(),
+            "compose": _measured(stages["compose"]) if completed else _not_reached(),
+            "approval_generation": approval, "apply": apply,
+            "canonical_serialization": _measured(stages["canonical_serialization"]) if completed else _not_reached(),
+            "end_to_end": timed,
+        },
+        "rss": supervised.get("rss", {"status": "unavailable"}),
+        "input_json_bytes": input_json_bytes if completed else None,
+        "output_json_bytes": output_json_bytes if completed else None,
+        "metrics": metrics, "terminal_state": state, "terminal_trace": trace,
+        "coverage_conservation": conservation, "stable_id_status": stable,
+        "canonical_determinism": determinism[0], "fingerprint_determinism": determinism[1],
+        "contract_status": contract, "final_profile_present": final_present,
+        "final_profile_fingerprint": worker["final_fingerprint"] if completed and final_present else None,
+    }
+
+
 def build_result(
     *,
     cell: dict[str, Any],
@@ -259,43 +354,15 @@ def build_result(
     subject_manifest: list[dict[str, str]],
     parameters: dict[str, Any],
     elapsed_seconds: float,
+    determinism: tuple[str, str] = ("not_applicable", "not_applicable"),
 ) -> dict[str, Any]:
     """Construct one non-artifact C2A result; it never decides suite GO."""
-    if supervised["status"] != "completed":
-        raise BenchmarkRunnerError("stopped result construction is owned by the supervisor campaign path")
-    worker = supervised["worker"]
+    worker = supervised.get("worker")
     scenario = parameters["scenario_id"]
-    terminal = FROZEN_SCENARIO_SEMANTICS[scenario]
-    final_present = worker["final_present"]
-    timing = {
-        "synthetic_generation": _measured(0.0),
-        "schema_registry_validation": _measured(0.0),
-        "compose": _measured(elapsed_seconds),
-        "approval_generation": _measured(0.0) if scenario == "mixed-conflict-approval" else _not_applicable(),
-        "apply": _measured(0.0) if final_present else _not_applicable(),
-        "canonical_serialization": _measured(0.0),
-        "end_to_end": _measured(elapsed_seconds),
-    }
-    input_bytes = len(canonical_json_bytes(cell["assets"]))
-    output_bytes = len(canonical_json_bytes({
-        "report": cell["report"], "final_profile": cell["final_profile"],
-    }))
-    run = {
-        "run_index": 1, "run_kind": parameters["measurement_kind"],
-        "run_status": "completed", "timings": timing,
-        "rss": supervised.get("rss", {"status": "unavailable"}),
-        "input_json_bytes": input_bytes, "output_json_bytes": output_bytes,
-        "metrics": worker["metrics"], "terminal_state": terminal["terminal_state"],
-        "terminal_trace": {
-            "pre_approval": terminal["pre_approval_terminal"],
-            "post_approval": terminal["post_approval_terminal"],
-        },
-        "coverage_conservation": "passed", "stable_id_status": "stable",
-        "canonical_determinism": "matched" if parameters["measurement_kind"] == "determinism" else "not_applicable",
-        "fingerprint_determinism": "matched" if parameters["measurement_kind"] == "determinism" else "not_applicable",
-        "contract_status": "valid", "final_profile_present": final_present,
-        "final_profile_fingerprint": worker["final_fingerprint"],
-    }
+    input_bytes = len(canonical_json_bytes(cell["assets"])) if cell else (worker or {}).get("input_json_bytes")
+    output_bytes = len(canonical_json_bytes({"report": cell["report"], "final_profile": cell["final_profile"]})) if cell else (worker or {}).get("output_json_bytes")
+    run_count = 4 if parameters["measurement_kind"] == "performance" and supervised["status"] == "completed" else 1
+    runs = [_run_record(ordinal=index, measurement_kind=parameters["measurement_kind"], scenario_id=scenario, supervised=supervised, worker=worker, elapsed_seconds=elapsed_seconds, input_json_bytes=input_bytes, output_json_bytes=output_bytes, determinism=determinism) for index in range(1, run_count + 1)]
     result = {
         "document_kind": "p3a_c2_benchmark_result", "contract_version": "1.0",
         "evidence_kind": "non_artifact_benchmark", "benchmark_subject_commit": subject_commit,
@@ -314,18 +381,40 @@ def build_result(
             "cpu_architecture": "other", "logical_cpu_count": 1, "ram_tier": "le_8gib",
         },
         "command_template": "internal-benchmark --worker", "parameters": parameters,
-        "execution_status": "completed", "composer_terminal_state": terminal["terminal_state"],
+        "execution_status": "completed" if supervised["status"] == "completed" else "stopped", "composer_terminal_state": runs[-1]["terminal_state"],
         "overall_gate": "go", "stop_reasons": [], "rss_protocol": FROZEN_RSS_PROTOCOL,
         "thresholds": FROZEN_THRESHOLDS,
         "output_json_bytes_basis": config["output_json_bytes_basis"],
-        "input_json_bytes_basis": config["input_json_bytes_basis"], "runs": [run],
-        "summary": None, "ratio_evidence": {name: {"status": "not_applicable"} for name in ("wall", "rss", "output_json")},
+        "input_json_bytes_basis": config["input_json_bytes_basis"], "runs": runs,
+        "summary": _summary_from_runs(runs) if parameters["measurement_kind"] == "performance" and supervised["status"] == "completed" else None, "ratio_evidence": {name: {"status": "not_applicable"} for name in ("wall", "rss", "output_json")},
         "reference_budget": {"elapsed_hours": 0.0, "limit_hours": config["total_reference_budget_hours"]},
     }
     result["stop_reasons"] = derive_stop_reasons(result)
     result["overall_gate"] = "stop" if result["stop_reasons"] else "go"
     result["result_digest"] = recompute_result_digest(result)
     return result
+
+
+def _summary_from_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    measured = [run for run in runs if run["run_kind"] == "performance_measured"]
+    if not measured:
+        raise BenchmarkRunnerError("performance result lacks measured runs")
+    def values(path: tuple[str, ...]) -> list[Any]:
+        out = []
+        for run in measured:
+            item: Any = run
+            for part in path:
+                item = item[part]
+            out.append(item)
+        return out
+    return {
+        "median_wall_seconds": median(values(("timings", "end_to_end", "wall_seconds"))),
+        "max_wall_seconds": max(values(("timings", "end_to_end", "wall_seconds"))),
+        "median_peak_rss_mib": median(values(("rss", "peak_rss_mib"))),
+        "max_peak_rss_mib": max(values(("rss", "peak_rss_mib"))),
+        "median_output_json_bytes": int(median(values(("output_json_bytes",)))),
+        "max_output_json_bytes": max(values(("output_json_bytes",))),
+    }
 
 
 def atomic_write_result(directory: Path, result: dict[str, Any]) -> Path:
@@ -335,6 +424,8 @@ def atomic_write_result(directory: Path, result: dict[str, Any]) -> Path:
     if path.exists():
         raise BenchmarkRunnerError("refusing to overwrite evidence")
     temporary = directory / (key + ".tmp")
+    if temporary.exists():
+        raise BenchmarkRunnerError("refusing to replace interrupted temporary evidence")
     temporary.write_bytes(canonical_json_bytes(result))
     os.replace(temporary, path)
     return path
@@ -358,6 +449,8 @@ def load_cached_result(path: Path, config: dict[str, Any], envelope: dict[str, A
 def scan_cache(directory: Path, config: dict[str, Any], envelope: dict[str, Any], *, subject_digest: str) -> dict[str, dict[str, Any]]:
     """Load only final JSON evidence; duplicate logical keys fail closed."""
     cached: dict[str, dict[str, Any]] = {}
+    if any(directory.glob("*.tmp")):
+        raise BenchmarkRunnerError("interrupted temporary evidence present")
     for path in sorted(directory.glob("*.json")):
         result = load_cached_result(path, config, envelope, subject_digest=subject_digest)
         key = logical_key(result["parameters"])
@@ -377,13 +470,152 @@ def close_campaign(results: Iterable[dict[str, Any]], config: dict[str, Any], en
     return validate_complete_benchmark_suite(results, config, envelope)
 
 
+def _parameters(kind: str, scale_id: str, scenario_id: str, seed: int, permutation_seed: int | None = None) -> dict[str, Any]:
+    return {"measurement_kind": kind, "scale_id": scale_id, "scenario_id": scenario_id, "generation_seed": seed, "permutation_seed": permutation_seed}
+
+
+def _ratio_evidence(one: dict[str, Any], two: dict[str, Any]) -> None:
+    """Populate only the 2x side from actual measured performance summaries."""
+    fields = {"wall": "median_wall_seconds", "rss": "median_peak_rss_mib", "output_json": "median_output_json_bytes"}
+    for name, field in fields.items():
+        baseline = Decimal(str(one["summary"][field]))
+        observed = Decimal(str(two["summary"][field]))
+        if baseline <= 0:
+            raise BenchmarkRunnerError("zero ratio baseline")
+        ratio = (observed / baseline).quantize(Decimal("0.000001"), rounding=ROUND_HALF_EVEN)
+        two["ratio_evidence"][name] = {"status": "measured", "baseline_1x": float(baseline), "observed_2x": float(observed), "ratio": float(ratio)}
+    two["stop_reasons"] = derive_stop_reasons(two)
+    two["overall_gate"] = "stop" if two["stop_reasons"] else "go"
+    two["result_digest"] = recompute_result_digest(two)
+
+
+def _actual_observations(
+    request: dict[str, Any], count: int, *, timeout_seconds: float, supervisor: Any, clock: Any,
+) -> list[tuple[dict[str, Any], float]]:
+    observations = []
+    for _ in range(count):
+        started = clock()
+        observation = supervisor(request, timeout_seconds=timeout_seconds)
+        observations.append((observation, max(0.0, clock() - started)))
+        if observation.get("status") != "completed":
+            break
+    return observations
+
+
+def _result_from_observations(
+    *, config: dict[str, Any], subject_commit: str, subject_manifest: list[dict[str, str]], parameters: dict[str, Any],
+    observations: list[tuple[dict[str, Any], float]], determinism: tuple[str, str] = ("not_applicable", "not_applicable"),
+) -> dict[str, Any]:
+    first, elapsed = observations[0]
+    result = build_result(cell=None, supervised=first, config=config, subject_commit=subject_commit, subject_manifest=subject_manifest, parameters=parameters, elapsed_seconds=elapsed, determinism=determinism)
+    if parameters["measurement_kind"] == "performance" and first["status"] == "completed":
+        if len(observations) != 4:
+            raise BenchmarkRunnerError("performance requires warmup plus three measured observations")
+        scenario = parameters["scenario_id"]
+        result["runs"] = [
+            _run_record(ordinal=index, measurement_kind="performance", scenario_id=scenario, supervised=supervised,
+                        worker=supervised.get("worker"), elapsed_seconds=duration,
+                        input_json_bytes=supervised.get("worker", {}).get("input_json_bytes"),
+                        output_json_bytes=supervised.get("worker", {}).get("output_json_bytes"))
+            for index, (supervised, duration) in enumerate(observations, 1)
+        ]
+        if any(item["status"] != "completed" for item, _ in observations):
+            result["execution_status"] = "stopped"
+            result["runs"] = result["runs"][:next(index for index, run in enumerate(result["runs"]) if run["run_status"] != "completed") + 1]
+            result["summary"] = None
+        else:
+            result["summary"] = _summary_from_runs(result["runs"])
+    result["composer_terminal_state"] = result["runs"][-1]["terminal_state"]
+    result["stop_reasons"] = derive_stop_reasons(result)
+    result["overall_gate"] = "stop" if result["stop_reasons"] else "go"
+    result["result_digest"] = recompute_result_digest(result)
+    return result
+
+
+def run_benchmark_campaign(
+    config: dict[str, Any], envelope: dict[str, Any], *, benchmark_subject_commit: str, cache_directory: Path,
+    timeout_seconds: float, supervisor: Any | None = None, clock: Any = time.monotonic,
+) -> dict[str, Any]:
+    """Internal serial orchestration; only complete-suite validation can close it.
+
+    This function is intentionally not wired to a runtime entry point.  C2C is
+    responsible for a formal/reference invocation and evidence publication.
+    """
+    validate_campaign_inputs(config, envelope)
+    supervisor = supervisor or supervise_worker
+    manifest = build_subject_manifest(benchmark_subject_commit)
+    subject_digest = recompute_subject_digest(manifest)
+    cached = scan_cache(cache_directory, config, envelope, subject_digest=subject_digest) if cache_directory.exists() else {}
+    started = clock()
+    requests: list[dict[str, Any]] = []
+    for item in config["matrices"]["coverage_cells"]:
+        requests.append(_parameters("coverage", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
+    for item in config["matrices"]["performance_cells"]:
+        requests.append(_parameters("performance", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
+    for item in config["matrices"]["determinism_cells"]:
+        requests.append(_parameters("determinism", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"], item["permutation_seed"]))
+    results: dict[str, dict[str, Any]] = dict(cached)
+    newly_created: dict[str, dict[str, Any]] = {}
+    requests.sort(key=logical_key)
+    baselines: dict[tuple[str, str], dict[str, Any]] = {}
+    for parameters in requests:
+        key = logical_key(parameters)
+        if key in results:
+            continue
+        if clock() - started > config["total_reference_budget_hours"] * 3600:
+            # C2A has no serializable "not started due to campaign budget"
+            # result.  Keep already validated evidence and fail closed without
+            # manufacturing timeout/crash records or a complete suite.
+            return {"status": "incomplete_budget_exceeded", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
+        request = {"config": config, "scale_id": parameters["scale_id"], "scenario_id": parameters["scenario_id"], "generation_seed": parameters["generation_seed"], "permutation_seed": parameters["permutation_seed"]}
+        count = 4 if parameters["measurement_kind"] == "performance" else 1
+        observations = _actual_observations(request, count, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock)
+        deterministic = ("not_applicable", "not_applicable")
+        if parameters["measurement_kind"] == "determinism" and observations[0][0].get("status") == "completed":
+            baseline_request = dict(request); baseline_request["permutation_seed"] = None
+            baseline_key = (parameters["scale_id"], parameters["scenario_id"])
+            baseline = baselines.get(baseline_key)
+            if baseline is None:
+                baseline = _actual_observations(baseline_request, 1, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock)[0][0]
+                baselines[baseline_key] = baseline
+            if baseline.get("status") == "completed":
+                matched = baseline["worker"]["canonical_output_digest"] == observations[0][0]["worker"]["canonical_output_digest"]
+                fingerprint_matched = (baseline["worker"]["report_fingerprint"], baseline["worker"]["final_fingerprint"]) == (observations[0][0]["worker"]["report_fingerprint"], observations[0][0]["worker"]["final_fingerprint"])
+                deterministic = ("matched" if matched else "mismatched", "matched" if fingerprint_matched else "mismatched")
+        result = _result_from_observations(config=config, subject_commit=benchmark_subject_commit, subject_manifest=manifest, parameters=parameters, observations=observations, determinism=deterministic)
+        result["reference_budget"]["elapsed_hours"] = float((Decimal(str(clock() - started)) / Decimal("3600")).quantize(Decimal("0.000001"), rounding=ROUND_HALF_EVEN))
+        result["stop_reasons"] = derive_stop_reasons(result)
+        result["overall_gate"] = "stop" if result["stop_reasons"] else "go"
+        result["result_digest"] = recompute_result_digest(result)
+        # Do not persist until all cross-scale evidence has been reconstructed.
+        results[key] = result
+        newly_created[key] = result
+    ordered = [results[logical_key(parameters)] for parameters in requests]
+    by_key = {logical_key(result["parameters"]): result for result in ordered}
+    for scenario in SCENARIOS:
+        one = by_key.get(logical_key(_parameters("performance", "1.0x", scenario, config["generation"]["generation_seed"])))
+        two = by_key.get(logical_key(_parameters("performance", "2.0x", scenario, config["generation"]["generation_seed"])))
+        if one and two and one["execution_status"] == two["execution_status"] == "completed":
+            _ratio_evidence(one, two)
+            validate_benchmark_result_context(two, config, envelope)
+    for key, result in newly_created.items():
+        validate_benchmark_result_context(result, config, envelope)
+        atomic_write_result(cache_directory, result)
+    return close_campaign(ordered, config, envelope)
+
+
 def worker_payload(request: dict[str, Any]) -> dict[str, Any]:
     """One logical cell only; parent-side supervision owns timeout/RSS/evidence."""
     try:
         composed = compose_cell(request["config"], scale_id=request["scale_id"], scenario_id=request["scenario_id"], generation_seed=request["generation_seed"], permutation_seed=request.get("permutation_seed"))
         metrics = composed["metrics"]
         report = composed["report"]
-        return {"status": "ok", "proposal_status": composed["status"], "final_present": composed["final_profile"] is not None, "metrics": metrics.__dict__, "report_fingerprint": report["semantic_fingerprint"], "report_counts": {"candidate_groups": len(report["candidate_groups"]), "scope_partitions": len(report["scope_partitions"]), "conflicts": len(report["approval_required_conflicts"]), "proposals": len(report["proposed_resolutions"]), "blockers": len(report["unresolvable_blockers"])}, "final_fingerprint": None if composed["final_profile"] is None else composed["final_profile"]["semantic_fingerprint"]}
+        payload = {"report": report, "final_profile": composed["final_profile"]}
+        serialization_at = time.perf_counter()
+        canonical_payload = canonical_json_bytes(payload)
+        stage_seconds = dict(composed["stage_seconds"])
+        stage_seconds["canonical_serialization"] = time.perf_counter() - serialization_at
+        return {"status": "ok", "proposal_status": composed["status"], "final_present": composed["final_profile"] is not None, "metrics": metrics.__dict__, "report_fingerprint": report["semantic_fingerprint"], "report_counts": {"candidate_groups": len(report["candidate_groups"]), "scope_partitions": len(report["scope_partitions"]), "conflicts": len(report["approval_required_conflicts"]), "proposals": len(report["proposed_resolutions"]), "blockers": len(report["unresolvable_blockers"])}, "final_fingerprint": None if composed["final_profile"] is None else composed["final_profile"]["semantic_fingerprint"], "input_json_bytes": len(canonical_json_bytes(composed["assets"])), "output_json_bytes": len(canonical_payload), "canonical_output_digest": _sha(canonical_payload), "stage_seconds": stage_seconds}
     except Exception as exc:  # Worker errors become parent-side contract evidence.
         return {"status": "error", "error": type(exc).__name__}
 
@@ -445,15 +677,15 @@ def supervise_worker(
 ) -> dict[str, Any]:
     """Run one child with timeout precedence and fail-closed RSS evidence."""
     command = [python_executable or sys.executable, str(Path(__file__).resolve()), "--worker"]
-    child = process_factory(
-        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
+    # stderr is deliberately not evidence and must not back-pressure a child.
+    child = process_factory(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     output: queue.Queue[bytes] = queue.Queue()
     thread = threading.Thread(target=_reader, args=(child.stdout, output), daemon=True)
     thread.start()
     started = clock()
+    deadline = started + timeout_seconds
     try:
-        first = output.get(timeout=timeout_seconds)
+        first = output.get(timeout=max(0.0, deadline - clock()))
     except queue.Empty:
         child.kill()
         child.wait()
@@ -463,20 +695,22 @@ def supervise_worker(
         child.wait()
         return {"status": "process_crash"}
     try:
-        if child.stdin is None:
-            raise OSError("worker stdin unavailable")
-        child.stdin.write(canonical_json_bytes(request))
-        child.stdin.close()
+        # READY is emitted after imports and before worker input is read.  Take
+        # the baseline first so generation cannot enter the RSS interval.
         read_rss = sampler or _windows_peak_working_set
         rss_available = os.name == "nt" or sampler is not None
         try:
             baseline = read_rss(child.pid) if rss_available else None
         except OSError:
             return {"status": "rss_unavailable"}
+        if child.stdin is None:
+            raise OSError("worker stdin unavailable")
+        child.stdin.write(canonical_json_bytes(request))
+        child.stdin.close()
         peak = baseline
         response_line: bytes | None = None
         while child.poll() is None:
-            if clock() - started > timeout_seconds:
+            if clock() >= deadline:
                 child.kill()
                 child.wait()
                 return {"status": "timeout"}
@@ -490,8 +724,13 @@ def supervise_worker(
                 if response_line:
                     break
             except queue.Empty:
-                sleeper(0.05)
-        child.wait()
+                sleeper(min(0.05, max(0.0, deadline - clock())))
+        while child.poll() is None:
+            if clock() >= deadline:
+                child.kill()
+                child.wait()
+                return {"status": "timeout"}
+            sleeper(min(0.05, max(0.0, deadline - clock())))
         while response_line is None:
             try:
                 line = output.get_nowait()

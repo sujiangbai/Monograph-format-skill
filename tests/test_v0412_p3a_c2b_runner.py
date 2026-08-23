@@ -84,7 +84,7 @@ class C2BRunnerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        assert len(CHECK_IDS) == 32 and len(set(CHECK_IDS)) == 32
+        assert len(CHECK_IDS) == 32 and cls.seen == set(CHECK_IDS)
 
     def check(self, number: int, condition: bool) -> None:
         identifier = CHECK_IDS[number - 1]
@@ -158,9 +158,13 @@ class C2BRunnerTests(unittest.TestCase):
 
     def test_016_017_permutation_determinism_without_extra_compose(self) -> None:
         normal, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 5)
-        permuted, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 5, permuted=True)
+        permuted, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 5, permutation_seed=17)
         self.check(16, runner.normalized_source_key_count(normal) == runner.normalized_source_key_count(permuted) == 2)
-        self.check(17, sorted(item["semantic_fingerprint"] for item in normal) == sorted(item["semantic_fingerprint"] for item in permuted))
+        observed_orders = {
+            tuple(item["artifact_id"] for item in runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 5, permutation_seed=seed)[0])
+            for seed in range(1, 17)
+        }
+        self.check(17, sorted(item["semantic_fingerprint"] for item in normal) == sorted(item["semantic_fingerprint"] for item in permuted) and len(observed_orders) >= 2)
 
     def test_018_022_supervisor_statuses(self) -> None:
         response = json.dumps({"status": "ok", "metrics": {}, "final_present": False}).encode("utf-8")
@@ -170,7 +174,7 @@ class C2BRunnerTests(unittest.TestCase):
         delayed.stdout = _DelayedEmpty()
         with patch.object(runner, "_reader", lambda stream, output: None):
             timeout = runner.supervise_worker({}, timeout_seconds=0.001, process_factory=lambda *args, **kwargs: delayed)
-        self.check(19, timeout["status"] == "timeout")
+        self.check(19, timeout["status"] == "timeout" and delayed.killed and getattr(delayed.stdin, "closed_by_runner", False))
         crash = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"BROKEN\n", 1))
         self.check(20, crash["status"] == "process_crash")
         contract = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"READY\n{\"status\":\"error\"}\n"), sampler=lambda pid: 1024)
