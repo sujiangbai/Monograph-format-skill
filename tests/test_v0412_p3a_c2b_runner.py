@@ -311,6 +311,27 @@ class C2BRunnerTests(unittest.TestCase):
             with self.assertRaises(runner.BenchmarkRunnerError):
                 runner.scan_cache(Path(name), config, {}, subject_digest=subject)
 
+    def test_cache_accepts_strict_prefix_and_environment_mismatch_stops_pre_worker(self) -> None:
+        config = {"matrices": {"coverage_cells": [{"scale_id": "0.5x", "scenario_id": "disjoint"}, {"scale_id": "1.0x", "scenario_id": "disjoint"}], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
+        subject = _sha("subject"); first, second = runner._campaign_requests(config)
+        def document(parameters, elapsed): return {"parameters": parameters, "reference_budget": {"elapsed_hours": elapsed}, "benchmark_subject_digest": subject}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "load_cached_result", side_effect=[document(first, 0.5), document(second, 1.0)]):
+            Path(name, "one.json").write_text("{}", encoding="utf-8"); Path(name, "two.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(set(runner.scan_cache(Path(name), config, {}, subject_digest=subject)), {runner.logical_key(first), runner.logical_key(second)})
+        cached = {runner.logical_key(first): {"parameters": first, "reference_budget": {"elapsed_hours": 0.5}, "environment": dict(CAMPAIGN_ENVIRONMENT, os_family="linux")}}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "_runtime_environment", return_value=CAMPAIGN_ENVIRONMENT), patch.object(runner, "build_subject_manifest", return_value=[]), patch.object(runner, "scan_cache", return_value=cached), patch.object(runner, "atomic_write_result") as write, patch.object(runner, "close_campaign") as close:
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, os_build_class="unspecified", supervisor=lambda *_a, **_k: self.fail("worker called"), clock=lambda: 0)
+        write.assert_not_called(); close.assert_not_called()
+
+    def test_runtime_environment_platform_mapping_and_fail_closed_machine(self) -> None:
+        with patch.object(runner.sys, "platform", "darwin"), patch.object(runner.platform, "machine", return_value="arm64"), patch.object(runner.os, "cpu_count", return_value=4), patch.object(runner.os, "sysconf", side_effect=(4096, 1024 * 1024), create=True):
+            environment = runner._runtime_environment("frozen_reference")
+        self.assertEqual((environment["os_family"], environment["cpu_architecture"], environment["os_build_class"]), ("macos", "arm64", "frozen_reference"))
+        with patch.object(runner.platform, "machine", return_value=""):
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner._runtime_environment("unspecified")
+
     def test_023_budget(self) -> None:
         config = {"matrices": {"coverage_cells": [{"scale_id": "0.5x", "scenario_id": "disjoint"}], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}, "total_reference_budget_hours": 3}
         clock_values = iter((0.0, 3 * 3600.0))
