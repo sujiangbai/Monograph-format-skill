@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import queue
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from profile_v2_benchmark import (
     recompute_subject_digest,
     validate_benchmark_campaign_context,
     validate_benchmark_result_context,
+    validate_benchmark_result_semantics,
     validate_complete_benchmark_suite,
 )
 from profile_v2_canonical import canonical_data_digest, stamp_intent_semantic_fingerprint_v041
@@ -172,6 +174,8 @@ def generate_assets(config: dict[str, Any], scale_id: str, scenario_id: str, see
     if scenario_id not in SCENARIOS:
         raise BenchmarkRunnerError("unknown scenario")
     work = scaled_workload(config, scale_id)
+    if scenario_id == "mixed-conflict-approval" and work["binding"] < 2 * work["key"]:
+        raise BenchmarkRunnerError("mixed-conflict-approval requires two bindings per source key")
     if scenario_id == "dense-crossing" and work["key"] < 2:
         raise BenchmarkRunnerError("dense-crossing requires at least two source keys")
     registry = load_registry(version="2.2", validation_context="declaration_intent")
@@ -245,6 +249,11 @@ def compose_cell(config: dict[str, Any], *, scale_id: str, scenario_id: str, gen
         raise BenchmarkRunnerError("dense crossing boundary")
     if scenario_id == "mixed-conflict-approval" and (status != "profile_generated" or final is None):
         raise BenchmarkRunnerError("mixed approval boundary")
+    if scenario_id == "mixed-conflict-approval" and (
+        not composed.report["approval_required_conflicts"]
+        or not composed.report["proposed_resolutions"]
+    ):
+        raise BenchmarkRunnerError("mixed scenario did not produce approval-required evidence")
     return {"assets": assets, "report": composed.report, "final_profile": final, "metrics": metrics, "status": status, "pre_status": pre_status, "expected": expected, "stage_seconds": {"synthetic_generation": generation_seconds, "schema_registry_validation": validation_seconds, "compose": compose_seconds, "approval_generation": approval_seconds, "apply": apply_seconds}}
 
 
@@ -306,7 +315,10 @@ def _run_record(
     All result arithmetic is reconstructed from these records; callers never
     supply summary, ratio, or determinism values as placeholders.
     """
-    completed = supervised["status"] == "completed" and worker is not None
+    # A worker can finish validly while external RSS evidence is unavailable.
+    # Preserve its actual composition evidence; the enclosing result remains
+    # stopped solely because C2A derives ``rss_unavailable``.
+    completed = supervised["status"] in {"completed", "rss_unavailable"} and worker is not None
     final_present = bool(worker and worker["final_present"])
     terminal = FROZEN_SCENARIO_SEMANTICS[scenario_id]
     timed = _measured(elapsed_seconds)
@@ -355,6 +367,7 @@ def build_result(
     subject_manifest: list[dict[str, str]],
     parameters: dict[str, Any],
     elapsed_seconds: float,
+    environment: dict[str, Any] | None = None,
     determinism: tuple[str, str] = ("not_applicable", "not_applicable"),
 ) -> dict[str, Any]:
     """Construct one non-artifact C2A result; it never decides suite GO."""
@@ -378,11 +391,7 @@ def build_result(
         },
         "benchmark_config_digest": config["config_digest"], "result_digest": _sha(b"unstamped"),
         "result_digest_basis": "canonical_json_excluding_result_digest",
-        "environment": {
-            "os_family": "windows" if os.name == "nt" else "linux",
-            "os_build_class": "unspecified", "python_version": "%d.%d.%d" % sys.version_info[:3],
-            "cpu_architecture": "other", "logical_cpu_count": 1, "ram_tier": "le_8gib",
-        },
+        "environment": deepcopy(environment if environment is not None else _runtime_environment("unspecified")),
         "command_template": "internal-benchmark --worker", "parameters": parameters,
         "execution_status": "completed" if supervised["status"] == "completed" else "stopped", "composer_terminal_state": runs[-1]["terminal_state"],
         "overall_gate": "go", "stop_reasons": [], "rss_protocol": FROZEN_RSS_PROTOCOL,
@@ -460,12 +469,13 @@ def scan_cache(directory: Path, config: dict[str, Any], envelope: dict[str, Any]
         if key in cached:
             raise BenchmarkRunnerError("duplicate logical cache key")
         cached[key] = result
+    expected = [logical_key(item) for item in _campaign_requests(config)]
+    if set(cached) != set(expected[:len(cached)]):
+        raise BenchmarkRunnerError("cache is not a canonical campaign prefix")
+    elapsed = [Decimal(str(cached[key]["reference_budget"]["elapsed_hours"])) for key in expected[:len(cached)]]
+    if any(later <= earlier for earlier, later in zip(elapsed, elapsed[1:])):
+        raise BenchmarkRunnerError("cache budget elapsed hours are not strictly increasing")
     return cached
-
-
-def enforce_campaign_budget(started: float, *, limit_seconds: float, clock: Any = time.monotonic) -> None:
-    if clock() - started > limit_seconds:
-        raise BenchmarkRunnerError("reference budget exceeded")
 
 
 def close_campaign(results: Iterable[dict[str, Any]], config: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -505,13 +515,66 @@ def _actual_observations(
     return observations
 
 
+def _runtime_environment(os_build_class: str) -> dict[str, Any]:
+    """Collect only the bounded, non-identifying C2A environment envelope."""
+    if os_build_class not in {"public_ci", "frozen_reference", "unspecified"}:
+        raise BenchmarkRunnerError("unknown OS build class")
+    family_by_platform = {"win32": "windows", "linux": "linux", "darwin": "macos"}
+    family = family_by_platform.get(sys.platform)
+    if family is None:
+        raise BenchmarkRunnerError("unsupported OS family")
+    machine = platform.machine().lower().replace("-", "_")
+    architecture = "x86_64" if machine in {"amd64", "x86_64", "x64"} else "arm64" if machine in {"arm64", "aarch64"} else "other"
+    cpus = os.cpu_count()
+    if not isinstance(cpus, int) or cpus < 1:
+        raise BenchmarkRunnerError("logical CPU count unavailable")
+    try:
+        if family == "windows":
+            import ctypes
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            status = MemoryStatus(); status.dwLength = ctypes.sizeof(status)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                raise OSError("GlobalMemoryStatusEx")
+            total_memory = int(status.ullTotalPhys)
+        else:
+            total_memory = int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, OSError, ValueError):
+        raise BenchmarkRunnerError("RAM capacity unavailable") from None
+    if total_memory <= 0:
+        raise BenchmarkRunnerError("RAM capacity unavailable")
+    gib = Decimal(total_memory) / Decimal(1024 ** 3)
+    tier = "le_8gib" if gib <= 8 else "8_to_16gib" if gib <= 16 else "16_to_32gib" if gib <= 32 else "32_to_64gib" if gib <= 64 else "gt_64gib"
+    return {"os_family": family, "os_build_class": os_build_class,
+            "python_version": "%d.%d.%d" % sys.version_info[:3],
+            "cpu_architecture": architecture, "logical_cpu_count": cpus, "ram_tier": tier}
+
+
+def _campaign_requests(config: dict[str, Any]) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for item in config["matrices"]["coverage_cells"]:
+        requests.append(_parameters("coverage", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
+    for item in config["matrices"]["performance_cells"]:
+        requests.append(_parameters("performance", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
+    for item in config["matrices"]["determinism_cells"]:
+        requests.append(_parameters("determinism", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"], item["permutation_seed"]))
+    kind_order = {"coverage": 0, "performance": 1, "determinism": 2}
+    return sorted(requests, key=lambda item: (kind_order[item["measurement_kind"]], SCALES[item["scale_id"]], item["scenario_id"], item["permutation_seed"] if item["permutation_seed"] is not None else -1))
+
+
 def _result_from_observations(
     *, config: dict[str, Any], subject_commit: str, subject_manifest: list[dict[str, str]], parameters: dict[str, Any],
-    observations: list[tuple[dict[str, Any], float]], determinism: tuple[str, str] = ("not_applicable", "not_applicable"),
+    observations: list[tuple[dict[str, Any], float]], environment: dict[str, Any] | None = None, determinism: tuple[str, str] = ("not_applicable", "not_applicable"),
 ) -> dict[str, Any]:
     first, elapsed = observations[0]
-    result = build_result(cell=None, supervised=first, config=config, subject_commit=subject_commit, subject_manifest=subject_manifest, parameters=parameters, elapsed_seconds=elapsed, determinism=determinism)
-    if parameters["measurement_kind"] == "performance" and first["status"] == "completed":
+    result = build_result(cell=None, supervised=first, config=config, subject_commit=subject_commit, subject_manifest=subject_manifest, parameters=parameters, elapsed_seconds=elapsed, environment=environment, determinism=determinism)
+    if parameters["measurement_kind"] == "performance" and first["status"] in {"completed", "rss_unavailable"}:
         if all(item["status"] == "completed" for item, _ in observations) and len(observations) != 4:
             raise BenchmarkRunnerError("performance requires warmup plus three measured observations")
         scenario = parameters["scenario_id"]
@@ -526,6 +589,9 @@ def _result_from_observations(
             result["execution_status"] = "stopped"
             result["runs"] = result["runs"][:next(index for index, run in enumerate(result["runs"]) if run["run_status"] != "completed") + 1]
             result["summary"] = None
+        elif any(run["rss"]["status"] != "available" for run in result["runs"]):
+            result["execution_status"] = "stopped"
+            result["summary"] = None
         else:
             result["summary"] = _summary_from_runs(result["runs"])
     result["composer_terminal_state"] = result["runs"][-1]["terminal_state"]
@@ -537,7 +603,7 @@ def _result_from_observations(
 
 def run_benchmark_campaign(
     config: dict[str, Any], envelope: dict[str, Any], *, benchmark_subject_commit: str, cache_directory: Path,
-    timeout_seconds: float, supervisor: Any | None = None, clock: Any = time.monotonic,
+    timeout_seconds: float, supervisor: Any | None = None, clock: Any = time.monotonic, os_build_class: str = "unspecified",
 ) -> dict[str, Any]:
     """Internal serial orchestration; only complete-suite validation can close it.
 
@@ -545,23 +611,15 @@ def run_benchmark_campaign(
     responsible for a formal/reference invocation and evidence publication.
     """
     validate_campaign_inputs(config, envelope)
+    environment = _runtime_environment(os_build_class)
     supervisor = supervisor or supervise_worker
     manifest = build_subject_manifest(benchmark_subject_commit)
     subject_digest = recompute_subject_digest(manifest)
     cached = scan_cache(cache_directory, config, envelope, subject_digest=subject_digest) if cache_directory.exists() else {}
-    elapsed_offset = max((Decimal(str(item["reference_budget"]["elapsed_hours"])) * Decimal("3600") for item in cached.values()), default=Decimal("0"))
+    requests = _campaign_requests(config)
+    elapsed_offset = Decimal("0") if not cached else Decimal(str(cached[logical_key(requests[len(cached) - 1])]["reference_budget"]["elapsed_hours"])) * Decimal("3600")
     started = clock() - float(elapsed_offset)
-    requests: list[dict[str, Any]] = []
-    for item in config["matrices"]["coverage_cells"]:
-        requests.append(_parameters("coverage", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
-    for item in config["matrices"]["performance_cells"]:
-        requests.append(_parameters("performance", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"]))
-    for item in config["matrices"]["determinism_cells"]:
-        requests.append(_parameters("determinism", item["scale_id"], item["scenario_id"], config["generation"]["generation_seed"], item["permutation_seed"]))
     results: dict[str, dict[str, Any]] = dict(cached)
-    newly_created: dict[str, dict[str, Any]] = {}
-    kind_order = {"coverage": 0, "performance": 1, "determinism": 2}
-    requests.sort(key=lambda item: (kind_order[item["measurement_kind"]], SCALES[item["scale_id"]], item["scenario_id"], item["permutation_seed"] if item["permutation_seed"] is not None else -1))
     baselines: dict[tuple[str, str], dict[str, Any]] = {}
     for parameters in requests:
         key = logical_key(parameters)
@@ -572,9 +630,14 @@ def run_benchmark_campaign(
             # result.  Keep already validated evidence and fail closed without
             # manufacturing timeout/crash records or a complete suite.
             return {"status": "incomplete_budget_exceeded", "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
-        request = {"config": config, "scale_id": parameters["scale_id"], "scenario_id": parameters["scenario_id"], "generation_seed": parameters["generation_seed"], "permutation_seed": parameters["permutation_seed"]}
+        request = {"config": config, "scale_id": parameters["scale_id"], "scenario_id": parameters["scenario_id"], "generation_seed": parameters["generation_seed"], "permutation_seed": parameters["permutation_seed"], "measurement_kind": parameters["measurement_kind"]}
         count = 4 if parameters["measurement_kind"] == "performance" else 1
         observations = _actual_observations(request, count, timeout_seconds=timeout_seconds, supervisor=supervisor, clock=clock)
+        # C2A has no legal run shape for a missing worker/contract-error RSS
+        # failure.  Preserve prior checkpoints and stop before fabricating one.
+        first_status, first_worker = observations[0][0].get("status"), observations[0][0].get("worker")
+        if first_status in {"rss_unavailable", "contract_error"} and first_worker is None:
+            return {"status": "incomplete_" + first_status, "overall_gate": "stop", "results": [results[name] for name in sorted(results)]}
         deterministic = ("not_applicable", "not_applicable")
         if parameters["measurement_kind"] == "determinism" and observations[0][0].get("status") == "completed":
             baseline_request = dict(request); baseline_request["permutation_seed"] = None
@@ -589,21 +652,19 @@ def run_benchmark_campaign(
                 matched = baseline["worker"]["canonical_output_digest"] == observations[0][0]["worker"]["canonical_output_digest"]
                 fingerprint_matched = (baseline["worker"]["report_fingerprint"], baseline["worker"]["final_fingerprint"]) == (observations[0][0]["worker"]["report_fingerprint"], observations[0][0]["worker"]["final_fingerprint"])
                 deterministic = ("matched" if matched else "mismatched", "matched" if fingerprint_matched else "mismatched")
-        result = _result_from_observations(config=config, subject_commit=benchmark_subject_commit, subject_manifest=manifest, parameters=parameters, observations=observations, determinism=deterministic)
+        result = _result_from_observations(config=config, subject_commit=benchmark_subject_commit, subject_manifest=manifest, parameters=parameters, observations=observations, environment=environment, determinism=deterministic)
         result["reference_budget"]["elapsed_hours"] = float((Decimal(str(clock() - started)) / Decimal("3600")).quantize(Decimal("0.000001"), rounding=ROUND_HALF_EVEN))
         result["stop_reasons"] = derive_stop_reasons(result)
         result["overall_gate"] = "stop" if result["stop_reasons"] else "go"
         result["result_digest"] = recompute_result_digest(result)
-        results[key] = result
         if parameters["measurement_kind"] == "performance" and parameters["scale_id"] == "2.0x":
             one = results.get(logical_key(_parameters("performance", "1.0x", parameters["scenario_id"], config["generation"]["generation_seed"])))
             if one is not None and one["execution_status"] == result["execution_status"] == "completed":
                 _ratio_evidence(one, result)
         validate_benchmark_result_context(result, config, envelope)
         atomic_write_result(cache_directory, result)
-        newly_created[key] = result
+        results[key] = result
     ordered = [results[logical_key(parameters)] for parameters in requests]
-    by_key = {logical_key(result["parameters"]): result for result in ordered}
     return close_campaign(ordered, config, envelope)
 
 
@@ -741,7 +802,9 @@ def supervise_worker(
                 try:
                     peak = max(peak or 0, read_rss(child.pid))
                 except OSError:
-                    return {"status": "rss_unavailable"}
+                    # Keep reading the worker response.  A valid worker with
+                    # missing RSS is a representable stopped C2A result.
+                    rss_available = False
             try:
                 response_line = output.get_nowait()
                 if response_line:

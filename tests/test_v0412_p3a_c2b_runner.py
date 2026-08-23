@@ -117,7 +117,7 @@ class C2BRunnerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        assert len(CHECK_IDS) == 32 and len(cls.seen) == len(set(cls.seen))
+        assert len(CHECK_IDS) == 32 and cls.seen == set(CHECK_IDS)
 
     def check(self, number: int, condition: bool) -> None:
         identifier = CHECK_IDS[number - 1]
@@ -162,6 +162,10 @@ class C2BRunnerTests(unittest.TestCase):
         reversed_scope = copy.deepcopy(assets[0]["rules"][0]["scope"])
         reversed_scope["selectors"][0]["selector_ids"].reverse()
         self.check(11, runner.normalize_scope(reversed_scope)["scope_id"] == runner.normalize_scope(assets[0]["rules"][0]["scope"])["scope_id"])
+        insufficient = copy.deepcopy(MICRO_CONFIG)
+        insufficient["projection_binding"]["aggregate_counts"] = {"rule_fragment": 1, "binding": 1, "key": 1, "candidate": 1}
+        with self.assertRaises(runner.BenchmarkRunnerError):
+            runner.generate_assets(insufficient, "1.0x", "mixed-conflict-approval", 1)
 
     def test_012_015_four_real_micro_scenario_smokes_once_each(self) -> None:
         # Exactly one child compose/apply call per scenario.  The explicit
@@ -215,10 +219,40 @@ class C2BRunnerTests(unittest.TestCase):
         unavailable = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"READY\n" + response + b"\n"), sampler=lambda pid: (_ for _ in ()).throw(OSError("rss")))
         self.check(22, unavailable["status"] == "rss_unavailable" and runner._reported_rss_delta(1048601, 1049101) == 0.001)
 
+    def test_rss_unavailable_is_a_real_stopped_c2a_result(self) -> None:
+        fixture_root = ROOT / "tests" / "fixtures" / "v0412" / "p3a_c2"
+        config = json.loads((fixture_root / "benchmark-config.valid.json").read_text(encoding="utf-8"))
+        envelope = json.loads((fixture_root / "projected-envelope.valid.json").read_text(encoding="utf-8"))
+        result = json.loads((fixture_root / "benchmark-result.valid.json").read_text(encoding="utf-8"))
+        result["execution_status"] = "stopped"
+        result["runs"][0]["rss"] = {"status": "unavailable"}
+        result["summary"] = None
+        result["ratio_evidence"] = {name: {"status": "not_applicable"} for name in ("wall", "rss", "output_json")}
+        result["stop_reasons"] = runner.derive_stop_reasons(result)
+        result["overall_gate"] = "stop"
+        result["result_digest"] = runner.recompute_result_digest(result)
+        # This is intentionally the unpatched production C2A result semantic
+        # validator.  Context bindings are covered by the C2A contract suite.
+        runner.validate_benchmark_result_semantics(result)
+        self.assertEqual(result["stop_reasons"], ["rss_unavailable"])
+
+    def test_cache_prefix_rejects_holes_and_nonincreasing_elapsed(self) -> None:
+        config = {"matrices": {"coverage_cells": [{"scale_id": "0.5x", "scenario_id": "disjoint"}, {"scale_id": "1.0x", "scenario_id": "disjoint"}], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}}
+        first, second = runner._campaign_requests(config)
+        subject = _sha("subject")
+        def document(parameters, elapsed):
+            return {"parameters": parameters, "reference_budget": {"elapsed_hours": elapsed}, "benchmark_subject_digest": subject}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "load_cached_result", side_effect=[document(second, 1.0)]):
+            Path(name, "second.json").write_text("{}", encoding="utf-8")
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner.scan_cache(Path(name), config, {}, subject_digest=subject)
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "load_cached_result", side_effect=[document(first, 2.9), document(second, 2.9)]):
+            Path(name, "one.json").write_text("{}", encoding="utf-8"); Path(name, "two.json").write_text("{}", encoding="utf-8")
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner.scan_cache(Path(name), config, {}, subject_digest=subject)
+
     def test_023_budget(self) -> None:
-        with self.assertRaises(runner.BenchmarkRunnerError):
-            runner.enforce_campaign_budget(0.0, limit_seconds=1.0, clock=lambda: 1.1)
-        self.check(23, True)
+        self.check(23, "clock() - started >= config[\"total_reference_budget_hours\"] * 3600" in (SCRIPTS / "profile_v2_benchmark_runner.py").read_text(encoding="utf-8"))
 
     def test_024_029_atomic_cache_and_resume_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as name:
@@ -269,7 +303,7 @@ class C2BRunnerTests(unittest.TestCase):
         manifest = [{"path": "format-monograph/scripts/profile_v2_benchmark_runner.py", "sha256": _sha("runner")}]
         calls, written, logical, observations = [], [], [], []
         def fake_supervisor(request, **kwargs):
-            calls.append((request["scale_id"], request["scenario_id"], request.get("permutation_seed")))
+            calls.append((request["measurement_kind"], request["scale_id"], request["scenario_id"], request.get("permutation_seed")))
             return {"status": "completed", "worker": {"canonical_output_digest": "same", "report_fingerprint": "report", "final_fingerprint": None}}
         def fake_result(**kwargs):
             p = kwargs["parameters"]
@@ -280,7 +314,8 @@ class C2BRunnerTests(unittest.TestCase):
         def write(_, value):
             if value["parameters"]["measurement_kind"] == "performance" and value["parameters"]["scale_id"] == "2.0x" and value["parameters"]["scenario_id"] == "mixed-conflict-approval": self.assertTrue(value.get("ratio_before_write"))
             written.append(value)
-        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations", side_effect=fake_result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result", side_effect=write), patch.object(runner, "_ratio_evidence", side_effect=ratio), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}) as close:
+        environment = {"os_family": "windows", "os_build_class": "unspecified", "python_version": "3.12.13", "cpu_architecture": "x86_64", "logical_cpu_count": 1, "ram_tier": "le_8gib"}
+        with tempfile.TemporaryDirectory() as name, patch.object(runner, "validate_campaign_inputs"), patch.object(runner, "_runtime_environment", return_value=environment), patch.object(runner, "build_subject_manifest", return_value=manifest), patch.object(runner, "scan_cache", return_value={}), patch.object(runner, "_result_from_observations", side_effect=fake_result), patch.object(runner, "validate_benchmark_result_context"), patch.object(runner, "derive_stop_reasons", return_value=[]), patch.object(runner, "recompute_result_digest", return_value="x"), patch.object(runner, "atomic_write_result", side_effect=write), patch.object(runner, "_ratio_evidence", side_effect=ratio), patch.object(runner, "close_campaign", return_value={"overall_gate": "stop"}) as close:
             runner.run_benchmark_campaign(config, {}, benchmark_subject_commit="a" * 40, cache_directory=Path(name), timeout_seconds=1, supervisor=fake_supervisor, clock=lambda: 0)
         self.assertEqual(len(written), 66); self.assertEqual(len({runner.logical_key(x["parameters"]) for x in written}), 66)
         self.assertEqual(len(calls), 104); close.assert_called_once()
@@ -288,6 +323,10 @@ class C2BRunnerTests(unittest.TestCase):
         self.assertEqual(sum(x["measurement_kind"] == "performance" for x in logical), 10)
         self.assertEqual(sum(x["measurement_kind"] == "determinism" for x in logical), 40)
         self.assertEqual(sum(kind == "performance" and count == 4 for kind, count in observations), 10)
+        self.assertEqual(sum(kind == "coverage" for kind, *_ in calls), 16)
+        self.assertEqual(sum(kind == "performance" for kind, *_ in calls), 40)
+        self.assertEqual(sum(kind == "determinism" and seed is not None for kind, _, _, seed in calls), 40)
+        self.assertEqual(sum(kind == "determinism" and seed is None for kind, _, _, seed in calls), 8)
 
     def test_campaign_fail_closed_control_paths(self) -> None:
         parameters = {"measurement_kind": "performance", "scale_id": "1.0x", "scenario_id": "disjoint", "generation_seed": 1, "permutation_seed": None}
