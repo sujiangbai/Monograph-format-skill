@@ -282,6 +282,18 @@ def build_subject_manifest(benchmark_subject_commit: str, *, repository: Path | 
     return manifest
 
 
+def _canonical_worktree_subject_bytes(raw: bytes) -> bytes:
+    """Permit only UTF-8 CRLF checkout spelling of a text subject blob."""
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BenchmarkRunnerError("subject worktree file is not UTF-8") from exc
+    normalized = raw.replace(b"\r\n", b"\n")
+    if b"\r" in normalized:
+        raise BenchmarkRunnerError("subject worktree contains lone CR")
+    return normalized
+
+
 def validate_subject_manifest_worktree(manifest: list[dict[str, str]]) -> None:
     """Fail closed unless the executing worktree exactly matches its subject."""
     root = Path(__file__).resolve().parents[2]
@@ -297,16 +309,7 @@ def validate_subject_manifest_worktree(manifest: list[dict[str, str]]) -> None:
         try:
             if not stat.S_ISREG(candidate.stat().st_mode):
                 raise BenchmarkRunnerError("subject path is not a regular file")
-            raw = candidate.read_bytes()
-            try:
-                raw.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise BenchmarkRunnerError("subject worktree file is not UTF-8") from exc
-            # The only permitted checkout equivalence is standard CRLF -> LF.
-            normalized = raw.replace(b"\r\n", b"\n")
-            if b"\r" in normalized:
-                raise BenchmarkRunnerError("subject worktree contains lone CR")
-            actual = _sha(normalized)
+            actual = _sha(_canonical_worktree_subject_bytes(candidate.read_bytes()))
         except OSError as exc:
             raise BenchmarkRunnerError("subject worktree file unavailable") from exc
         if actual != expected:

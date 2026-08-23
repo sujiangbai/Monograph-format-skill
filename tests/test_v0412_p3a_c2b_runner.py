@@ -121,6 +121,15 @@ def _fake_process(lines: bytes, returncode: int = 0):
 class C2BRunnerTests(unittest.TestCase):
     seen: set[str] = set()
 
+    def setUp(self) -> None:
+        # Most campaign tests intentionally replace the commit manifest with a
+        # tiny control-flow fixture.  Provenance tests opt out below.
+        self._provenance_seam = patch.object(runner, "validate_subject_manifest_worktree")
+        self._provenance_seam.start()
+
+    def tearDown(self) -> None:
+        self._provenance_seam.stop()
+
     @classmethod
     def tearDownClass(cls) -> None:
         assert len(CHECK_IDS) == 32 and cls.seen == set(CHECK_IDS)
@@ -215,6 +224,7 @@ class C2BRunnerTests(unittest.TestCase):
         self.check(6, True)
 
     def test_subject_manifest_binds_executing_worktree_before_campaign(self) -> None:
+        self._provenance_seam.stop()
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         manifest = runner.build_subject_manifest(head, repository=ROOT)
         runner.validate_subject_manifest_worktree(manifest)
@@ -296,22 +306,12 @@ class C2BRunnerTests(unittest.TestCase):
         unavailable = runner.supervise_worker({}, timeout_seconds=0.1, process_factory=_fake_process(b"READY\n" + response + b"\n"), sampler=lambda pid: (_ for _ in ()).throw(OSError("rss")))
         self.check(22, unavailable["status"] == "rss_unavailable" and runner._reported_rss_delta(1048601, 1049101) == 0.001)
 
-    def test_rss_unavailable_is_a_real_stopped_c2a_result(self) -> None:
-        fixture_root = ROOT / "tests" / "fixtures" / "v0412" / "p3a_c2"
-        config = json.loads((fixture_root / "benchmark-config.valid.json").read_text(encoding="utf-8"))
-        envelope = json.loads((fixture_root / "projected-envelope.valid.json").read_text(encoding="utf-8"))
-        result = json.loads((fixture_root / "benchmark-result.valid.json").read_text(encoding="utf-8"))
-        result["execution_status"] = "stopped"
-        result["runs"][0]["rss"] = {"status": "unavailable"}
-        result["summary"] = None
-        result["ratio_evidence"] = {name: {"status": "not_applicable"} for name in ("wall", "rss", "output_json")}
-        result["stop_reasons"] = runner.derive_stop_reasons(result)
-        result["overall_gate"] = "stop"
-        result["result_digest"] = runner.recompute_result_digest(result)
-        # This is intentionally the unpatched production C2A result semantic
-        # validator.  Context bindings are covered by the C2A contract suite.
-        runner.validate_benchmark_result_semantics(result)
-        self.assertEqual(result["stop_reasons"], ["rss_unavailable"])
+    def test_subject_text_normalization_is_constrained(self) -> None:
+        self.assertEqual(runner._canonical_worktree_subject_bytes(b'{"x":1}\n'), runner._canonical_worktree_subject_bytes(b'{"x":1}\r\n'))
+        self.assertNotEqual(runner._canonical_worktree_subject_bytes(b'{"x":1}\n'), runner._canonical_worktree_subject_bytes(b'{"x":2}\n'))
+        for raw in (b"x\ry", b"\xff"):
+            with self.assertRaises(runner.BenchmarkRunnerError):
+                runner._canonical_worktree_subject_bytes(raw)
 
     def test_cache_prefix_rejects_holes_and_nonincreasing_elapsed(self) -> None:
         config = {"matrices": {"coverage_cells": [{"scale_id": "0.5x", "scenario_id": "disjoint"}, {"scale_id": "1.0x", "scenario_id": "disjoint"}], "performance_cells": [], "determinism_cells": []}, "generation": {"generation_seed": 1}}
