@@ -34,7 +34,6 @@ from profile_v2_benchmark import (
 )
 from profile_v2_canonical import canonical_data_digest, stamp_intent_semantic_fingerprint_v041
 from profile_v2_composer import apply_intent_resolutions_v041, compose_intent_profile_v041
-from profile_v2_artifacts import validate_intent_artifact_v041
 from profile_v2_registry import load_registry
 from profile_v2_scope import normalize_scope, normalized_property_scope_key
 
