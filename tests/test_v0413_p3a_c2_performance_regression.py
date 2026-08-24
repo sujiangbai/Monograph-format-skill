@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import copy
+import concurrent.futures
 import hashlib
 import json
+import os
 import sys
 import time
 import unittest
@@ -17,6 +19,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import profile_v2_benchmark_runner as runner
 import profile_v2_composer as composer
+import profile_v2_artifacts as artifacts
 from profile_v2_canonical import stamp_intent_semantic_fingerprint_v041
 from profile_v2_composer import ComposerContractError, ComposerDisabledError
 
@@ -102,19 +105,30 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
         original = copy.deepcopy(assets)
         calls: list[str] = []
         mutate_once = {"done": False}
-        validate = composer.validate_intent_artifact_v041
+        original_factory = composer._new_intent_validation_session_v041
 
-        def observed_validate(document: dict) -> None:
-            calls.append(document.get("artifact_kind", ""))
-            if not mutate_once["done"]:
-                mutate_once["done"] = True
-                assets[0]["activation"] = "rejected"
-                assets[0]["rules"][0]["status"] = "rejected"
-                assets[0]["rules"][0]["properties"][0]["value"]["value"] = "caller-mutated"
-                manifest["features"]["monograph_base_v041"] = False
-            validate(document)
+        class ObservedSession:
+            def __init__(self) -> None:
+                self._inner = original_factory()
 
-        with patch.object(composer, "validate_intent_artifact_v041", side_effect=observed_validate):
+            @property
+            def registry(self) -> dict:
+                return self._inner.registry
+
+            def validate(self, document: dict):
+                calls.append(document.get("artifact_kind", ""))
+                if not mutate_once["done"]:
+                    mutate_once["done"] = True
+                    assets[0]["activation"] = "rejected"
+                    assets[0]["rules"][0]["status"] = "rejected"
+                    assets[0]["rules"][0]["properties"][0]["value"]["value"] = "caller-mutated"
+                    manifest["features"]["monograph_base_v041"] = False
+                return self._inner.validate(document)
+
+            def close(self) -> None:
+                self._inner.close()
+
+        with patch.object(composer, "_new_intent_validation_session_v041", side_effect=ObservedSession):
             composed = self._compose(assets, manifest)
             approvals = [
                 _approval_for(composed.report, ordinal)
@@ -139,9 +153,11 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
         self.assertEqual("rejected", assets[0]["rules"][0]["status"])
         self.assertEqual("caller-mutated", assets[0]["rules"][0]["properties"][0]["value"]["value"])
         self.assertFalse(manifest["features"]["monograph_base_v041"])
+        self.assertEqual(2, calls.count("feature-activation-manifest"))
         self.assertEqual(len(original), calls.count("layered-rule-asset"))
-        self.assertGreaterEqual(calls.count("conflict-report"), 2)
-        self.assertGreaterEqual(calls.count("final-execution-profile"), 1)
+        self.assertEqual(2, calls.count("conflict-report"))
+        self.assertEqual(len(approvals), calls.count("qa-approval-artifact"))
+        self.assertEqual(1, calls.count("final-execution-profile"))
         self.assertEqual(expected["rule_fragment"], composed.metrics.input_asset_count)
 
     def test_direct_composer_remains_fail_closed_without_runner(self) -> None:
@@ -154,24 +170,106 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
 
     def test_content_bound_prepared_snapshot_rejects_post_validation_tamper(self) -> None:
         assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "disjoint", 41)
-        adapter = composer._intent_adapter_v041()
-        prepared = composer._prepare_intent_snapshot_v041(
-            assets, runner.feature_manifest(), adapter
-        )
-        prepared.rule_assets[0]["rules"][0]["properties"][0]["value"]["value"] = "tampered-after-validation"
-        with self.assertRaises(ComposerContractError):
-            composer._build_report_documents(
-                prepared.rule_assets,
-                prepared.feature_manifest,
-                adapter=adapter,
-                input_fingerprint=_digest("c2p-source"),
-                structure_fingerprint=_digest("c2p-structure"),
-                artifact_id="conflict-report:c2p-tamper",
-                created_by_tool=_tool(),
-                generated_at="2026-08-24T00:00:00Z",
-                intent_contract=True,
-                prepared_intent=prepared,
+        session = artifacts._new_intent_validation_session_v041()
+        try:
+            adapter = composer._intent_adapter_v041(session)
+            prepared = composer._prepare_intent_snapshot_v041(
+                assets, runner.feature_manifest(), adapter
             )
+            prepared.rule_assets[0]["rules"][0]["properties"][0]["value"]["value"] = "tampered-after-validation"
+            with self.assertRaises(ComposerContractError):
+                composer._build_report_documents(
+                    prepared.rule_assets,
+                    prepared.feature_manifest,
+                    adapter=adapter,
+                    input_fingerprint=_digest("c2p-source"),
+                    structure_fingerprint=_digest("c2p-structure"),
+                    artifact_id="conflict-report:c2p-tamper",
+                    created_by_tool=_tool(),
+                    generated_at="2026-08-24T00:00:00Z",
+                    intent_contract=True,
+                    prepared_intent=prepared,
+                )
+        finally:
+            session.close()
+
+    def test_public_and_private_session_validation_have_identical_results(self) -> None:
+        assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "disjoint", 41)
+        corpus = [runner.feature_manifest(), assets[0]]
+        session = artifacts._new_intent_validation_session_v041()
+        try:
+            for document in corpus:
+                self.assertEqual(
+                    artifacts.validate_intent_artifact_v041(document).document,
+                    session.validate(document).document,
+                )
+            invalid = copy.deepcopy(corpus[0])
+            invalid["registry_contract_version"] = "9.9"
+            with self.assertRaises(artifacts.ArtifactContractError) as public_error:
+                artifacts.validate_intent_artifact_v041(invalid)
+            with self.assertRaises(artifacts.ArtifactContractError) as session_error:
+                session.validate(invalid)
+            self.assertEqual(type(public_error.exception), type(session_error.exception))
+            self.assertEqual(str(public_error.exception), str(session_error.exception))
+        finally:
+            session.close()
+
+    def test_private_session_rejects_use_after_close_and_is_call_local(self) -> None:
+        first = artifacts._new_intent_validation_session_v041()
+        second = artifacts._new_intent_validation_session_v041()
+        self.assertIsNot(first, second)
+        self.assertIsNot(first.registry, second.registry)
+        first.close()
+        with self.assertRaises(artifacts.ArtifactContractError):
+            first.validate(runner.feature_manifest())
+        second.validate(runner.feature_manifest())
+        second.close()
+
+    def test_session_reuses_only_route_resources_not_document_results(self) -> None:
+        assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "disjoint", 41)
+        session = artifacts._new_intent_validation_session_v041()
+        try:
+            session.validate(runner.feature_manifest())
+            first = session.validate(assets[0])
+            second = session.validate(assets[1])
+            self.assertIsNot(first.document, second.document)
+            self.assertEqual(1, len(session._registries))
+            self.assertEqual(2, len(session._validators))
+            self.assertEqual(1, len(session._authorities))
+        finally:
+            session.close()
+
+    def test_concurrent_composes_create_distinct_call_local_sessions(self) -> None:
+        assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "disjoint", 41)
+        seen: list[object] = []
+        factory = composer._new_intent_validation_session_v041
+
+        class ObservedSession:
+            def __init__(self) -> None:
+                self._inner = factory()
+                seen.append(self._inner)
+
+            @property
+            def registry(self) -> dict:
+                return self._inner.registry
+
+            def validate(self, document: dict):
+                return self._inner.validate(document)
+
+            def close(self) -> None:
+                self._inner.close()
+
+        with patch.object(composer, "_new_intent_validation_session_v041", side_effect=ObservedSession):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(
+                    executor.map(
+                        lambda _: self._compose(copy.deepcopy(assets), runner.feature_manifest()),
+                        range(2),
+                    )
+                )
+        self.assertEqual(["resolvable", "resolvable"], [item.status for item in results])
+        self.assertEqual(2, len(seen))
+        self.assertIsNot(seen[0], seen[1])
 
     def test_committed_old_h_micro_golden_matches_h2(self) -> None:
         """The expected values were generated once by H, never by this implementation."""
@@ -214,6 +312,10 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
         }
         self.assertEqual(expected, actual)
 
+    @unittest.skipUnless(
+        os.environ.get("PROFILE_V2_RUN_FORMAL_SHAPED") == "1",
+        "formal-shaped structural invariant requires explicit final-head invocation",
+    )
     def test_frozen_formal_shape_is_structural_invariant_only(self) -> None:
         """Structural invariant only: not a Pilot, campaign, or 60/120-second gate."""
         config = json.loads(FORMAL_CONFIG.read_text(encoding="utf-8"))
@@ -221,14 +323,25 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
             config, "0.5x", "dense-crossing", 41, permutation_seed=None
         )
         calls: list[str] = []
-        validate = composer.validate_intent_artifact_v041
+        factory = composer._new_intent_validation_session_v041
 
-        def observed_validate(document: dict) -> None:
-            calls.append(document.get("artifact_kind", ""))
-            validate(document)
+        class ObservedSession:
+            def __init__(self) -> None:
+                self._inner = factory()
+
+            @property
+            def registry(self) -> dict:
+                return self._inner.registry
+
+            def validate(self, document: dict):
+                calls.append(document.get("artifact_kind", ""))
+                return self._inner.validate(document)
+
+            def close(self) -> None:
+                self._inner.close()
 
         started = time.monotonic()
-        with patch.object(composer, "validate_intent_artifact_v041", side_effect=observed_validate):
+        with patch.object(composer, "_new_intent_validation_session_v041", side_effect=ObservedSession):
             composed = self._compose(assets, runner.feature_manifest())
         elapsed = time.monotonic() - started
         self.assertGreater(elapsed, 0.0)

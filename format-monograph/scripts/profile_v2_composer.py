@@ -18,10 +18,10 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from profile_v2_artifacts import (
     ArtifactContractError,
     ProfileV2DisabledError,
+    _IntentValidationSessionV041,
+    _new_intent_validation_session_v041,
     profile_v2_composer_contract_enabled,
-    profile_v2_intent_contract_enabled,
     validate_artifact,
-    validate_intent_artifact_v041,
 )
 from profile_v2_authority import (
     authority_contract_fingerprint,
@@ -209,16 +209,29 @@ def _production_adapter() -> _ContractAdapter:
     )
 
 
-def _intent_adapter_v041() -> _ContractAdapter:
-    registry = load_registry(
-        version="2.2", validation_context="declaration_intent"
+def _intent_feature_enabled_v041(manifest: dict[str, Any] | None) -> bool:
+    """Check fields only after the compose-local session has validated the manifest."""
+
+    if manifest is None:
+        return False
+    features = manifest.get("features", {})
+    return bool(
+        manifest.get("artifact_kind") == "feature-activation-manifest"
+        and manifest.get("schema_version") == "2.2"
+        and features.get("profile_v2_schema") is True
+        and features.get("profile_v2_composer") is True
+        and features.get("monograph_base_v041") is True
+        and features.get("final_ready_eligible") is False
     )
 
+
+def _intent_adapter_v041(session: _IntentValidationSessionV041) -> _ContractAdapter:
+
     return _ContractAdapter(
-        registry=registry,
-        validate=lambda document: validate_intent_artifact_v041(document),
+        registry=session.registry,
+        validate=session.validate,
         stamp=stamp_intent_semantic_fingerprint_v041,
-        feature_enabled=profile_v2_intent_contract_enabled,
+        feature_enabled=_intent_feature_enabled_v041,
         registry_validation_context="declaration_intent",
     )
 
@@ -1088,18 +1101,20 @@ def _apply_report(
     artifact_id: str,
     created_by_tool: dict[str, Any],
     intent_contract: bool = False,
+    report_prevalidated: bool = False,
 ) -> dict[str, Any]:
     original_report = deepcopy(report)
     original_approvals = deepcopy(list(approvals))
-    try:
-        adapter.validate(report)
-    except (ArtifactContractError, ValueError) as exc:
-        return _application_result(
-            "fatal",
-            original_report,
-            None,
-            [_application_diagnostic("invalid_report", str(exc))],
-        )
+    if not report_prevalidated:
+        try:
+            adapter.validate(report)
+        except (ArtifactContractError, ValueError) as exc:
+            return _application_result(
+                "fatal",
+                original_report,
+                None,
+                [_application_diagnostic("invalid_report", str(exc))],
+            )
     if report["fatal_diagnostics"]:
         return _application_result("fatal", original_report, None, [])
     if report["unresolvable_blockers"] or any(
@@ -1400,12 +1415,18 @@ def _prepare_intent_snapshot_v041(
 
     prepared_assets = tuple(deepcopy(item) for item in rule_assets)
     prepared_manifest = deepcopy(feature_manifest)
+    try:
+        adapter.validate(prepared_manifest)
+    except ArtifactContractError as exc:
+        raise ComposerDisabledError(
+            "profile_v2_schema, profile_v2_composer, and monograph_base_v041 "
+            "must all be explicitly true in a valid 2.2 manifest."
+        ) from exc
     if not adapter.feature_enabled(prepared_manifest):
         raise ComposerDisabledError(
             "profile_v2_schema, profile_v2_composer, and monograph_base_v041 "
             "must all be explicitly true in a valid 2.2 manifest."
         )
-    adapter.validate(prepared_manifest)
     expected, expected_keys = _intent_expected_inventory_v041(
         prepared_assets, adapter
     )
@@ -1673,41 +1694,45 @@ def compose_intent_profile_v041(
 ) -> IntentCompositionResult:
     """Compose a disabled declaration-intent report; no runtime imports this API."""
 
-    adapter = _intent_adapter_v041()
-    prepared = _prepare_intent_snapshot_v041(
-        rule_assets, feature_manifest, adapter
-    )
-    report_build = _build_report_documents(
-        prepared.rule_assets,
-        prepared.feature_manifest,
-        adapter=adapter,
-        input_fingerprint=input_fingerprint,
-        structure_fingerprint=structure_fingerprint,
-        artifact_id=artifact_id,
-        created_by_tool=created_by_tool,
-        generated_at=generated_at,
-        intent_contract=True,
-        prepared_intent=prepared,
-    )
-    report = report_build.report
-    _verify_intent_coverage_v041(prepared.expected_inventory, report)
-    metrics = (
-        _intent_metrics_v041(
-            prepared.rule_assets,
-            prepared.expected_keys,
-            report,
-            max_repartition_depth=report_build.max_repartition_depth,
+    session = _new_intent_validation_session_v041()
+    try:
+        adapter = _intent_adapter_v041(session)
+        prepared = _prepare_intent_snapshot_v041(
+            rule_assets, feature_manifest, adapter
         )
-        if include_metrics
-        else None
-    )
-    return IntentCompositionResult(
-        status=report["proposal_status"],
-        report=deepcopy(report),
-        final_profile=None,
-        application_diagnostics=(),
-        metrics=metrics,
-    )
+        report_build = _build_report_documents(
+            prepared.rule_assets,
+            prepared.feature_manifest,
+            adapter=adapter,
+            input_fingerprint=input_fingerprint,
+            structure_fingerprint=structure_fingerprint,
+            artifact_id=artifact_id,
+            created_by_tool=created_by_tool,
+            generated_at=generated_at,
+            intent_contract=True,
+            prepared_intent=prepared,
+        )
+        report = report_build.report
+        _verify_intent_coverage_v041(prepared.expected_inventory, report)
+        metrics = (
+            _intent_metrics_v041(
+                prepared.rule_assets,
+                prepared.expected_keys,
+                report,
+                max_repartition_depth=report_build.max_repartition_depth,
+            )
+            if include_metrics
+            else None
+        )
+        return IntentCompositionResult(
+            status=report["proposal_status"],
+            report=deepcopy(report),
+            final_profile=None,
+            application_diagnostics=(),
+            metrics=metrics,
+        )
+    finally:
+        session.close()
 
 
 def apply_intent_resolutions_v041(
@@ -1723,45 +1748,56 @@ def apply_intent_resolutions_v041(
 ) -> IntentCompositionResult:
     """Mechanically apply bound 2.2 approvals to a disabled 2.3 intent report."""
 
-    adapter = _intent_adapter_v041()
-    if not adapter.feature_enabled(feature_manifest):
-        raise ComposerDisabledError("The V0.4.1 intent feature contract is disabled.")
-    if (
-        report.get("bindings", {}).get("feature_activation_fingerprint")
-        != feature_manifest.get("semantic_fingerprint")
-    ):
-        raise ComposerContractError("Intent report is bound to a different feature manifest.")
-    adapter.validate(report)
-    _verify_intent_report_coverage_v041(report)
-    result = _apply_report(
-        report,
-        approvals,
-        adapter=adapter,
-        task_id=task_id,
-        task_fingerprint=task_fingerprint,
-        artifact_id=artifact_id,
-        created_by_tool=created_by_tool,
-        intent_contract=True,
-    )
-    final_profile = result["final_profile"]
-    if final_profile is not None:
-        for field, expected_value in (
-            ("activation", "disabled"),
-            ("runtime_eligible", False),
-            ("final_ready_eligible", False),
-            ("delivery_allowed", False),
+    session = _new_intent_validation_session_v041()
+    try:
+        adapter = _intent_adapter_v041(session)
+        try:
+            adapter.validate(feature_manifest)
+        except ArtifactContractError as exc:
+            raise ComposerDisabledError(
+                "The V0.4.1 intent feature contract is disabled."
+            ) from exc
+        if not adapter.feature_enabled(feature_manifest):
+            raise ComposerDisabledError("The V0.4.1 intent feature contract is disabled.")
+        if (
+            report.get("bindings", {}).get("feature_activation_fingerprint")
+            != feature_manifest.get("semantic_fingerprint")
         ):
-            if final_profile.get(field) != expected_value:
-                raise ComposerContractError(
-                    f"Intent final profile violates disabled delivery contract: {field}"
-                )
-        canonical_intent_semantic_bytes_v041(final_profile)
-    return IntentCompositionResult(
-        status=result["status"],
-        report=deepcopy(result["report"]),
-        final_profile=deepcopy(final_profile),
-        application_diagnostics=tuple(
-            deepcopy(item) for item in result["application_diagnostics"]
-        ),
-        metrics=metrics,
-    )
+            raise ComposerContractError("Intent report is bound to a different feature manifest.")
+        adapter.validate(report)
+        _verify_intent_report_coverage_v041(report)
+        result = _apply_report(
+            report,
+            approvals,
+            adapter=adapter,
+            task_id=task_id,
+            task_fingerprint=task_fingerprint,
+            artifact_id=artifact_id,
+            created_by_tool=created_by_tool,
+            intent_contract=True,
+            report_prevalidated=True,
+        )
+        final_profile = result["final_profile"]
+        if final_profile is not None:
+            for field, expected_value in (
+                ("activation", "disabled"),
+                ("runtime_eligible", False),
+                ("final_ready_eligible", False),
+                ("delivery_allowed", False),
+            ):
+                if final_profile.get(field) != expected_value:
+                    raise ComposerContractError(
+                        f"Intent final profile violates disabled delivery contract: {field}"
+                    )
+            canonical_intent_semantic_bytes_v041(final_profile)
+        return IntentCompositionResult(
+            status=result["status"],
+            report=deepcopy(result["report"]),
+            final_profile=deepcopy(final_profile),
+            application_diagnostics=tuple(
+                deepcopy(item) for item in result["application_diagnostics"]
+            ),
+            metrics=metrics,
+        )
+    finally:
+        session.close()
