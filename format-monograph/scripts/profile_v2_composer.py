@@ -153,6 +153,16 @@ class _PreparedIntentSnapshot:
     inventory_digest: str
 
 
+@dataclass(frozen=True)
+class _PreparedIntentApplySnapshot:
+    """Private, content-bound apply inputs consumed after their one full validation."""
+
+    report: dict[str, Any]
+    approvals: tuple[dict[str, Any], ...]
+    feature_manifest: dict[str, Any]
+    content_digest: str
+
+
 def _canonical_value(value: Any) -> Any:
     if isinstance(value, dict):
         normalized: dict[str, Any] = {}
@@ -1101,11 +1111,11 @@ def _apply_report(
     artifact_id: str,
     created_by_tool: dict[str, Any],
     intent_contract: bool = False,
-    report_prevalidated: bool = False,
+    prepared_intent_apply: _PreparedIntentApplySnapshot | None = None,
 ) -> dict[str, Any]:
-    original_report = deepcopy(report)
-    original_approvals = deepcopy(list(approvals))
-    if not report_prevalidated:
+    if prepared_intent_apply is None:
+        original_report = deepcopy(report)
+        original_approvals = deepcopy(list(approvals))
         try:
             adapter.validate(report)
         except (ArtifactContractError, ValueError) as exc:
@@ -1115,6 +1125,12 @@ def _apply_report(
                 None,
                 [_application_diagnostic("invalid_report", str(exc))],
             )
+    else:
+        _verify_prepared_intent_apply_snapshot_v041(prepared_intent_apply)
+        report = prepared_intent_apply.report
+        approvals = prepared_intent_apply.approvals
+        original_report = report
+        original_approvals = approvals
     if report["fatal_diagnostics"]:
         return _application_result("fatal", original_report, None, [])
     if report["unresolvable_blockers"] or any(
@@ -1457,6 +1473,63 @@ def _verify_prepared_intent_snapshot_v041(
         raise ComposerContractError("Validated intent snapshot inventory changed.")
 
 
+def _intent_apply_snapshot_digest_v041(
+    report: Mapping[str, Any],
+    approvals: Sequence[Mapping[str, Any]],
+    feature_manifest: Mapping[str, Any],
+) -> str:
+    return _digest(
+        {
+            "report": report,
+            "approvals": list(approvals),
+            "feature_manifest": feature_manifest,
+        }
+    )
+
+
+def _prepare_intent_apply_snapshot_v041(
+    report: dict[str, Any],
+    approvals: Sequence[dict[str, Any]],
+    feature_manifest: dict[str, Any],
+    adapter: _ContractAdapter,
+) -> _PreparedIntentApplySnapshot:
+    """Copy before validation so apply never observes caller-owned mutable JSON."""
+
+    prepared_report = deepcopy(report)
+    prepared_approvals = tuple(deepcopy(item) for item in approvals)
+    prepared_manifest = deepcopy(feature_manifest)
+    try:
+        adapter.validate(prepared_manifest)
+    except ArtifactContractError as exc:
+        raise ComposerDisabledError("The V0.4.1 intent feature contract is disabled.") from exc
+    if not adapter.feature_enabled(prepared_manifest):
+        raise ComposerDisabledError("The V0.4.1 intent feature contract is disabled.")
+    if (
+        prepared_report.get("bindings", {}).get("feature_activation_fingerprint")
+        != prepared_manifest.get("semantic_fingerprint")
+    ):
+        raise ComposerContractError("Intent report is bound to a different feature manifest.")
+    adapter.validate(prepared_report)
+    _verify_intent_report_coverage_v041(prepared_report)
+    return _PreparedIntentApplySnapshot(
+        report=prepared_report,
+        approvals=prepared_approvals,
+        feature_manifest=prepared_manifest,
+        content_digest=_intent_apply_snapshot_digest_v041(
+            prepared_report, prepared_approvals, prepared_manifest
+        ),
+    )
+
+
+def _verify_prepared_intent_apply_snapshot_v041(
+    prepared: _PreparedIntentApplySnapshot,
+) -> None:
+    if prepared.content_digest != _intent_apply_snapshot_digest_v041(
+        prepared.report, prepared.approvals, prepared.feature_manifest
+    ):
+        raise ComposerContractError("Validated intent apply snapshot content changed.")
+
+
 def _validate_intent_asset_registry_binding_v041(
     asset: Mapping[str, Any], registry: Mapping[str, Any]
 ) -> None:
@@ -1751,31 +1824,19 @@ def apply_intent_resolutions_v041(
     session = _new_intent_validation_session_v041()
     try:
         adapter = _intent_adapter_v041(session)
-        try:
-            adapter.validate(feature_manifest)
-        except ArtifactContractError as exc:
-            raise ComposerDisabledError(
-                "The V0.4.1 intent feature contract is disabled."
-            ) from exc
-        if not adapter.feature_enabled(feature_manifest):
-            raise ComposerDisabledError("The V0.4.1 intent feature contract is disabled.")
-        if (
-            report.get("bindings", {}).get("feature_activation_fingerprint")
-            != feature_manifest.get("semantic_fingerprint")
-        ):
-            raise ComposerContractError("Intent report is bound to a different feature manifest.")
-        adapter.validate(report)
-        _verify_intent_report_coverage_v041(report)
+        prepared = _prepare_intent_apply_snapshot_v041(
+            report, approvals, feature_manifest, adapter
+        )
         result = _apply_report(
-            report,
-            approvals,
+            prepared.report,
+            prepared.approvals,
             adapter=adapter,
             task_id=task_id,
             task_fingerprint=task_fingerprint,
             artifact_id=artifact_id,
             created_by_tool=created_by_tool,
             intent_contract=True,
-            report_prevalidated=True,
+            prepared_intent_apply=prepared,
         )
         final_profile = result["final_profile"]
         if final_profile is not None:

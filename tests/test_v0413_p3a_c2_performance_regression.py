@@ -195,7 +195,20 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
 
     def test_public_and_private_session_validation_have_identical_results(self) -> None:
         assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "disjoint", 41)
-        corpus = [runner.feature_manifest(), assets[0]]
+        manifest = runner.feature_manifest()
+        semantic_invalid = copy.deepcopy(manifest)
+        semantic_invalid["features"]["profile_v2_schema"] = False
+        semantic_invalid = stamp_intent_semantic_fingerprint_v041(semantic_invalid)
+        fingerprint_invalid = copy.deepcopy(manifest)
+        fingerprint_invalid["semantic_fingerprint"] = _digest("wrong-fingerprint")
+        schema_invalid = copy.deepcopy(manifest)
+        schema_invalid["additional_property"] = True
+        route_invalid = copy.deepcopy(manifest)
+        route_invalid["registry_contract_version"] = "9.9"
+        binding_invalid = copy.deepcopy(assets[0])
+        binding_invalid["property_registry_binding"]["registry_fingerprint"] = _digest("wrong-registry")
+        binding_invalid = stamp_intent_semantic_fingerprint_v041(binding_invalid)
+        corpus = [manifest, assets[0]]
         session = artifacts._new_intent_validation_session_v041()
         try:
             for document in corpus:
@@ -203,16 +216,120 @@ class C2PPreparedSnapshotRegressionTests(unittest.TestCase):
                     artifacts.validate_intent_artifact_v041(document).document,
                     session.validate(document).document,
                 )
-            invalid = copy.deepcopy(corpus[0])
-            invalid["registry_contract_version"] = "9.9"
-            with self.assertRaises(artifacts.ArtifactContractError) as public_error:
-                artifacts.validate_intent_artifact_v041(invalid)
-            with self.assertRaises(artifacts.ArtifactContractError) as session_error:
-                session.validate(invalid)
-            self.assertEqual(type(public_error.exception), type(session_error.exception))
-            self.assertEqual(str(public_error.exception), str(session_error.exception))
+            for invalid in (
+                route_invalid,
+                schema_invalid,
+                semantic_invalid,
+                fingerprint_invalid,
+                binding_invalid,
+            ):
+                with self.subTest(invalid=invalid.get("artifact_kind")):
+                    with self.assertRaises(artifacts.ArtifactContractError) as public_error:
+                        artifacts.validate_intent_artifact_v041(invalid)
+                    with self.assertRaises(artifacts.ArtifactContractError) as session_error:
+                        session.validate(invalid)
+                    self.assertEqual(type(public_error.exception), type(session_error.exception))
+                    self.assertEqual(str(public_error.exception), str(session_error.exception))
         finally:
             session.close()
+
+    def test_apply_uses_only_private_snapshot_after_validation(self) -> None:
+        assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 41)
+        composed = self._compose(assets, runner.feature_manifest())
+        approvals = [
+            _approval_for(composed.report, ordinal)
+            for ordinal in range(len(composed.report["approval_required_conflicts"]))
+        ]
+        caller_report = copy.deepcopy(composed.report)
+        caller_approvals = copy.deepcopy(approvals)
+        caller_manifest = runner.feature_manifest()
+        factory = composer._new_intent_validation_session_v041
+        mutated = {"done": False}
+
+        class ObservedSession:
+            def __init__(self) -> None:
+                self._inner = factory()
+
+            @property
+            def registry(self) -> dict:
+                return self._inner.registry
+
+            def validate(self, document: dict):
+                result = self._inner.validate(document)
+                if not mutated["done"] and document.get("artifact_kind") == "conflict-report":
+                    mutated["done"] = True
+                    caller_report["schema_forbidden"] = True
+                    caller_approvals[0]["schema_forbidden"] = True
+                    caller_manifest["features"]["monograph_base_v041"] = False
+                return result
+
+            def close(self) -> None:
+                self._inner.close()
+
+        with patch.object(composer, "_new_intent_validation_session_v041", side_effect=ObservedSession):
+            applied = composer.apply_intent_resolutions_v041(
+                caller_report,
+                caller_approvals,
+                caller_manifest,
+                task_id="task:c2p-apply-snapshot",
+                task_fingerprint=_digest("c2p-apply-task"),
+                artifact_id="final-execution-profile:c2p-apply-snapshot",
+                created_by_tool=_tool(),
+                metrics=composed.metrics,
+            )
+        self.assertTrue(mutated["done"])
+        self.assertEqual("profile_generated", applied.status)
+        self.assertNotIn("schema_forbidden", applied.report)
+        artifacts.validate_intent_artifact_v041(applied.report)
+        artifacts.validate_intent_artifact_v041(applied.final_profile)
+        self.assertIn("schema_forbidden", caller_report)
+        self.assertIn("schema_forbidden", caller_approvals[0])
+        self.assertFalse(caller_manifest["features"]["monograph_base_v041"])
+
+    def test_prepared_apply_snapshot_rejects_internal_tamper(self) -> None:
+        assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "mixed-conflict-approval", 41)
+        composed = self._compose(assets, runner.feature_manifest())
+        approvals = [_approval_for(composed.report, 0)]
+        session = artifacts._new_intent_validation_session_v041()
+        try:
+            adapter = composer._intent_adapter_v041(session)
+            prepared = composer._prepare_intent_apply_snapshot_v041(
+                composed.report, approvals, runner.feature_manifest(), adapter
+            )
+            prepared.report["schema_forbidden"] = True
+            with self.assertRaises(ComposerContractError):
+                composer._apply_report(
+                    prepared.report,
+                    prepared.approvals,
+                    adapter=adapter,
+                    task_id="task:c2p-tamper",
+                    task_fingerprint=_digest("c2p-tamper-task"),
+                    artifact_id="final-execution-profile:c2p-tamper",
+                    created_by_tool=_tool(),
+                    intent_contract=True,
+                    prepared_intent_apply=prepared,
+                )
+        finally:
+            session.close()
+
+    def test_apply_invalid_report_preserves_artifact_contract_error(self) -> None:
+        assets, _ = runner.generate_assets(MICRO_CONFIG, "1.0x", "disjoint", 41)
+        composed = self._compose(assets, runner.feature_manifest())
+        invalid = copy.deepcopy(composed.report)
+        invalid["schema_forbidden"] = True
+        with self.assertRaises(artifacts.ArtifactContractError) as expected:
+            artifacts.validate_intent_artifact_v041(invalid)
+        with self.assertRaises(artifacts.ArtifactContractError) as actual:
+            composer.apply_intent_resolutions_v041(
+                invalid,
+                [],
+                runner.feature_manifest(),
+                task_id="task:c2p-invalid",
+                task_fingerprint=_digest("c2p-invalid-task"),
+                artifact_id="final-execution-profile:c2p-invalid",
+                created_by_tool=_tool(),
+            )
+        self.assertEqual(str(expected.exception), str(actual.exception))
 
     def test_private_session_rejects_use_after_close_and_is_call_local(self) -> None:
         first = artifacts._new_intent_validation_session_v041()
