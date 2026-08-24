@@ -141,6 +141,18 @@ class _ReportBuild:
     max_repartition_depth: int
 
 
+@dataclass(frozen=True)
+class _PreparedIntentSnapshot:
+    """Private, content-bound handoff from intent preflight to report building."""
+
+    rule_assets: tuple[dict[str, Any], ...]
+    feature_manifest: dict[str, Any]
+    expected_inventory: dict[str, dict[str, Any]]
+    expected_keys: set[tuple[str, str, str]]
+    content_digest: str
+    inventory_digest: str
+
+
 def _canonical_value(value: Any) -> Any:
     if isinstance(value, dict):
         normalized: dict[str, Any] = {}
@@ -504,8 +516,13 @@ def _build_report_documents(
     generated_at: str,
     intent_contract: bool = False,
     intent_expected_inventory: Mapping[str, dict[str, Any]] | None = None,
-    prevalidated_assets: bool = False,
+    prepared_intent: _PreparedIntentSnapshot | None = None,
 ) -> _ReportBuild:
+    if prepared_intent is not None:
+        _verify_prepared_intent_snapshot_v041(prepared_intent)
+        rule_assets = prepared_intent.rule_assets
+        feature_manifest = prepared_intent.feature_manifest
+        intent_expected_inventory = prepared_intent.expected_inventory
     if not rule_assets:
         raise ComposerContractError("Composition requires at least one rule asset.")
     _validate_fingerprint(input_fingerprint, "input_fingerprint")
@@ -539,7 +556,7 @@ def _build_report_documents(
         seen_fingerprints.add(fingerprint)
         bound_fingerprints.append(fingerprint)
         try:
-            if not prevalidated_assets:
+            if prepared_intent is None:
                 adapter.validate(asset)
         except (ArtifactContractError, RegistryContractError, ScopeContractError, ValueError) as exc:
             text = str(exc)
@@ -1351,6 +1368,74 @@ def _intent_expected_inventory_v041(
     return expected, keys
 
 
+def _intent_snapshot_content_digest_v041(
+    rule_assets: Sequence[dict[str, Any]], feature_manifest: Mapping[str, Any]
+) -> str:
+    return _digest(
+        {
+            "rule_assets": list(rule_assets),
+            "feature_manifest": feature_manifest,
+        }
+    )
+
+
+def _intent_snapshot_inventory_digest_v041(
+    expected_inventory: Mapping[str, dict[str, Any]],
+    expected_keys: Iterable[tuple[str, str, str]],
+) -> str:
+    return _digest(
+        {
+            "expected_inventory": expected_inventory,
+            "expected_keys": [list(item) for item in sorted(expected_keys)],
+        }
+    )
+
+
+def _prepare_intent_snapshot_v041(
+    rule_assets: Sequence[dict[str, Any]],
+    feature_manifest: dict[str, Any],
+    adapter: _ContractAdapter,
+) -> _PreparedIntentSnapshot:
+    """Deep-copy before validation so all later work has one verified input view."""
+
+    prepared_assets = tuple(deepcopy(item) for item in rule_assets)
+    prepared_manifest = deepcopy(feature_manifest)
+    if not adapter.feature_enabled(prepared_manifest):
+        raise ComposerDisabledError(
+            "profile_v2_schema, profile_v2_composer, and monograph_base_v041 "
+            "must all be explicitly true in a valid 2.2 manifest."
+        )
+    adapter.validate(prepared_manifest)
+    expected, expected_keys = _intent_expected_inventory_v041(
+        prepared_assets, adapter
+    )
+    return _PreparedIntentSnapshot(
+        rule_assets=prepared_assets,
+        feature_manifest=prepared_manifest,
+        expected_inventory=expected,
+        expected_keys=expected_keys,
+        content_digest=_intent_snapshot_content_digest_v041(
+            prepared_assets, prepared_manifest
+        ),
+        inventory_digest=_intent_snapshot_inventory_digest_v041(
+            expected, expected_keys
+        ),
+    )
+
+
+def _verify_prepared_intent_snapshot_v041(
+    prepared: _PreparedIntentSnapshot,
+) -> None:
+    if prepared.content_digest != _intent_snapshot_content_digest_v041(
+        prepared.rule_assets, prepared.feature_manifest
+    ):
+        raise ComposerContractError("Validated intent snapshot content changed.")
+    if prepared.inventory_digest != _intent_snapshot_inventory_digest_v041(
+        prepared.expected_inventory, prepared.expected_keys
+    ):
+        raise ComposerContractError("Validated intent snapshot inventory changed.")
+
+
 def _validate_intent_asset_registry_binding_v041(
     asset: Mapping[str, Any], registry: Mapping[str, Any]
 ) -> None:
@@ -1589,19 +1674,12 @@ def compose_intent_profile_v041(
     """Compose a disabled declaration-intent report; no runtime imports this API."""
 
     adapter = _intent_adapter_v041()
-    # The private snapshot is the only input seen after validation.
-    prepared_assets = deepcopy(list(rule_assets))
-    prepared_manifest = deepcopy(feature_manifest)
-    if not adapter.feature_enabled(prepared_manifest):
-        raise ComposerDisabledError(
-            "profile_v2_schema, profile_v2_composer, and monograph_base_v041 "
-            "must all be explicitly true in a valid 2.2 manifest."
-        )
-    adapter.validate(prepared_manifest)
-    expected, expected_keys = _intent_expected_inventory_v041(prepared_assets, adapter)
+    prepared = _prepare_intent_snapshot_v041(
+        rule_assets, feature_manifest, adapter
+    )
     report_build = _build_report_documents(
-        prepared_assets,
-        prepared_manifest,
+        prepared.rule_assets,
+        prepared.feature_manifest,
         adapter=adapter,
         input_fingerprint=input_fingerprint,
         structure_fingerprint=structure_fingerprint,
@@ -1609,15 +1687,14 @@ def compose_intent_profile_v041(
         created_by_tool=created_by_tool,
         generated_at=generated_at,
         intent_contract=True,
-        intent_expected_inventory=expected,
-        prevalidated_assets=True,
+        prepared_intent=prepared,
     )
     report = report_build.report
-    _verify_intent_coverage_v041(expected, report)
+    _verify_intent_coverage_v041(prepared.expected_inventory, report)
     metrics = (
         _intent_metrics_v041(
-            prepared_assets,
-            expected_keys,
+            prepared.rule_assets,
+            prepared.expected_keys,
             report,
             max_repartition_depth=report_build.max_repartition_depth,
         )
