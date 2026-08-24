@@ -225,9 +225,7 @@ def compose_cell(config: dict[str, Any], *, scale_id: str, scenario_id: str, gen
     generation_seconds = time.perf_counter() - generated_at
     manifest = feature_manifest()
     validation_at = time.perf_counter()
-    for asset in assets:
-        validate_intent_artifact_v041(asset)
-    validate_intent_artifact_v041(manifest)
+    # Composer owns asset and manifest contract validation for its private snapshot.
     validation_seconds = time.perf_counter() - validation_at
     composed_at = time.perf_counter()
     composed = compose_intent_profile_v041(assets, manifest, input_fingerprint=_sha(b"c2b-source"), structure_fingerprint=_sha(b"c2b-structure"), artifact_id="conflict-report:c2b-%s-%s" % (scale_id, scenario_id), created_by_tool=_tool(), generated_at="2026-08-23T00:00:00Z", include_metrics=True)

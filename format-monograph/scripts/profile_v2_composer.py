@@ -504,6 +504,7 @@ def _build_report_documents(
     generated_at: str,
     intent_contract: bool = False,
     intent_expected_inventory: Mapping[str, dict[str, Any]] | None = None,
+    prevalidated_assets: bool = False,
 ) -> _ReportBuild:
     if not rule_assets:
         raise ComposerContractError("Composition requires at least one rule asset.")
@@ -538,7 +539,8 @@ def _build_report_documents(
         seen_fingerprints.add(fingerprint)
         bound_fingerprints.append(fingerprint)
         try:
-            adapter.validate(asset)
+            if not prevalidated_assets:
+                adapter.validate(asset)
         except (ArtifactContractError, RegistryContractError, ScopeContractError, ValueError) as exc:
             text = str(exc)
             category = (
@@ -1587,15 +1589,19 @@ def compose_intent_profile_v041(
     """Compose a disabled declaration-intent report; no runtime imports this API."""
 
     adapter = _intent_adapter_v041()
-    if not adapter.feature_enabled(feature_manifest):
+    # The private snapshot is the only input seen after validation.
+    prepared_assets = deepcopy(list(rule_assets))
+    prepared_manifest = deepcopy(feature_manifest)
+    if not adapter.feature_enabled(prepared_manifest):
         raise ComposerDisabledError(
             "profile_v2_schema, profile_v2_composer, and monograph_base_v041 "
             "must all be explicitly true in a valid 2.2 manifest."
         )
-    expected, expected_keys = _intent_expected_inventory_v041(rule_assets, adapter)
+    adapter.validate(prepared_manifest)
+    expected, expected_keys = _intent_expected_inventory_v041(prepared_assets, adapter)
     report_build = _build_report_documents(
-        rule_assets,
-        feature_manifest,
+        prepared_assets,
+        prepared_manifest,
         adapter=adapter,
         input_fingerprint=input_fingerprint,
         structure_fingerprint=structure_fingerprint,
@@ -1604,12 +1610,13 @@ def compose_intent_profile_v041(
         generated_at=generated_at,
         intent_contract=True,
         intent_expected_inventory=expected,
+        prevalidated_assets=True,
     )
     report = report_build.report
     _verify_intent_coverage_v041(expected, report)
     metrics = (
         _intent_metrics_v041(
-            rule_assets,
+            prepared_assets,
             expected_keys,
             report,
             max_repartition_depth=report_build.max_repartition_depth,
