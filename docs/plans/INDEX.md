@@ -14,11 +14,12 @@
 | 0.3.1 | 历史 | [v0.3.1-title-heading-normalization.md](v0.3.1-title-heading-normalization.md) | 书名文字块精确居中、标题零缩进、编号覆盖清理及跨 Agent 审计门禁 |
 | 0.3.2 | 历史 | [v0.3.2-selective-field-result-writeback.md](v0.3.2-selective-field-result-writeback.md) | Word 字段结果选择性回写、目录验证、分页一致性及目标软件只读复验 |
 | 0.3.3 | 历史 | [v0.3.3-toc-and-image-integrity.md](v0.3.3-toc-and-image-integrity.md) | 目录纯文本来源、非文字对象拒绝、嵌入图片行距与表内图片可见性 |
-| 0.4.0 | 当前 | [v0.4.0-profile-system-and-long-document-reliability.md](v0.4.0-profile-system-and-long-document-reliability.md) | Profile 分层与扁平化、冻结格式规格、旧规则迁移及长文可靠性总体门禁 |
+| 0.4.0 | 长期格式总纲 | [v0.4.0-profile-system-and-long-document-reliability.md](v0.4.0-profile-system-and-long-document-reliability.md) | 管理冻结格式值与长期目标：Profile 分层、旧规则迁移及长文可靠性总体门禁 |
 | 0.4.1 | 方案 | [v0.4.1-profile-foundation-and-grouped-execution.md](v0.4.1-profile-foundation-and-grouped-execution.md) | Profile 工件分离、确定性合成、monograph-base、七个工作流/至少九个实现 PR 与逐项决策映射 |
 | 0.4.1.1 | 方案 | [v0.4.1.1-p2-contract-correction.md](v0.4.1.1-p2-contract-correction.md) | V0.4.1 P2 契约修订附录：无环工件依赖、权威顺序、作用域分区及 P2b-H/S/C 实施门禁 |
 | 0.4.1.2 | 方案 | [v0.4.1.2-p3-capability-and-asset-freeze.md](v0.4.1.2-p3-capability-and-asset-freeze.md) | V0.4.1 P3 契约修订附录：能力真实性、规则资产拆分、迁移追踪与内部合成性能门禁 |
 | 0.4.1.3 | 方案 | [v0.4.1.3-p3a-c2-performance-contract-correction.md](v0.4.1.3-p3a-c2-performance-contract-correction.md) | P3a-C2 内部 JSON 合成性能 STOP 的契约修订 |
+| 0.4.1.4 | 当前实施规范 | [v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md](v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md) | 水平基础与分阶段真实纵向验收的实施路由/证明时点修订 |
 
 ## 版本规则
 
