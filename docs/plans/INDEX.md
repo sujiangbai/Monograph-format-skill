@@ -21,9 +21,12 @@
 | 0.4.1.3 | 方案 | [v0.4.1.3-p3a-c2-performance-contract-correction.md](v0.4.1.3-p3a-c2-performance-contract-correction.md) | P3a-C2 内部 JSON 合成性能 STOP 的契约修订 |
 | 0.4.1.4 | 当前实施规范（总路由） | [v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md](v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md) | 水平基础与分阶段真实纵向验收的实施路由/证明时点修订 |
 | 0.4.1.5 | 当前实施规范（registry succession 附录） | [v0.4.1.5-append-only-production-registry-succession.md](v0.4.1.5-append-only-production-registry-succession.md) | 生产 property registry 的 append-only successor、阶段所有权与 P3a-R/P3b-B 契约顺序修订 |
+| 0.4.1.6 | 当前实施规范修订 | [v0.4.1.6-registry-semantic-closure-and-matrix-succession.md](v0.4.1.6-registry-semantic-closure-and-matrix-succession.md) | P3a-R registry semantic closure、matrix 1.2/1.3 身份与 current-closure 交接修订 |
 
 ## 版本规则
 
 方案文件是不可变快照。任何修订必须在新分支创建新版本文件并通过 PR 合并，不得修改已有版本正文。
 
 P3 当前实施权威由 V0.4.1.4 总路由与 V0.4.1.5 registry succession 附录共同组成。涉及 production registry succession、P3a-R 文件边界及 P3b-B successor-chain 顺序时，以 V0.4.1.5 第 2 节的逐条关系表为准；其余事项继续以 V0.4.1.4 为准。
+
+涉及 registry semantic closure、matrix 1.2/1.3 身份或 current-closure 交接时，以 V0.4.1.6 为准；其余事项继续沿用 V0.4.1.5、V0.4.1.4、V0.4.1.2、V0.4.1.1 与原始 V0.4.1 方案的未被逐条修订内容。
