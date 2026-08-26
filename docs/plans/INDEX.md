@@ -20,6 +20,7 @@
 | 0.4.1.2 | 方案 | [v0.4.1.2-p3-capability-and-asset-freeze.md](v0.4.1.2-p3-capability-and-asset-freeze.md) | V0.4.1 P3 契约修订附录：能力真实性、规则资产拆分、迁移追踪与内部合成性能门禁 |
 | 0.4.1.3 | 方案 | [v0.4.1.3-p3a-c2-performance-contract-correction.md](v0.4.1.3-p3a-c2-performance-contract-correction.md) | P3a-C2 内部 JSON 合成性能 STOP 的契约修订 |
 | 0.4.1.4 | 当前实施规范 | [v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md](v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md) | 水平基础与分阶段真实纵向验收的实施路由/证明时点修订 |
+| 0.4.1.5 | 方案 | [v0.4.1.5-append-only-production-registry-succession.md](v0.4.1.5-append-only-production-registry-succession.md) | 生产 property registry 的 append-only successor、阶段所有权与 P3a-R/P3b-B 契约顺序修订 |
 
 ## 版本规则
 
