@@ -19,8 +19,11 @@
 | 0.4.1.1 | 方案 | [v0.4.1.1-p2-contract-correction.md](v0.4.1.1-p2-contract-correction.md) | V0.4.1 P2 契约修订附录：无环工件依赖、权威顺序、作用域分区及 P2b-H/S/C 实施门禁 |
 | 0.4.1.2 | 方案 | [v0.4.1.2-p3-capability-and-asset-freeze.md](v0.4.1.2-p3-capability-and-asset-freeze.md) | V0.4.1 P3 契约修订附录：能力真实性、规则资产拆分、迁移追踪与内部合成性能门禁 |
 | 0.4.1.3 | 方案 | [v0.4.1.3-p3a-c2-performance-contract-correction.md](v0.4.1.3-p3a-c2-performance-contract-correction.md) | P3a-C2 内部 JSON 合成性能 STOP 的契约修订 |
-| 0.4.1.4 | 当前实施规范 | [v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md](v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md) | 水平基础与分阶段真实纵向验收的实施路由/证明时点修订 |
+| 0.4.1.4 | 当前实施规范（总路由） | [v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md](v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md) | 水平基础与分阶段真实纵向验收的实施路由/证明时点修订 |
+| 0.4.1.5 | 当前实施规范（registry succession 附录） | [v0.4.1.5-append-only-production-registry-succession.md](v0.4.1.5-append-only-production-registry-succession.md) | 生产 property registry 的 append-only successor、阶段所有权与 P3a-R/P3b-B 契约顺序修订 |
 
 ## 版本规则
 
 方案文件是不可变快照。任何修订必须在新分支创建新版本文件并通过 PR 合并，不得修改已有版本正文。
+
+P3 当前实施权威由 V0.4.1.4 总路由与 V0.4.1.5 registry succession 附录共同组成。涉及 production registry succession、P3a-R 文件边界及 P3b-B successor-chain 顺序时，以 V0.4.1.5 第 2 节的逐条关系表为准；其余事项继续以 V0.4.1.4 为准。
