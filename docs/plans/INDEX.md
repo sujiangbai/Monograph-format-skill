@@ -22,11 +22,12 @@
 | 0.4.1.4 | 当前实施规范（总路由） | [v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md](v0.4.1.4-horizontal-foundation-and-staged-vertical-validation.md) | 水平基础与分阶段真实纵向验收的实施路由/证明时点修订 |
 | 0.4.1.5 | 当前实施规范（registry succession 附录） | [v0.4.1.5-append-only-production-registry-succession.md](v0.4.1.5-append-only-production-registry-succession.md) | 生产 property registry 的 append-only successor、阶段所有权与 P3a-R/P3b-B 契约顺序修订 |
 | 0.4.1.6 | 当前实施规范修订 | [v0.4.1.6-registry-semantic-closure-and-matrix-succession.md](v0.4.1.6-registry-semantic-closure-and-matrix-succession.md) | P3a-R registry semantic closure、matrix 1.2/1.3 身份与 current-closure 交接修订 |
+| 0.4.1.7 | 当前实施规范修订（R1 semantic-domain / R2 restart） | [v0.4.1.7-r1-semantic-domain-completion-and-r2-restart.md](v0.4.1.7-r1-semantic-domain-completion-and-r2-restart.md) | R1 semantic-domain machine contract、独立接受绑定与 R2 restart 门禁修订；docs-only |
 
 ## 版本规则
 
 方案文件是不可变快照。任何修订必须在新分支创建新版本文件并通过 PR 合并，不得修改已有版本正文。
 
-P3 当前实施权威由 V0.4.1.4 总路由、V0.4.1.5 registry succession 附录与 V0.4.1.6 semantic/matrix correction 共同组成。registry 2.3 append-only succession 的一般规则仍以 V0.4.1.5 为准。
+P3 当前实施权威由 V0.4.1.4 总路由、V0.4.1.5 registry succession 附录、V0.4.1.6 semantic/matrix correction 与 V0.4.1.7 R1 semantic-domain / R2 restart correction 共同组成。registry 2.3 append-only succession 的一般规则仍以 V0.4.1.5 为准。
 
-涉及 registry semantic closure、P3a-R 为 matrix 1.2 与 `profile_v2_artifacts.py` 扩展的文件边界、matrix 1.2/1.3 的阶段身份、V0.4.1.6 改写的 P3b-B successor 顺序部分、current-closure 交接及对应 rollback 时，以 V0.4.1.6 为准。其他事项继续按 V0.4.1.4、V0.4.1.2、V0.4.1.1、原始 V0.4.1 与 V0.4.0 的未被逐条修订条款延续。
+涉及 registry semantic closure、P3a-R 为 matrix 1.2 与 profile_v2_artifacts.py 扩展的文件边界、matrix 1.2/1.3 的阶段身份、V0.4.1.6 改写的 P3b-B successor 顺序部分、current-closure 交接及对应 rollback 时，以 V0.4.1.6 为准。涉及 R1 semantic-domain contract、R1 acceptance binding、旧 R1 inputs 的失效以及 R2 restart 前置条件时，以 V0.4.1.7 为准；其只替代自身逐条列明的 V0.4.1.6 R1/R2 条款。其他事项继续按 V0.4.1.4、V0.4.1.2、V0.4.1.1、原始 V0.4.1 与 V0.4.0 的未被逐条修订条款延续。
