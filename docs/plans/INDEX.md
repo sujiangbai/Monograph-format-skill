@@ -30,4 +30,4 @@
 
 P3 当前实施权威由 V0.4.1.4 总路由、V0.4.1.5 registry succession 附录、V0.4.1.6 semantic/matrix correction 与 V0.4.1.7 R1 semantic-domain / R2 restart correction 共同组成。registry 2.3 append-only succession 的一般规则仍以 V0.4.1.5 为准。
 
-涉及 registry semantic closure、P3a-R 为 matrix 1.2 与 profile_v2_artifacts.py 扩展的文件边界、matrix 1.2/1.3 的阶段身份、V0.4.1.6 改写的 P3b-B successor 顺序部分、current-closure 交接及对应 rollback 时，以 V0.4.1.6 为准。涉及 R1 semantic-domain contract、R1 acceptance binding、旧 R1 inputs 的失效以及 R2 restart 前置条件时，以 V0.4.1.7 为准；其只替代自身逐条列明的 V0.4.1.6 R1/R2 条款。其他事项继续按 V0.4.1.4、V0.4.1.2、V0.4.1.1、原始 V0.4.1 与 V0.4.0 的未被逐条修订条款延续。
+涉及 registry semantic closure、P3a-R 为 matrix 1.2 与 profile_v2_artifacts.py 扩展的文件边界、matrix 1.2/1.3 的阶段身份、V0.4.1.6 改写的 P3b-B successor 顺序部分、current-closure 交接及对应 rollback 时，以 V0.4.1.6 为准。涉及 R1 semantic-domain contract、R1 acceptance binding、旧 R1 inputs 的失效以及 R2 restart 前置条件时，以 V0.4.1.7 为准；其只替代自身逐条列明的 V0.4.1.6 R1/R2 条款。所有既有方案中未被 V0.4.1.7 逐条 supersede 的条款继续有效；上文所列关键条款仅为非穷举例，仍包括 V0.4.1.3 的 C2 STOP 与其他未被修订的权威边界。
