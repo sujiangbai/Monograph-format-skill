@@ -37,8 +37,11 @@
 
 Treat field finalization as an independent capability. `field_finalization=true` means an executable external or LibreOffice/UNO candidate exists; it does not guarantee that the candidate preserves fields or layout for a particular DOCX. `word_automation=true` still requires caller authorization and a successful live run.
 
+On macOS, prefer an explicitly configured renderer and otherwise use the installed `/Applications/LibreOffice.app` before a PATH wrapper. Run the LibreOffice Python field helper as a user macro inside a disposable LibreOffice profile; do not launch the app's embedded Python executable from an unrelated parent process, mix it with another Python runtime, weaken the caller's global macro policy, or embed the helper in the delivery DOCX. Reject `TargetMode=External`, package-field connections, all URI schemes (including `file`, `ftp`, `smb`, `http`, and `https`), URI-relative and backslash network paths, package escapes, malformed targets, and unresolved XML `href`/`src` references before launch. Resolve `.rels` targets from their OPC source part after percent-decoding and backslash normalization; only fragments and relative or package-root references to members that actually exist in the package are accepted. Load accepted input with UNO `UpdateDocMode.NO_UPDATE` and `MacroExecMode.NEVER_EXECUTE`; update only a `ContentIndex` whose complete hashed identity matches the approved structure contract, exact baseline OOXML TOC instruction and position, occurrence/ordinal/service, and observed UNO `CreateFromOutline`, `CreateFromMarks`, and `Level` properties. The canonical TOC contract is a macro input separate from the authorization. The macro validates and canonicalizes it, recomputes SHA-256, and compares that hash with the authorization before any `update()`. This is an unsigned consistency check, not a signature or protection against coherent alteration of every local input or the macro environment. A count, contract, or identity mismatch rejects before any `update()`. Perform only that authorized update plus document-internal calculations, and never call collection-level `TextFields.refresh()`. Publish success only after the document closes successfully. A successful synthetic smoke reports `libreoffice_refreshed` plus `libreoffice_selective` only after exact baseline field instructions, ordering, boundaries, and pagination semantics are verified. `sectPr` is never overwritten to hide a backend difference. This is a non-final backend state. A strict rejection may pass the safety smoke only as `strictly_deferred` with `backend_result_accepted=false` and the rejection evidence retained; it is not a backend field-refresh success. Both states still require Word no-save verification, do not complete the field gate, and cannot become `final_ready`.
+
 - `refreshed`: field instructions remain editable, cached results are present, and final content/object audits pass.
-- `selective_verified`: the core imported only uniquely matched approved field results into its baseline, and target Word reopened the selective output without saving, reproduced the page count, and exported the verification PDF.
+- `selective_verified`: input cache is `stale`, output cache is `refreshed`, the core imported only uniquely matched approved field results into its baseline, and target Word reopened the selective output without saving, reproduced the page count, and exported a persistent verification PDF. The finalized DOCX and PDF are bound by path, SHA-256, size, and page count and are rechecked before `final_ready`.
+- `libreoffice_refreshed`: LibreOffice updated only approved internal indexes/calculations and the core selectively imported matched caches while preserving the exact baseline field contract. This is not Word-verified and is not final-ready.
 - `refreshed_target_word`: legacy status from earlier implementations; do not use it for a new `final_ready` claim without the V0.3.2 selective and no-save verification evidence.
 - `deferred`: fields are marked dirty and Word-compatible update-on-open is enabled. This state requires explicit caller QA and is not a completed refresh.
 - `code_only` or `stale`: do not deliver as finalized.
@@ -50,6 +53,18 @@ Before accepting a finalized copy, resolve approved fonts through direct formatt
 
 `target_pdf_ready_for_visual_qa` means the target application exported a PDF, not that layout passed. Mark `target_layout_verified` only after every exported page is inspected for page-number sequences, TOC entries, clipping, overlap, tables, captions, headers, footers, and equations.
 
+Whole-book `final_ready` additionally requires the versioned allowlisted
+finalization-gate summary and versioned finalization/verification request
+identities to match the current state, stage input keys, artifacts, target PDF,
+and render manifest. Only an actually used renderer is bound by normalized
+request source, resolved path, and current file digest. External updater
+identities bind shared-parser argv, fixed arguments, executable, and local
+script/file arguments by path, digest, and size. These are local consistency
+checks, not signatures or application authentication. Target evidence uses
+exact allowlisted IDs; changing a used renderer, target, updater entity or
+argument, deferred approval, or visual-manifest path/hash reruns the affected
+stage and cannot reuse a previous target's completion claim.
+
 ## Portable capability snapshot
 
 V0.3.0 also emits `portable_capabilities` for file reading, Python execution,
@@ -57,6 +72,10 @@ DOCX inspection, profile validation, DOCX editing, font discovery, rendering,
 target Word, field update, and multimodal source reading. The legacy
 `capabilities` keys remain available for schema compatibility. An Agent must
 declare multimodal source-reading support separately; the core cannot infer it.
+LibreOffice field refresh is available only through the verified macOS internal
+macro host. Other platforms or unrecognized executables may still render safe
+fixtures, but field refresh is unavailable/deferred; the legacy UNO
+server/helper is never a capability fallback.
 
 Use the same snapshot in `run-state.json` for every staged command. An adapter
 may add an authorized target-application backend, but it cannot turn an

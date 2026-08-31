@@ -74,7 +74,151 @@ The detailed commands below remain the individual building blocks for analysis, 
 12. Finalize editable field caches without overwriting either input:
    `<python> scripts/finalize_docx.py <formatted.docx> --source <input.docx> --profile <profile.json> --structure-map <approved-structure-map.json> --output <finalized.docx> --status-output <finalization.json>`
 
-When an approved target-application backend is available, call the finalizer with `--field-updater external --field-updater-command <command>`. The backend is a disposable field-calculation service, never the delivery parent. The core imports only uniquely matched, approved field results into its audited baseline, discards backend OOXML serialization, then asks the backend to reopen the selective output without saving and export the target PDF. Require `field_writeback_status=selective_verified`; any authored-content, field-instruction, bookmark-target, pagination-structure, OMML, embedded-object, or media change is blocking. Without an external backend, `auto` may use LibreOffice UNO. Fall back to update-on-open only after explicit caller QA, using `--approve-deferred`; record `delivery_field_status=deferred`. Never describe dirty flags as a completed refresh or LibreOffice pagination as Microsoft Word pagination.
+When an approved target-application backend is available, call the finalizer with `--field-updater external --field-updater-command <command> --pdf-output <persistent-verification.pdf>`. The backend is a disposable field-calculation service, never the delivery parent. Require the complete Word evidence shape: input cache `stale`, output cache `refreshed`, external backend, `field_writeback_status=selective_verified`, successful no-save repagination, matching calculation/verification/render page counts, a persisted verification PDF, and internally consistent completion scope and gate evidence. Target applications use the allowlisted IDs `microsoft_word`, `libreoffice`, and `unsupported`; only explicit Microsoft Word/Microsoft 365 aliases map to `microsoft_word`, and arbitrary strings containing “word” never do. When `--target-software` is omitted, finalization inherits the approved profile default and verification inherits the persisted finalization ID. Finalization binds the finalized DOCX and Word verification PDF by resolved path, SHA-256, size, and PDF page count. The versioned canonical gate also binds top-level pass/integrity results, finalized workflow and artifact hashes, exact target IDs, and stored `field_completion.evidence_validation`; resume, verification, and status require that validation to equal a fresh recalculation with `status=pass` and `errors=[]`. Only renderer and updater entities actually invoked by a stage are bound. External updater identities record parsed argv/cwd, the PATH-resolved executable, explicit files/options/response files, deterministic directory manifests, symlinks, and diagnostic Python script or `-m` entities for unsigned local consistency. They always record `dependency_closure.status=unproven`, `external_program_not_hermetic`, `runtime_dependencies_unproven`, and `cache_reusable=false`: native programs, wrappers, Python reflection/site customization, environment variables, PATH subcommands, and other hidden runtime inputs cannot be proven closed without OS-enforced hermetic execution. Therefore every external `finalize --resume` must rerun the updater even when all recorded entities are unchanged. Fresh valid evidence is not failed merely because it is non-cacheable, and status remains read-only. This is not a signature, application authentication, or arbitrary-program dependency analysis; external finalize caching may return only through a separately approved, auditable, runtime-enforced hermetic adapter. Any authored-content, field-instruction, bookmark-target, pagination-structure, OMML, embedded-object, or media change is blocking. Without an external backend, `auto` may use only the verified macOS LibreOffice internal-Python macro host. Linux, Windows, unsupported executables, and ordinary wrappers have no safe LibreOffice field-refresh fallback: explicit `libreoffice` fails closed, while `auto --approve-deferred` may safely record deferred without starting the legacy UNO server/helper. Even after strict selective cache writeback, LibreOffice remains non-final and cannot enter `final_ready`. Never describe dirty flags as a completed refresh or LibreOffice pagination as Microsoft Word pagination.
+
+Any real successful finalization execution clears prior audit/render/visual
+verification bindings and derived visual/page state, even when output bytes are
+unchanged. The next `verify --resume` reruns audit and render and revalidates the
+visual manifest; verification never invokes the updater. Only a true,
+revalidated finalization cache hit preserves an existing verification cache and
+`final_ready` state.
+
+“Successful finalization execution” requires process exit zero plus a readable,
+supported, versioned finalization-evidence object that passes the shared closed
+shape validator. Validate required nested types/enums, cache inventories,
+backend and completion objects, integrity/workflow hashes, targets, output paths,
+and artifact identities before invalidating any old verification state. Shape
+validity is not final readiness: valid deferred and LibreOffice non-final results
+remain candidates under the existing gate.
+
+Keep backend gate facts and backend diagnostics separate. The inline,
+versioned `field_backend` is a closed allowlisted projection; never put raw
+external or LibreOffice response objects into finalization evidence. Persist
+detailed diagnostics only in the bounded, standard-JSON backend-audit sidecar,
+and bind it by resolved path, SHA-256, and size. Resume, verification, and status
+must rehash the sidecar, but field completion and final-ready decisions use only
+the canonical projection. Unknown canonical keys, invalid nested operations or
+counts, and non-finite numbers fail the evidence shape. Without
+`--status-output`, report that the audit was not persisted rather than embedding
+raw diagnostics.
+
+Before finalization creates a directory or temporary file, resolve the input,
+source, profile, structure map, DOCX output, optional PDF, status JSON, and
+derived backend-audit paths as one contract. Every output must have a distinct
+lexical and resolved path, must not alias an input or symlink, and all persistent
+outputs must share one parent directory. Reject control-character paths and
+non-regular takeover targets. On POSIX, create staging and the producer child
+only through one parent-authority-relative create-and-bind helper: generate a
+random valid basename, call exclusive `mkdir` with `dir_fd`, immediately capture
+the no-follow stat identity, open the same child relative to the parent, and
+compare device/inode/owner/mode before returning. Name collisions retry with a
+new basename; any create-to-open substitution fails closed and is retained,
+never adopted. No hook or producer operation may precede a successful helper
+return. Import final staged DOCX/PDF/status/audit
+files from the bound producer child through authority-relative exclusive, no-follow creation;
+never let a pathname copy/open/unlink overwrite, truncate, follow, or remove an
+existing staged entry. While the target write FD remains open, derive the
+complete identity from `fstat` plus the digest of bytes actually written. After
+closing, immediately reopen relative to the staging authority with no-follow and
+require a full identity match; return the write-FD identity itself, then require
+the publisher's first snapshot to match it again, including when no status output
+exists. Retain the producer child as reported evidence. Snapshot regular targets
+through one no-follow file descriptor. On POSIX, open the output parent and its
+unique staging child as stable no-follow directory-FD authorities, require the
+effective user as owner, reject group/world-writable directories, and recheck
+their device/inode/owner/mode and pathname entries throughout publication. The
+Windows production publishing is unavailable: SDDL string inspection does not
+prove effective private access, and pathname `MoveFileExW` does not bind the
+verified source and parent handles to the no-replace rename. It must fail closed
+before creating a missing output parent, staging, or producer child until a separately approved implementation
+uses AccessCheck-equivalent effective-permission validation and an audited
+authority-bound native rename. Darwin-backed Windows simulation is test-only. For an
+existing target, move the object currently at that descriptor-relative pathname
+to a unique staging backup with the platform's atomic no-replace primitive, then
+verify the captured object against the startup snapshot before publishing
+anything there. Publish and restore only by the same atomic no-replace move:
+macOS `renameatx_np(RENAME_EXCL)` and Linux
+`renameat2(RENAME_NOREPLACE)` semantics. An occupied pathname, unsupported primitive, cross-device
+result, reparse point, parent replacement, or permission failure closes the
+transaction; never fall back to a hard link,
+ordinary rename, copy, overwrite, or check-then-unlink sequence. A successful
+move consumes the staged pathname, so a successful run has no second writable
+alias to a published inode. Never remove the staging directory in production,
+including after success. A successful transaction writes the versioned,
+`business_gate=false` `publication-record.json` exclusively into its retained staging and
+reports the transaction ID, retained path, and `cleanup_policy=manual_only`.
+Bind that record to the identity derived from its write FD; after any hook,
+require an exact no-follow identity match and an exact staging entry set of the
+producer workspace plus the record. Same-byte inode replacement or an extra
+entry fails closed.
+Failures retain staging/quarantine/backup/unknown evidence and report the same
+identity; cleanup never reintroduces a check-then-unlink or check-then-rmdir
+window. Tests may remove their enclosing temporary root only after all authority
+FDs/handles close. Automated residue checks distinguish reported retained
+publication evidence from unreported residue.
+Every final authority close is attempted even if an earlier close fails. After
+status and the exclusive publication record establish the commit point, close or
+console-report faults return structured `committed_with_cleanup_errors`
+diagnostics without rollback or a generic publication-failed result; the
+persisted business status remains authoritative and independently revalidated.
+Both stderr cleanup diagnostics and stdout status are best-effort reporters that
+swallow pipe, OS, encoding, and closed-stream faults after commit.
+Publish DOCX, PDF state, and sidecar first. Rehash those published objects and
+check the staged status immediately before publishing the status JSON last. The
+producer serializes the complete, already validated finalization evidence once
+as standard JSON bytes and supplies a separate SHA-256/size identity. Before and
+after status publication, require the exact bytes plus the complete closed shape,
+fresh completion/evidence-validation recalculation, and artifact bindings; the
+publisher never derives its trust anchor from the staged status itself. Then
+rehash all published objects and the published status bindings once more.
+Rollback first atomically captures each current target into quarantine,
+classifies it as this run's object or an unknown concurrent object, and restores
+only with no-replace semantics. Unknown concurrent objects, old backups, and
+staging/quarantine evidence are retained on conflict. The status marker is not a
+lock: a consumer must still perform the normal artifact-binding revalidation,
+because another process can mutate local files after the final check.
+
+On a successful replacement, never delete an inode captured from an existing
+target. Establish `.format-monograph-recovery/<transaction-id>/` from the
+already-open output-parent authority. POSIX uses descriptor-relative, no-follow
+creation/opening. Windows has no production recovery publisher while its
+effective-ACL and authority-bound rename requirements are unimplemented. Recheck the lexical entry
+against every opened FD/handle after parent open, transaction creation, every
+backup move, manifest publication, and immediately before return. Atomically
+move each captured pathname into that authority and write the versioned
+`recovery-manifest.json` exclusively through the transaction FD. Preserve the
+manifest writer-FD identity and compare a full authority-relative no-follow
+snapshot both after the manifest hook and immediately before return. At both
+points require the transaction entries to be exactly the expected
+`*.previous` files plus `recovery-manifest.json`; any extra entry, same-byte new
+inode, symlink,
+file, directory substitution, identity/mode/owner change, existing transaction,
+or manifest fault fails closed without deleting the substituted object. The
+manifest contains the transaction ID, original target, recovery path, and
+startup snapshot. The recovery inode may keep changing if a
+caller retained an open descriptor, so its later hash is diagnostic only and is
+not a final-ready business gate. Recovery is retained storage and has no
+automatic cleanup: remove it and retained staging only after an operator proves
+that no process still holds an open FD/handle and re-establishes path ownership.
+The private directory contract assumes control by the current effective user;
+an adversary able to coordinate changes as that same UID/SID or modify every
+local evidence file is inside the unsigned local trust boundary. Production
+still never deletes an unknown object. The protocol is not an OS-wide multi-file
+transaction, does not provide an `fsync`/power-loss durability guarantee, and
+status is not a lock. Windows support remains NO-GO; the explicit
+`windows-latest` gate currently proves fail-closed behavior on a real host, while
+local capability-set simulation is supplemental and never availability evidence.
+
+Console JSON is a best-effort report after the status commit, not part of the
+transaction. A closed pipe, encoding error, write error, or flush error after a
+legal commit does not turn the finalizer into a failure or trigger rollback; the
+CLI detaches stdout before interpreter-exit flushing. Any fault before the
+status commit remains a nonzero failure and preserves or safely restores the
+pre-run targets.
+
+For fresh orchestration evidence, validate the sidecar against the independently
+derived `<finalization-status-stem>-backend-audit.json` path before clearing any
+prior verification state.
 
 For a whole book, use one source-bound structure map that covers the entire DOCX. A chapter trial is evidence for tuning the rules, not the final scope of the skill.
 

@@ -70,9 +70,79 @@
 
 ## Finalization evidence
 
-Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; approved, matched, updated, and rejected field counts; discarded backend-difference categories; each read-only layout measurement; core section-start, page-display-offset, and page-top-spacer adjustments; calculation and no-save verification page counts; target PDF; and content/protected-object audit outcomes. Do not include manuscript or field-result text in the status file.
+Record the input, profile, structure-map, and final-output SHA-256 values; field-cache status before and after finalization; updater backend and software version; approved, matched, updated, and rejected field counts; discarded backend-difference categories; each read-only layout measurement; core section-start, page-display-offset, and page-top-spacer adjustments; calculation and no-save verification page counts; target PDF; and content/protected-object audit outcomes. For a completed Word path, persist the verification PDF and bind both it and the finalized DOCX by resolved path, SHA-256, size, and page count where applicable. Store a versioned allowlisted finalization-gate summary in state: top-level pass status, all three integrity results, finalized workflow stage, source/formatted/profile/map/output hashes, output/target paths and layout status, artifact identities, and complete field evidence. Rebuild and compare it during resume, verification, and status. Also bind and revalidate the final audit, render manifest, visual manifest, and versioned target/renderer request identity before a verification resume or a `status` report preserves `final_ready`; repeat the Word/PDF/render/visual page-count and completion checks rather than trusting the stored status. A legitimate new input or request is a cache miss and reruns the stage before replacing old bindings; an unchanged input key with altered output is invalid. Invalid evidence is stale and must not remain final-ready, and `status` must not regenerate it. These checks detect single-sided local file or JSON changes but are not a signature or application authentication: a subject that can coherently alter every unsigned local file and request record is inside the explicit local trust boundary. Do not include manuscript or field-result text in the status file.
 
 Finalization evidence must also record effective-font integrity before and after refresh. A target-software save is rejected when it reintroduces a conflicting theme font or changes an approved effective font.
+
+A real successful finalization execution always clears the previous verify
+stage and all audit/render/visual bindings and derived visual/page state before
+saving the new candidate, even if the finalized DOCX and persistent PDF bytes
+did not change. The next verification resume must run audit and render again and
+validate the requested visual manifest before restoring final-ready. Only a
+true, revalidated finalization cache hit may preserve the existing verification
+cache and final-ready state.
+
+Treat the finalizer as successfully producing evidence only after process exit
+zero and validation of the shared versioned finalization-evidence shape. Require
+all declared cache, backend, completion, integrity, workflow, target, output, and
+artifact-binding fields with their exact object/scalar types and supported
+enums; reject missing fields, unknown versions, booleans used as integers, empty
+paths, and malformed identities before changing run state. This is a producer
+schema gate, not the final-ready business gate: structurally valid deferred and
+LibreOffice non-final evidence remains candidate evidence.
+
+`field_backend` is a versioned closed canonical projection used by completion
+and final-ready gates. It contains only allowlisted finite enums, booleans,
+counts, and explicitly shaped selective-writeback, read-only-verification, and
+fallback-failure facts; unknown keys, invalid operations/counts, and non-finite
+numbers are rejected. Never copy a raw external or LibreOffice response into
+that object. Detailed backend diagnostics belong in a separate versioned JSON
+audit sidecar. The finalization JSON stores only the sidecar's resolved path,
+SHA-256, and byte size, and resume, verify, and status rehash it before trusting
+the evidence. The sidecar accepts standard JSON only and enforces bounded byte,
+depth, node, and string limits; it must be written atomically. A command without
+`--status-output` reports `backend_audit.status=not_persisted` and never embeds
+the raw response. The sidecar remains diagnostic, not business-gate input, and
+must not contain manuscript or field-result text.
+
+Resolve all finalization inputs and persistent outputs before any filesystem
+mutation. The DOCX, PDF, status, and derived backend-audit outputs must be
+pairwise distinct both lexically and after symlink resolution, must not resolve
+to any input, must not themselves be symlinks, and must share one parent
+directory. Reject NUL/control-character and unresolvable paths. Existing targets
+require `--force` and must remain unchanged until a fully validated staging set
+is ready. Publish status last as the commit marker. If a multi-file replace
+fails, restore the captured old targets; retain staging rather than deleting an
+unrestored backup when rollback cannot complete.
+
+The orchestrator does not accept a fresh sidecar path from the candidate JSON or
+old state. It independently derives the expected path from its fixed
+finalization-status path, requires an exact versioned binding and ordinary
+non-symlink file, and checks size, SHA-256, standard JSON, limits, and root schema
+before invalidating prior verify evidence. Every evidence `version` is an exact
+integer: booleans, floats, strings, and unknown integers are unsupported.
+
+Use only the allowlisted target IDs `microsoft_word`, `libreoffice`, and
+`unsupported`; backend software, finalization, persistent Word PDF, verification
+request, and render manifest must resolve to the same applicable ID. The
+canonical gate includes the stored `field_completion.evidence_validation` and
+requires it to equal a fresh canonical recalculation with `status=pass` and no
+errors. Bind a renderer only when the stage actually invokes it. When an
+external updater is used, record its versioned, explicitly unproven dependency
+audit and `cache_reusable=false`. Record the shared-parser argv and fixed
+arguments; the PATH-resolved executable; plain, option-value, and
+option-assignment files; response files; deterministic directory manifests; and
+diagnostic direct Python script or local `-m` identities by resolved path, type,
+SHA-256, and size where applicable. Resolve relative paths from the same execution
+cwd used by the finalizer and never follow directory symlinks. None of these
+observations proves runtime hermeticity: native programs, wrappers, Python
+reflection/site customization, environment variables, PATH subcommands, and
+other hidden inputs remain possible. Consequently every external finalize resume
+must rerun the updater even when all recorded entities are unchanged. Fresh valid
+evidence remains valid and status remains read-only. This is unsigned argv and
+explicit-entity consistency—not a signature, application authentication, or
+general dependency analysis. Reopening external finalize caching requires a
+separately approved, auditable, runtime-enforced hermetic adapter.
 
 When `toc_source` is approved, finalization evidence must record only the source
 mode, source count, approved TC source-field count, result count, and

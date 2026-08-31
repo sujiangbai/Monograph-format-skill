@@ -14,11 +14,11 @@ permissions:
 
 jobs:
   core:
-    name: Core / ${{ matrix.os }} / Python ${{ matrix.python }}
+    name: Supported core / ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
         python: ["3.11", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:
@@ -35,6 +35,30 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
+  windows-publisher-no-go:
+    name: Windows publisher NO-GO / compile and fail-close / Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: format-monograph/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r format-monograph/requirements.txt
+      - name: Compile scripts without claiming Windows runtime support
+        run: python -m compileall -q format-monograph/scripts tests
+      - name: Prove Windows publisher remains fail-closed on a real host
+        run: >-
+          python -m unittest discover -s tests
+          -p "test_v024_finalization.py"
+          -k windows_host_ -v
+
   render-smoke:
     name: LibreOffice render smoke
     runs-on: ubuntu-latest
@@ -49,8 +73,41 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libreoffice-writer
       - name: Install dependencies
         run: python -m pip install -r format-monograph/requirements.txt
-      - name: Render synthetic DOCX
+      - name: Render synthetic DOCX and keep unsafe field refresh deferred
         run: python tests/render_smoke.py
+
+  macos-libreoffice-smoke:
+    name: macOS LibreOffice safety rejection and non-final backend smoke
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: format-monograph/requirements.txt
+      - name: Install LibreOffice
+        run: brew install --cask libreoffice
+      - name: Install dependencies
+        run: python -m pip install -r format-monograph/requirements.txt
+      - name: Record runtime versions
+        run: |
+          sw_vers
+          python --version
+          /Applications/LibreOffice.app/Contents/MacOS/soffice --version
+          brew info --cask libreoffice
+      - name: Exercise internal macro backend as explicitly non-final
+        run: >-
+          python tests/render_smoke.py
+          --renderer /Applications/LibreOffice.app/Contents/MacOS/soffice
+      - name: Report loopback calibration and enforce external-link preflight rejection
+        run: >-
+          python tests/libreoffice_security_smoke.py
+          --renderer /Applications/LibreOffice.app/Contents/MacOS/soffice
+      - name: Validate exact TOC index authorization and stable section semantics
+        run: >-
+          python tests/libreoffice_index_authorization_smoke.py
+          --renderer /Applications/LibreOffice.app/Contents/MacOS/soffice
 
   skill-spec:
     name: Agent Skills specification
