@@ -60,6 +60,31 @@ class ProbeHandler(BaseHTTPRequestHandler):
         return None
 
 
+def positive_control_calibration(
+    unsafe_probe: dict[str, object], request_paths: list[str]
+) -> dict[str, object]:
+    """Classify loopback calibration without treating absence as safety proof."""
+    if (
+        unsafe_probe.get("unsafe_full_update_load_completed") is not True
+        or unsafe_probe.get("unsafe_graphics_loaded") != 1
+    ):
+        return {
+            "status": "invalid",
+            "reason": "unsafe_positive_control_did_not_complete",
+        }
+    if not request_paths:
+        return {
+            "status": "unavailable",
+            "reason": "loopback_request_not_observed",
+        }
+    if "/linked-graphic.png" not in request_paths:
+        return {
+            "status": "invalid",
+            "reason": "unexpected_loopback_request_path",
+        }
+    return {"status": "calibrated", "reason": None}
+
+
 def inject_external_graphic(path: Path, port: int) -> str:
     namespaces = {
         "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
@@ -418,6 +443,9 @@ def main() -> int:
             time.sleep(0.5)
             unsafe_external_requests = len(ProbeHandler.hits)
             unsafe_external_request_paths = list(ProbeHandler.hits)
+            unsafe_calibration = positive_control_calibration(
+                unsafe_probe, unsafe_external_request_paths
+            )
             ProbeHandler.hits = []
             safe_rejection = None
             try:
@@ -467,6 +495,11 @@ def main() -> int:
                 ),
                 "unsafe_external_requests": unsafe_external_requests,
                 "unsafe_external_request_paths": unsafe_external_request_paths,
+                "unsafe_positive_control_status": unsafe_calibration["status"],
+                "unsafe_positive_control_reason": unsafe_calibration["reason"],
+                "safe_path_network_claim_calibrated": (
+                    unsafe_calibration["status"] == "calibrated"
+                ),
                 "external_requests": len(ProbeHandler.hits),
                 "external_request_paths": list(ProbeHandler.hits),
                 "safe_preflight_rejection": safe_rejection,
@@ -488,7 +521,8 @@ def main() -> int:
                 or report["relationship_external_requests"] != 0
                 or report["unsafe_full_update_load_completed"] is not True
                 or report["unsafe_graphics_loaded"] != 1
-                or report["unsafe_external_requests"] < 1
+                or report["unsafe_positive_control_status"]
+                not in {"calibrated", "unavailable"}
                 or report["external_requests"] != 0
                 or not report["safe_preflight_rejection"]
                 or report["macro_text_fields_collection_refreshed"] is not False

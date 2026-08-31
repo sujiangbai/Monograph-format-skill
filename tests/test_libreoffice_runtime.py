@@ -49,6 +49,7 @@ from render_smoke import (  # noqa: E402
     field_finalization_summary,
     load_field_backend_audit,
 )
+from libreoffice_security_smoke import positive_control_calibration  # noqa: E402
 from toc_index_identity import authorization_with_hash  # noqa: E402
 
 
@@ -971,6 +972,120 @@ class LibreOfficeRuntimeTests(unittest.TestCase):
         summary = field_finalization_summary(payload, raw_backend)
         self.assertEqual("strictly_deferred", summary["gate_outcome"])
         self.assertFalse(summary["backend_result_accepted"])
+
+    def test_safe_linux_libreoffice_unavailability_is_strictly_deferred(self) -> None:
+        error = (
+            "LibreOffice field refresh requires the verified macOS internal-Python "
+            "macro host; the legacy UNO server/helper backend is disabled."
+        )
+        raw_backend = {
+            "backend": "deferred_on_open",
+            "fallback_from": "libreoffice_error",
+            "attempted_backend": {
+                "backend": "libreoffice_uno",
+                "failure": {
+                    "status": "rejected",
+                    "stage": "libreoffice_refresh",
+                    "error": error,
+                    "failed_checks": ["libreoffice_refresh"],
+                },
+            },
+        }
+        payload = {
+            "status": "pass",
+            "delivery_field_status": "deferred",
+            "field_writeback_status": "deferred",
+            "field_backend": canonical_backend_projection(raw_backend),
+            "field_completion": {
+                "field_gate_completed": False,
+                "final_ready_eligible": False,
+                "word_verification_required": True,
+                "word_verification_completed": False,
+            },
+            "content_integrity": "pass",
+            "protected_object_integrity": "pass",
+            "effective_font_integrity": "pass",
+        }
+        self.assertEqual([], field_finalization_errors(payload, raw_backend))
+        self.assertEqual(
+            "strictly_deferred",
+            field_finalization_summary(payload, raw_backend)["gate_outcome"],
+        )
+
+    def test_unknown_libreoffice_failure_is_not_strictly_deferred(self) -> None:
+        raw_backend = {
+            "backend": "deferred_on_open",
+            "fallback_from": "libreoffice_error",
+            "attempted_backend": {
+                "backend": "libreoffice_uno",
+                "failure": {
+                    "status": "rejected",
+                    "stage": "libreoffice_refresh",
+                    "error": "unknown renderer failure",
+                    "failed_checks": ["libreoffice_refresh"],
+                },
+            },
+        }
+        payload = {
+            "status": "pass",
+            "delivery_field_status": "deferred",
+            "field_writeback_status": "deferred",
+            "field_backend": canonical_backend_projection(raw_backend),
+            "field_completion": {
+                "field_gate_completed": False,
+                "final_ready_eligible": False,
+                "word_verification_required": True,
+                "word_verification_completed": False,
+            },
+            "content_integrity": "pass",
+            "protected_object_integrity": "pass",
+            "effective_font_integrity": "pass",
+        }
+        errors = field_finalization_errors(payload, raw_backend)
+        self.assertIn(
+            "LibreOffice backend neither completed non-finally nor deferred strictly",
+            errors,
+        )
+        self.assertEqual(
+            "invalid", field_finalization_summary(payload, raw_backend)["gate_outcome"]
+        )
+
+    def test_external_positive_control_calibration_matrix(self) -> None:
+        completed = {
+            "unsafe_full_update_load_completed": True,
+            "unsafe_graphics_loaded": 1,
+        }
+        self.assertEqual(
+            {"status": "calibrated", "reason": None},
+            positive_control_calibration(completed, ["/linked-graphic.png"]),
+        )
+        self.assertEqual(
+            {
+                "status": "unavailable",
+                "reason": "loopback_request_not_observed",
+            },
+            positive_control_calibration(completed, []),
+        )
+        self.assertEqual(
+            {
+                "status": "invalid",
+                "reason": "unexpected_loopback_request_path",
+            },
+            positive_control_calibration(completed, ["/unexpected.png"]),
+        )
+        self.assertEqual(
+            {
+                "status": "invalid",
+                "reason": "unsafe_positive_control_did_not_complete",
+            },
+            positive_control_calibration(
+                {
+                    "unsafe_full_update_load_completed": False,
+                    "unsafe_graphics_loaded": 1,
+                },
+                [],
+            ),
+        )
 
     def test_nonfinal_libreoffice_output_satisfies_backend_smoke_gate(self) -> None:
         payload = {

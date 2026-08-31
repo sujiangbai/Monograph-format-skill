@@ -20,6 +20,10 @@ from backend_evidence import (  # noqa: E402
 from test_v024_finalization import V024FinalizationTests  # noqa: E402
 
 SCRIPT = REPO / "format-monograph" / "scripts" / "render_docx.py"
+SAFE_LIBREOFFICE_UNAVAILABLE_ERROR = (
+    "LibreOffice field refresh requires the verified macOS internal-Python "
+    "macro host; the legacy UNO server/helper backend is disabled."
+)
 
 
 def load_field_backend_audit(finalization: dict) -> dict:
@@ -42,7 +46,7 @@ def field_finalization_summary(
     selective = attempted.get("selective_writeback") or {}
     failure = attempted.get("failure") or {}
     completion = finalization.get("field_completion", {})
-    deferred_rejection = (
+    contract_or_integrity_rejection = (
         backend.get("backend") == "deferred_on_open"
         and attempt.get("backend") == "libreoffice_uno"
         and attempt.get("fallback_from") == "libreoffice_contract_or_integrity"
@@ -51,6 +55,20 @@ def field_finalization_summary(
             or canonical_failure.get("status") == "rejected"
         )
     )
+    safe_backend_unavailable = (
+        backend.get("backend") == "deferred_on_open"
+        and attempt.get("backend") == "libreoffice_uno"
+        and attempt.get("fallback_from") == "libreoffice_error"
+        and canonical_selective is None
+        and canonical_failure.get("status") == "rejected"
+        and canonical_failure.get("stage") == "libreoffice_refresh"
+        and canonical_failure.get("failed_checks") == ["libreoffice_refresh"]
+        and failure.get("status") == "rejected"
+        and failure.get("stage") == "libreoffice_refresh"
+        and failure.get("failed_checks") == ["libreoffice_refresh"]
+        and failure.get("error") == SAFE_LIBREOFFICE_UNAVAILABLE_ERROR
+    )
+    deferred_rejection = contract_or_integrity_rejection or safe_backend_unavailable
     nonfinal_backend = (
         backend.get("backend") == "libreoffice_uno"
         and finalization.get("delivery_field_status") == "libreoffice_refreshed"

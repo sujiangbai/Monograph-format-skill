@@ -47,7 +47,7 @@ PNG_1X1 = base64.b64decode(
 
 
 class SimulatedWindowsPublisherApi:
-    """Windows capability-set simulation backed by Darwin exclusive rename."""
+    """Windows capability-set simulation backed by the POSIX host rename."""
 
     FILE_ATTRIBUTE_DIRECTORY = 0x00000010
     FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
@@ -98,7 +98,22 @@ class SimulatedWindowsPublisherApi:
         if self.move_fault is not None and self.move_fault(source, target):
             raise self.move_fault.error
         library = ctypes.CDLL(None, use_errno=True)
-        function = library.renameatx_np
+        if sys.platform == "darwin":
+            function_name = "renameatx_np"
+            flag = finalize_docx.DARWIN_RENAME_EXCL
+        elif sys.platform.startswith("linux"):
+            function_name = "renameat2"
+            flag = finalize_docx.LINUX_RENAME_NOREPLACE
+        else:
+            raise finalize_docx.FinalizationPublishError(
+                "simulated Windows publisher requires a supported POSIX "
+                "atomic no-replace host primitive"
+            )
+        function = getattr(library, function_name, None)
+        if function is None:
+            raise finalize_docx.FinalizationPublishError(
+                f"simulated Windows publisher cannot resolve {function_name}"
+            )
         function.argtypes = (
             ctypes.c_int,
             ctypes.c_char_p,
@@ -112,7 +127,7 @@ class SimulatedWindowsPublisherApi:
             os.fsencode(source),
             -2,
             os.fsencode(target),
-            finalize_docx.DARWIN_RENAME_EXCL,
+            flag,
         ):
             finalize_docx._raise_atomic_move_error(
                 ctypes.get_errno(), source, target
