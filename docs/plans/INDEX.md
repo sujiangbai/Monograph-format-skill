@@ -23,11 +23,14 @@
 | 0.4.1.5 | 当前实施规范（registry succession 附录） | [v0.4.1.5-append-only-production-registry-succession.md](v0.4.1.5-append-only-production-registry-succession.md) | 生产 property registry 的 append-only successor、阶段所有权与 P3a-R/P3b-B 契约顺序修订 |
 | 0.4.1.6 | 当前实施规范修订 | [v0.4.1.6-registry-semantic-closure-and-matrix-succession.md](v0.4.1.6-registry-semantic-closure-and-matrix-succession.md) | P3a-R registry semantic closure、matrix 1.2/1.3 身份与 current-closure 交接修订 |
 | 0.4.1.7 | 当前实施规范修订（R1 semantic-domain / R2 restart） | [v0.4.1.7-r1-semantic-domain-completion-and-r2-restart.md](v0.4.1.7-r1-semantic-domain-completion-and-r2-restart.md) | R1 semantic-domain machine contract、独立接受绑定与 R2 restart 门禁修订；docs-only |
+| 0.4.1.8 | 当前实施规范窄修订（atomic ownership / route） | [v0.4.1.8-atomic-ownership-authority-correction.md](v0.4.1.8-atomic-ownership-authority-correction.md) | 171 个冻结决策的非重叠原子责任、唯一 primary owner、真实 route intersection、P7 最终化实施/验证拆分与 Z-009 边界修订；docs-only planning candidate |
 
 ## 版本规则
 
 方案文件是不可变快照。任何修订必须在新分支创建新版本文件并通过 PR 合并，不得修改已有版本正文。
 
-P3 当前实施权威由 V0.4.1.4 总路由、V0.4.1.5 registry succession 附录、V0.4.1.6 semantic/matrix correction 与 V0.4.1.7 R1 semantic-domain / R2 restart correction 共同组成。registry 2.3 append-only succession 的一般规则仍以 V0.4.1.5 为准。
+P3 当前实施权威由 V0.4.1.4 总路由、V0.4.1.5 registry succession 附录、V0.4.1.6 semantic/matrix correction、V0.4.1.7 R1 semantic-domain / R2 restart correction 与 V0.4.1.8 atomic ownership / route 窄修订共同组成。registry 2.3 append-only succession 的一般规则仍以 V0.4.1.5 为准。
 
 涉及 registry semantic closure、P3a-R 为 matrix 1.2 与 profile_v2_artifacts.py 扩展的文件边界、matrix 1.2/1.3 的阶段身份、V0.4.1.6 改写的 P3b-B successor 顺序部分、current-closure 交接及对应 rollback 时，以 V0.4.1.6 为准。涉及 R1 semantic-domain contract、R1 acceptance binding、旧 R1 inputs 的失效以及 R2 restart 前置条件时，以 V0.4.1.7 为准；其只替代自身逐条列明的 V0.4.1.6 R1/R2 条款。所有既有方案中未被 V0.4.1.7 逐条 supersede 的条款继续有效；上文所列关键条款仅为非穷举例，仍包括 V0.4.1.3 的 C2 STOP 与其他未被修订的权威边界。
+
+涉及 V040 决策的实施、保留、验证、治理和未来边界如何拆成互不重叠的原子责任、每项唯一 primary responsible owner、复合 P3/P5 路由展开、`route_intersection` 的真实集合语义、P7 中冻结最终化动作与独立验证的职责拆分以及 Z-009 分项归属时，以 V0.4.1.8 为准。V0.4.1.8 不改变任何格式值、R1 三资产或接受绑定、R2 restart 前置条件、C2 STOP、P3b 顺序、默认关闭、非交付和无公共 CLI 边界；未被其逐项修订的 V0.4.1–V0.4.1.7 条款继续有效。
