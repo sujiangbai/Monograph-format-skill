@@ -13,6 +13,8 @@ import tempfile
 from pathlib import Path
 
 from _common import FormatMonographError, ensure_docx, write_json
+from target_software import LIBREOFFICE, resolve_target_id
+from libreoffice_runtime import default_macos_soffice
 
 
 def locate_soffice(requested: str | None = None) -> tuple[str, str]:
@@ -21,6 +23,9 @@ def locate_soffice(requested: str | None = None) -> tuple[str, str]:
     if not executable:
         source = "environment"
         executable = os.environ.get("FORMAT_MONOGRAPH_RENDERER")
+    if not executable:
+        source = "application"
+        executable = default_macos_soffice()
     if not executable:
         source = "path"
         executable = shutil.which("soffice") or shutil.which("libreoffice")
@@ -142,6 +147,7 @@ def main() -> int:
                     shutil.copy2(pdf_path, kept_pdf_path)
                 kept_pdf = str(kept_pdf_path)
 
+        target_id = resolve_target_id(args.target_software)
         result = {
             "input": str(args.input.resolve()),
             "page_count": len(page_paths),
@@ -151,12 +157,12 @@ def main() -> int:
             "renderer": soffice,
             "renderer_version": renderer_version,
             "renderer_source": renderer_source,
-            "target_software": args.target_software,
+            "target_software": target_id,
             "target_pdf_source": str(args.target_pdf.resolve()) if args.target_pdf else None,
             "target_layout_unverified": bool(
                 args.target_software
                 and not args.target_pdf
-                and "libreoffice" not in args.target_software.casefold()
+                and target_id != LIBREOFFICE
             ),
             "visual_review": "pending",
         }

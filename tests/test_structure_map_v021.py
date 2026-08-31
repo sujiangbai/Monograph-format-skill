@@ -182,7 +182,8 @@ class StructureMapV021Tests(unittest.TestCase):
     def test_environment_reports_independent_capabilities(self) -> None:
         result = self.run_script("check_environment.py", "--json")
         self.assertEqual(0, result.returncode, result.stderr)
-        capabilities = json.loads(result.stdout)["capabilities"]
+        payload = json.loads(result.stdout)
+        capabilities = payload["capabilities"]
         self.assertEqual(
             {
                 "inspection",
@@ -196,6 +197,11 @@ class StructureMapV021Tests(unittest.TestCase):
             },
             set(capabilities),
         )
+        self.assertEqual(
+            capabilities["field_finalization"],
+            payload["portable_capabilities"]["field_update"]["available"],
+        )
+        self.assertIn("field_refresh_backend", payload["rendering"])
 
 
 if __name__ == "__main__":

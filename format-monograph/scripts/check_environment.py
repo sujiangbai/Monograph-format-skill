@@ -12,6 +12,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from libreoffice_runtime import default_macos_soffice, macos_internal_macro_soffice
+
 PACKAGES = {
     "python-docx": "docx",
     "jsonschema": "jsonschema",
@@ -61,11 +63,22 @@ def font_directories() -> list[str]:
 def resolve_renderer(requested: str | None) -> tuple[str | None, str | None]:
     if requested:
         path = Path(requested).expanduser()
-        return (str(path.resolve()), "argument") if path.is_file() else (None, "argument")
+        return (
+            (str(path.resolve()), "argument")
+            if path.is_file() and os.access(path, os.X_OK)
+            else (None, "argument")
+        )
     configured = os.environ.get("FORMAT_MONOGRAPH_RENDERER")
     if configured:
         path = Path(configured).expanduser()
-        return (str(path.resolve()), "environment") if path.is_file() else (None, "environment")
+        return (
+            (str(path.resolve()), "environment")
+            if path.is_file() and os.access(path, os.X_OK)
+            else (None, "environment")
+        )
+    application = default_macos_soffice()
+    if application:
+        return application, "application"
     discovered = shutil.which("soffice") or shutil.which("libreoffice")
     return discovered, "path" if discovered else None
 
@@ -81,9 +94,22 @@ def word_automation_status(adapter: str | None) -> dict[str, object]:
                 installed = True
         except (ImportError, FileNotFoundError, OSError):
             installed = False
+    elif platform.system() == "Darwin":
+        installed = any(
+            path.is_dir()
+            for path in (
+                Path("/Applications/Microsoft Word.app"),
+                Path.home() / "Applications" / "Microsoft Word.app",
+            )
+        )
     adapter_path = Path(adapter).expanduser() if adapter else None
     adapter_available = bool(adapter_path and adapter_path.is_file())
-    available = bool(installed and powershell and (adapter_available or not adapter))
+    available = bool(
+        platform.system() == "Windows"
+        and installed
+        and powershell
+        and (adapter_available or not adapter)
+    )
     return {
         "installed": installed,
         "powershell": powershell,
@@ -92,6 +118,31 @@ def word_automation_status(adapter: str | None) -> dict[str, object]:
         "available": available,
         "authorization_required": True,
         "live_automation_verified": False,
+    }
+
+
+def libreoffice_field_status(soffice: str | None) -> dict[str, object]:
+    if not soffice:
+        return {
+            "available": False,
+            "backend": None,
+            "runtime": None,
+            "live_verified": False,
+        }
+    macro_soffice = macos_internal_macro_soffice(soffice)
+    if macro_soffice:
+        return {
+            "available": True,
+            "backend": "libreoffice_internal_python_macro",
+            "runtime": macro_soffice,
+            "live_verified": False,
+        }
+    return {
+        "available": False,
+        "backend": None,
+        "runtime": None,
+        "live_verified": False,
+        "reason": "verified_internal_macro_host_unavailable",
     }
 
 
@@ -114,6 +165,8 @@ def main() -> int:
     soffice, renderer_source = resolve_renderer(args.renderer)
     pymupdf_ok = bool(packages["PyMuPDF"]["available"])
     word = word_automation_status(args.word_adapter)
+    libreoffice_fields = libreoffice_field_status(soffice)
+    field_update_ok = bool(word["available"] or libreoffice_fields["available"])
     fonts = font_directories()
 
     if editing_ok and validation_ok and pymupdf_ok and (soffice or word["available"]):
@@ -141,7 +194,7 @@ def main() -> int:
             "inspection": inspection_ok,
             "profile_validation": validation_ok,
             "docx_editing": editing_ok,
-            "field_finalization": bool(editing_ok and (soffice or word["available"])),
+            "field_finalization": bool(editing_ok and field_update_ok),
             "word_automation": bool(word["available"]),
             "word_field_refresh": bool(word["available"]),
             "word_pdf_export": bool(word["available"]),
@@ -179,8 +232,12 @@ def main() -> int:
                 "authorization_required": True,
             },
             "field_update": {
-                "available": bool(editing_ok and (soffice or word["available"])),
-                "source": "renderer_or_target_application",
+                "available": bool(editing_ok and field_update_ok),
+                "source": (
+                    "target_application_adapter"
+                    if word["available"]
+                    else libreoffice_fields["backend"]
+                ),
             },
             "multimodal_source_reading": {
                 "available": None,
@@ -194,7 +251,8 @@ def main() -> int:
             "source": renderer_source,
             "pymupdf": pymupdf_ok,
             "available": bool(soffice and pymupdf_ok),
-            "field_refresh_candidate": bool(soffice),
+            "field_refresh_candidate": bool(libreoffice_fields["available"]),
+            "field_refresh_backend": libreoffice_fields,
         },
         "microsoft_word": word,
         "font_directories": fonts,
@@ -209,6 +267,11 @@ def main() -> int:
     if not soffice:
         result["limitations"].append(
             "LibreOffice soffice was not found; rendering requires an approved Word adapter or another renderer."
+        )
+    elif not libreoffice_fields["available"] and not word["available"]:
+        result["limitations"].append(
+            "LibreOffice rendering is available, but the verified macOS internal-macro "
+            "field-refresh host is unavailable; field refresh is deferred/unavailable."
         )
     if platform.system() == "Windows" and not word["installed"]:
         result["limitations"].append("Microsoft Word desktop automation was not detected.")

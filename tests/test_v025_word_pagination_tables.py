@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -20,7 +21,11 @@ sys.path.insert(0, str(SCRIPTS))
 from _common import FormatMonographError, apply_table_properties  # noqa: E402
 from audit_docx import audit_table_rule  # noqa: E402
 from docx_pagination import audit_pagination_sections, pagination_inventory  # noqa: E402
-from finalize_docx import external_refresh  # noqa: E402
+from finalize_docx import (  # noqa: E402
+    EXTERNAL_COMMAND_CWD,
+    _invoke_external_command,
+    external_refresh,
+)
 from structure_map import (  # noqa: E402
     approved_data_tables,
     apply_structure_map,
@@ -195,6 +200,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
         helper.write_text(
             "import json, shutil, sys\n"
             "request = json.load(sys.stdin)\n"
+            "assert request['target_software']=='microsoft_word'\n"
             "shutil.copy2(request['input_path'], request['output_path'])\n"
             "print(json.dumps({'status':'success','backend':'test_word','software':'Microsoft Word',"
             "'repaginated':True,'saved':True,'field_cache_verified':True,"
@@ -231,6 +237,47 @@ class V025WordPaginationTableTests(unittest.TestCase):
                 None,
                 "Microsoft Word",
             )
+
+    def test_external_backend_rejects_unsupported_word_substrings_before_launch(self) -> None:
+        for target in ("WordPerfect", "random-word-target", "Password Writer"):
+            with self.subTest(target=target), patch(
+                "finalize_docx.subprocess.run"
+            ) as run:
+                with self.assertRaisesRegex(
+                    FormatMonographError, "requires target ID 'microsoft_word'"
+                ):
+                    external_refresh(
+                        self.source,
+                        self.root / f"{target}.docx",
+                        json.dumps([sys.executable]),
+                        self.root / "profile.json",
+                        self.root / "map.json",
+                        None,
+                        target,
+                    )
+                run.assert_not_called()
+
+        with self.assertRaisesRegex(FormatMonographError, "command is unavailable"):
+            external_refresh(
+                self.source,
+                self.root / "missing-adapter.docx",
+                "format-monograph-definitely-missing-adapter --fixed",
+                self.root / "profile.json",
+                self.root / "map.json",
+                None,
+                "Microsoft Word",
+            )
+
+    def test_external_command_uses_the_bound_orchestration_cwd(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+        with patch("finalize_docx.subprocess.run", return_value=completed) as run:
+            self.assertIs(
+                completed,
+                _invoke_external_command(
+                    json.dumps(["adapter", "--mode", "one"]), {}, "test"
+                ),
+            )
+        self.assertEqual(EXTERNAL_COMMAND_CWD, run.call_args.kwargs["cwd"])
 
     def test_target_pdf_can_be_rendered_without_libreoffice_conversion(self) -> None:
         import fitz
