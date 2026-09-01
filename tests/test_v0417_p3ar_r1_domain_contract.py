@@ -739,6 +739,8 @@ def _validate_github_pull_request_checkout(
     status_lines: list[str],
     checkout_blob_oids: dict[str, str],
     working_blob_oids: dict[str, str],
+    authority_blob_oids: dict[str, str],
+    base_is_head_ancestor: bool,
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(event, dict) or set(event) != {
@@ -766,9 +768,15 @@ def _validate_github_pull_request_checkout(
     changed_files = pull_request.get("changed_files")
     commit_count = pull_request.get("commits")
     repository_name = repository.get("full_name")
-    if base_sha != BASE_COMMIT:
-        errors.append("GitHub pull-request base SHA differs from the frozen base")
-    if not isinstance(head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", head_sha):
+    base_sha_valid = isinstance(base_sha, str) and re.fullmatch(
+        r"[0-9a-f]{40}", base_sha
+    ) is not None
+    head_sha_valid = isinstance(head_sha, str) and re.fullmatch(
+        r"[0-9a-f]{40}", head_sha
+    ) is not None
+    if not base_sha_valid:
+        errors.append("GitHub pull-request base SHA is missing or invalid")
+    if not head_sha_valid:
         errors.append("GitHub pull-request head SHA is missing or invalid")
     if merge_sha is not None and (
         not isinstance(merge_sha, str)
@@ -783,49 +791,125 @@ def _validate_github_pull_request_checkout(
     if status_lines:
         errors.append("GitHub pull-request checkout worktree is not clean")
 
-    if isinstance(head_sha, str) and head == head_sha:
-        if event.get("github_sha") not in {head_sha, merge_sha}:
-            errors.append("GitHub runner SHA conflicts with the direct head checkout")
-        if parent_oids != [BASE_COMMIT]:
-            errors.append("direct pull-request head is not one commit on the frozen base")
-    elif (
-        event.get("github_sha") == head
-        and parent_oids == [BASE_COMMIT, head_sha]
-        and commit_message
-        == f"Merge {head_sha} into {BASE_COMMIT}\n".encode("ascii")
-    ):
-        pass
-    else:
-        if event.get("github_sha") == head and len(parent_oids) == 2:
-            if parent_oids != [BASE_COMMIT, head_sha]:
-                errors.append("synthetic pull-request merge parents conflict with event SHAs")
-            else:
-                errors.append(
-                    "synthetic pull-request merge message conflicts with event SHAs"
-                )
-        else:
-            errors.append("GitHub pull-request checkout shape is unknown")
-
-    if type(changed_files) is not int or changed_files != len(ALLOWED_PATHS):
-        errors.append("GitHub pull-request changed-file count is not exactly three")
-    if type(commit_count) is not int or commit_count != 1:
-        errors.append("GitHub pull-request candidate commit count is not exactly one")
-    if set(checkout_blob_oids) != ALLOWED_PATHS:
-        errors.append("GitHub checkout tree does not contain exactly the three allowed paths")
-    if set(working_blob_oids) != ALLOWED_PATHS:
-        errors.append("GitHub working-tree blob evidence is incomplete or contains extras")
-    for path in ALLOWED_PATHS:
-        checkout_oid = checkout_blob_oids.get(path)
-        working_oid = working_blob_oids.get(path)
-        if not isinstance(checkout_oid, str) or not re.fullmatch(
-            r"[0-9a-f]{40}", checkout_oid
+    legacy_r1_candidate = base_sha == BASE_COMMIT
+    if legacy_r1_candidate:
+        if head_sha_valid and head == head_sha:
+            if event.get("github_sha") not in {head_sha, merge_sha}:
+                errors.append("GitHub runner SHA conflicts with the direct head checkout")
+            if parent_oids != [BASE_COMMIT]:
+                errors.append("direct pull-request head is not one commit on the frozen base")
+        elif (
+            head_sha_valid
+            and event.get("github_sha") == head
+            and parent_oids == [BASE_COMMIT, head_sha]
+            and commit_message
+            == f"Merge {head_sha} into {BASE_COMMIT}\n".encode("ascii")
         ):
-            errors.append(f"GitHub checkout tree blob OID is invalid: {path}")
-        if checkout_oid != working_oid:
-            errors.append(f"GitHub checkout tree blob differs from the clean file: {path}")
-        fixed_oid = FIXED_CHECKOUT_BLOB_OIDS.get(path)
-        if fixed_oid is not None and checkout_oid != fixed_oid:
-            errors.append(f"GitHub checkout tree blob differs from the frozen fixture: {path}")
+            pass
+        else:
+            if event.get("github_sha") == head and len(parent_oids) == 2:
+                if parent_oids != [BASE_COMMIT, head_sha]:
+                    errors.append(
+                        "synthetic pull-request merge parents conflict with event SHAs"
+                    )
+                else:
+                    errors.append(
+                        "synthetic pull-request merge message conflicts with event SHAs"
+                    )
+            else:
+                errors.append("GitHub pull-request checkout shape is unknown")
+
+        if type(changed_files) is not int or changed_files != len(ALLOWED_PATHS):
+            errors.append("GitHub pull-request changed-file count is not exactly three")
+        if type(commit_count) is not int or commit_count != 1:
+            errors.append("GitHub pull-request candidate commit count is not exactly one")
+        if set(checkout_blob_oids) != ALLOWED_PATHS:
+            errors.append(
+                "GitHub checkout tree does not contain exactly the three allowed paths"
+            )
+        if set(working_blob_oids) != ALLOWED_PATHS:
+            errors.append(
+                "GitHub working-tree blob evidence is incomplete or contains extras"
+            )
+        for path in ALLOWED_PATHS:
+            checkout_oid = checkout_blob_oids.get(path)
+            working_oid = working_blob_oids.get(path)
+            if not isinstance(checkout_oid, str) or not re.fullmatch(
+                r"[0-9a-f]{40}", checkout_oid
+            ):
+                errors.append(f"GitHub checkout tree blob OID is invalid: {path}")
+            if checkout_oid != working_oid:
+                errors.append(
+                    f"GitHub checkout tree blob differs from the clean file: {path}"
+                )
+            fixed_oid = FIXED_CHECKOUT_BLOB_OIDS.get(path)
+            if fixed_oid is not None and checkout_oid != fixed_oid:
+                errors.append(
+                    f"GitHub checkout tree blob differs from the frozen fixture: {path}"
+                )
+        return errors
+
+    base_ref = base.get("ref") if isinstance(base, dict) else None
+    base_repository = base.get("repo") if isinstance(base, dict) else None
+    head_repository = pr_head.get("repo") if isinstance(pr_head, dict) else None
+    base_repository_name = (
+        base_repository.get("full_name") if isinstance(base_repository, dict) else None
+    )
+    head_repository_name = (
+        head_repository.get("full_name") if isinstance(head_repository, dict) else None
+    )
+    if base_ref != "main":
+        errors.append("post-integration pull-request base branch is not main")
+    if base_repository_name != CANONICAL_REPOSITORY:
+        errors.append("post-integration pull-request base repository is not canonical")
+    if head_repository_name != CANONICAL_REPOSITORY:
+        errors.append("post-integration pull-request head repository is not canonical")
+    if base_sha_valid and head_sha_valid and base_sha == head_sha:
+        errors.append("post-integration pull-request base and head SHAs are identical")
+    # Counts are event-shape evidence only. Governed preservation is proven from
+    # the final checkout hashes below, not from an unobservable depth-one diff.
+    if type(changed_files) is not int or changed_files <= 0:
+        errors.append("post-integration pull-request changed-file count is not positive")
+    if type(commit_count) is not int or commit_count <= 0:
+        errors.append("post-integration pull-request commit count is not positive")
+
+    if event.get("github_sha") != head:
+        errors.append("post-integration runner SHA conflicts with checkout HEAD")
+    if head_sha_valid and head == head_sha:
+        if type(commit_count) is int and commit_count == 1:
+            if parent_oids != [base_sha]:
+                errors.append(
+                    "post-integration direct head is not one commit on the event base"
+                )
+        elif type(commit_count) is int and commit_count > 1:
+            if base_is_head_ancestor is not True:
+                errors.append(
+                    "post-integration direct multi-commit ancestry is not proven locally"
+                )
+            if not parent_oids:
+                errors.append("post-integration direct head has no parent evidence")
+    elif base_sha_valid and head_sha_valid:
+        expected_parents = [base_sha, head_sha]
+        expected_message = f"Merge {head_sha} into {base_sha}\n".encode("ascii")
+        if parent_oids != expected_parents:
+            errors.append(
+                "post-integration synthetic merge parents conflict with event SHAs"
+            )
+        if commit_message != expected_message:
+            errors.append(
+                "post-integration synthetic merge message conflicts with event SHAs"
+            )
+    else:
+        errors.append("post-integration pull-request checkout shape is unknown")
+
+    errors.extend(
+        _validate_integrated_tree(
+            checkout_blob_oids=checkout_blob_oids,
+            working_blob_oids=working_blob_oids,
+            authority_blob_oids=authority_blob_oids,
+            context="post-integration pull-request",
+        )
+    )
     return errors
 
 
@@ -1101,11 +1185,13 @@ def _git_is_ancestor(ancestor: str, descendant: str) -> bool:
 
 
 def _parse_commit_parent_oids(raw_commit: bytes) -> list[str]:
-    if not isinstance(raw_commit, bytes) or not raw_commit.endswith(b"\n"):
-        raise AssertionError("raw commit object must be complete newline-terminated bytes")
-    header_block, separator, _message = raw_commit.partition(b"\n\n")
+    if not isinstance(raw_commit, bytes) or not raw_commit:
+        raise AssertionError("raw commit object must be non-empty bytes")
+    header_block, separator, message = raw_commit.partition(b"\n\n")
     if not separator:
         raise AssertionError("raw commit object is missing the header boundary")
+    if not message:
+        raise AssertionError("raw commit object is missing its message")
     lines = header_block.split(b"\n")
     if not lines or re.fullmatch(rb"tree [0-9a-f]{40}", lines[0]) is None:
         raise AssertionError("raw commit object has an invalid tree header")
@@ -1237,6 +1323,23 @@ def _runtime_checkpoint_evidence(
         path: _git("hash-object", "--", path) for path in sorted(ALLOWED_PATHS)
     }
     if event.get("github_event_name") == "pull_request":
+        payload = event.get("payload")
+        pull_request = payload.get("pull_request") if isinstance(payload, dict) else None
+        base = pull_request.get("base") if isinstance(pull_request, dict) else None
+        pr_head = pull_request.get("head") if isinstance(pull_request, dict) else None
+        base_sha = base.get("sha") if isinstance(base, dict) else None
+        head_sha = pr_head.get("sha") if isinstance(pr_head, dict) else None
+        post_integration = (
+            isinstance(base_sha, str)
+            and re.fullmatch(r"[0-9a-f]{40}", base_sha) is not None
+            and base_sha != BASE_COMMIT
+        )
+        base_is_head_ancestor = (
+            post_integration
+            and isinstance(head_sha, str)
+            and re.fullmatch(r"[0-9a-f]{40}", head_sha) is not None
+            and _git_is_ancestor(base_sha, head_sha)
+        )
         return (
             "github_pull_request",
             _validate_github_pull_request_checkout(
@@ -1247,6 +1350,10 @@ def _runtime_checkpoint_evidence(
                 status_lines=status,
                 checkout_blob_oids=checkout_blobs,
                 working_blob_oids=working_blobs,
+                authority_blob_oids=(
+                    _authority_tree_blob_oids("HEAD") if post_integration else {}
+                ),
+                base_is_head_ancestor=base_is_head_ancestor,
             ),
         )
     return (
@@ -2997,6 +3104,8 @@ class V0417R1DomainContractTests(unittest.TestCase):
             status_lines=[],
             checkout_blob_oids=copy.deepcopy(checkout_blobs),
             working_blob_oids=copy.deepcopy(checkout_blobs),
+            authority_blob_oids={},
+            base_is_head_ancestor=False,
         )
         synthetic = copy.deepcopy(direct)
         synthetic.update(
@@ -3131,6 +3240,385 @@ class V0417R1DomainContractTests(unittest.TestCase):
         for mutation in mutations:
             self.assertTrue(_validate_github_pull_request_checkout(**mutation))
 
+    def test_001ca_post_integration_pull_request_preservation_matrix(self) -> None:
+        base_sha = "9" * 40
+        head_sha = "a" * 40
+        checkout_sha = "b" * 40
+        repository = CANONICAL_REPOSITORY
+        checkout_blobs = {
+            **FIXED_CHECKOUT_BLOB_OIDS,
+            "tests/test_v0417_p3ar_r1_domain_contract.py": "3" * 40,
+        }
+        payload = {
+            "repository": {"full_name": repository},
+            "pull_request": {
+                "base": {
+                    "sha": base_sha,
+                    "ref": "main",
+                    "repo": {"full_name": repository},
+                },
+                "head": {
+                    "sha": head_sha,
+                    "ref": "fix/maintenance",
+                    "repo": {"full_name": repository},
+                },
+                "merge_commit_sha": checkout_sha,
+                "changed_files": 1,
+                "commits": 1,
+            },
+        }
+        event = {
+            "payload": payload,
+            "github_event_name": "pull_request",
+            "github_sha": checkout_sha,
+            "github_repository": repository,
+            "github_ref": "refs/pull/52/merge",
+        }
+        synthetic = {
+            "event": event,
+            "head": checkout_sha,
+            "parent_oids": [base_sha, head_sha],
+            "commit_message": f"Merge {head_sha} into {base_sha}\n".encode("ascii"),
+            "status_lines": [],
+            "checkout_blob_oids": copy.deepcopy(checkout_blobs),
+            "working_blob_oids": copy.deepcopy(checkout_blobs),
+            "authority_blob_oids": copy.deepcopy(FROZEN_AUTHORITY_BLOB_OIDS),
+            "base_is_head_ancestor": False,
+        }
+        self.assertEqual([], _validate_github_pull_request_checkout(**synthetic))
+
+        multi_files = copy.deepcopy(synthetic)
+        multi_files["event"]["payload"]["pull_request"]["changed_files"] = 7
+        self.assertEqual([], _validate_github_pull_request_checkout(**multi_files))
+        multi_commits = copy.deepcopy(synthetic)
+        multi_commits["event"]["payload"]["pull_request"]["commits"] = 3
+        self.assertEqual([], _validate_github_pull_request_checkout(**multi_commits))
+
+        for merge_sha in (None, head_sha, checkout_sha, "f" * 40):
+            merge_variant = copy.deepcopy(synthetic)
+            merge_variant["event"]["payload"]["pull_request"][
+                "merge_commit_sha"
+            ] = merge_sha
+            self.assertEqual(
+                [],
+                _validate_github_pull_request_checkout(**merge_variant),
+            )
+
+        direct = copy.deepcopy(synthetic)
+        direct.update(
+            head=head_sha,
+            parent_oids=[base_sha],
+            commit_message=b"maintenance candidate\n",
+        )
+        direct["event"]["github_sha"] = head_sha
+        self.assertEqual([], _validate_github_pull_request_checkout(**direct))
+
+        direct_multi = copy.deepcopy(direct)
+        direct_multi["event"]["payload"]["pull_request"]["commits"] = 3
+        direct_multi["parent_oids"] = ["c" * 40]
+        direct_multi["base_is_head_ancestor"] = True
+        self.assertEqual([], _validate_github_pull_request_checkout(**direct_multi))
+        direct_multi_unproven = copy.deepcopy(direct_multi)
+        direct_multi_unproven["base_is_head_ancestor"] = False
+        self.assertTrue(
+            any(
+                "ancestry is not proven locally" in error
+                for error in _validate_github_pull_request_checkout(
+                    **direct_multi_unproven
+                )
+            )
+        )
+        direct_multi_non_boolean = copy.deepcopy(direct_multi)
+        direct_multi_non_boolean["base_is_head_ancestor"] = 1
+        self.assertTrue(
+            any(
+                "ancestry is not proven locally" in error
+                for error in _validate_github_pull_request_checkout(
+                    **direct_multi_non_boolean
+                )
+            )
+        )
+
+        mutations: list[tuple[dict[str, Any], str]] = []
+
+        def mutate(path: tuple[str, ...], value: Any) -> dict[str, Any]:
+            mutation = copy.deepcopy(synthetic)
+            target: dict[str, Any] = mutation
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            return mutation
+
+        for invalid_merge_sha in ("F" * 40, "f" * 39, "g" * 40, 1):
+            mutations.append(
+                (
+                    mutate(
+                        (
+                            "event",
+                            "payload",
+                            "pull_request",
+                            "merge_commit_sha",
+                        ),
+                        invalid_merge_sha,
+                    ),
+                    "merge SHA is invalid",
+                )
+            )
+        for field in ("changed_files", "commits"):
+            for invalid_count in (0, -1, True, "1", None):
+                mutations.append(
+                    (
+                        mutate(
+                            ("event", "payload", "pull_request", field),
+                            invalid_count,
+                        ),
+                        "count is not positive",
+                    )
+                )
+        mutations.extend(
+            [
+                (
+                    mutate(
+                        ("event", "github_repository"),
+                        "other/repository",
+                    ),
+                    "repository identity conflicts",
+                ),
+                (
+                    mutate(
+                        ("event", "payload", "repository", "full_name"),
+                        "other/repository",
+                    ),
+                    "repository identity conflicts",
+                ),
+                (
+                    mutate(("event", "github_ref"), "refs/heads/main"),
+                    "not a canonical merge ref",
+                ),
+                (
+                    mutate(
+                        ("event", "payload", "pull_request", "base", "ref"),
+                        "release",
+                    ),
+                    "base branch is not main",
+                ),
+                (
+                    mutate(
+                        (
+                            "event",
+                            "payload",
+                            "pull_request",
+                            "base",
+                            "repo",
+                            "full_name",
+                        ),
+                        "other/repository",
+                    ),
+                    "base repository is not canonical",
+                ),
+                (
+                    mutate(
+                        (
+                            "event",
+                            "payload",
+                            "pull_request",
+                            "head",
+                            "repo",
+                            "full_name",
+                        ),
+                        "other/repository",
+                    ),
+                    "head repository is not canonical",
+                ),
+                (
+                    mutate(("event", "github_sha"), "d" * 40),
+                    "runner SHA conflicts",
+                ),
+            ]
+        )
+
+        wrong_base = mutate(
+            ("event", "payload", "pull_request", "base", "sha"),
+            "d" * 40,
+        )
+        mutations.append((wrong_base, "parents conflict"))
+        wrong_head = mutate(
+            ("event", "payload", "pull_request", "head", "sha"),
+            "d" * 40,
+        )
+        mutations.append((wrong_head, "parents conflict"))
+        identical_head = mutate(
+            ("event", "payload", "pull_request", "head", "sha"),
+            base_sha,
+        )
+        mutations.append((identical_head, "base and head SHAs are identical"))
+        invalid_base = mutate(
+            ("event", "payload", "pull_request", "base", "sha"),
+            "G" * 40,
+        )
+        mutations.append((invalid_base, "base SHA is missing or invalid"))
+        invalid_head = mutate(
+            ("event", "payload", "pull_request", "head", "sha"),
+            1,
+        )
+        mutations.append((invalid_head, "head SHA is missing or invalid"))
+
+        wrong_parents = copy.deepcopy(synthetic)
+        wrong_parents["parent_oids"] = [head_sha, base_sha]
+        mutations.append((wrong_parents, "parents conflict"))
+        wrong_message = copy.deepcopy(synthetic)
+        wrong_message["commit_message"] = (
+            f"Merge {head_sha} into {base_sha}".encode("ascii")
+        )
+        mutations.append((wrong_message, "message conflicts"))
+        dirty = copy.deepcopy(synthetic)
+        dirty["status_lines"] = [" M governed"]
+        mutations.append((dirty, "worktree is not clean"))
+
+        missing_path = copy.deepcopy(synthetic)
+        missing_path["checkout_blob_oids"].pop(
+            "tests/test_v0417_p3ar_r1_domain_contract.py"
+        )
+        mutations.append((missing_path, "checkout tree does not contain"))
+        working_drift = copy.deepcopy(synthetic)
+        working_drift["working_blob_oids"][
+            "tests/test_v0417_p3ar_r1_domain_contract.py"
+        ] = "d" * 40
+        mutations.append((working_drift, "checkout blob differs from the clean file"))
+        for fixture_path in FIXED_CHECKOUT_BLOB_OIDS:
+            fixture_drift = copy.deepcopy(synthetic)
+            fixture_drift["checkout_blob_oids"][fixture_path] = "d" * 40
+            fixture_drift["working_blob_oids"][fixture_path] = "d" * 40
+            mutations.append((fixture_drift, "fixture blob differs"))
+        authority_drift = copy.deepcopy(synthetic)
+        authority_path = next(iter(FROZEN_AUTHORITY_BLOB_OIDS))
+        authority_drift["authority_blob_oids"][authority_path] = "d" * 40
+        mutations.append((authority_drift, "authority blob differs"))
+        missing_authority = copy.deepcopy(synthetic)
+        missing_authority["authority_blob_oids"].pop(authority_path)
+        mutations.append((missing_authority, "authority tree evidence is not closed"))
+        extra_authority = copy.deepcopy(synthetic)
+        extra_authority["authority_blob_oids"]["unexpected"] = "d" * 40
+        mutations.append((extra_authority, "authority tree evidence is not closed"))
+
+        for mutation, expected_error in mutations:
+            with self.subTest(expected_error=expected_error):
+                errors = _validate_github_pull_request_checkout(**mutation)
+                self.assertTrue(
+                    any(expected_error in error for error in errors),
+                    errors,
+                )
+
+    def test_001cb_post_integration_runtime_evidence_routes_dynamic_base(self) -> None:
+        base_sha = "9" * 40
+        head_sha = "a" * 40
+        checkout_sha = "b" * 40
+        repository = CANONICAL_REPOSITORY
+        checkout_blobs = {
+            **FIXED_CHECKOUT_BLOB_OIDS,
+            "tests/test_v0417_p3ar_r1_domain_contract.py": "3" * 40,
+        }
+
+        def event(*, commits: int) -> dict[str, Any]:
+            return {
+                "payload": {
+                    "repository": {"full_name": repository},
+                    "pull_request": {
+                        "base": {
+                            "sha": base_sha,
+                            "ref": "main",
+                            "repo": {"full_name": repository},
+                        },
+                        "head": {
+                            "sha": head_sha,
+                            "ref": "fix/maintenance",
+                            "repo": {"full_name": repository},
+                        },
+                        "merge_commit_sha": checkout_sha,
+                        "changed_files": 2,
+                        "commits": commits,
+                    },
+                },
+                "github_event_name": "pull_request",
+                "github_sha": checkout_sha,
+                "github_repository": repository,
+                "github_ref": "refs/pull/52/merge",
+            }
+
+        def runtime(
+            *,
+            observed_head: str,
+            observed_parents: list[str],
+            observed_message: bytes,
+            observed_event: dict[str, Any],
+            ancestry: bool,
+        ) -> tuple[str, list[str]]:
+            def git(*args: str) -> str:
+                if args == ("rev-parse", "HEAD"):
+                    return observed_head
+                if args == ("status", "--short", "--untracked-files=all"):
+                    return ""
+                if len(args) == 3 and args[:2] == ("hash-object", "--"):
+                    return checkout_blobs[args[2]]
+                raise AssertionError(f"unexpected git call: {args!r}")
+
+            with mock.patch(
+                f"{__name__}._load_github_event",
+                return_value=copy.deepcopy(observed_event),
+            ), mock.patch(
+                f"{__name__}._git",
+                side_effect=git,
+            ), mock.patch(
+                f"{__name__}._commit_object_evidence",
+                return_value=(observed_parents, observed_message),
+            ), mock.patch(
+                f"{__name__}._tree_blob_oid",
+                side_effect=lambda _revision, path: checkout_blobs[path],
+            ), mock.patch(
+                f"{__name__}._authority_tree_blob_oids",
+                return_value=copy.deepcopy(FROZEN_AUTHORITY_BLOB_OIDS),
+            ) as authority_mock, mock.patch(
+                f"{__name__}._git_is_ancestor",
+                return_value=ancestry,
+            ) as ancestry_mock:
+                result = _runtime_checkpoint_evidence({"GITHUB_ACTIONS": "true"})
+            authority_mock.assert_called_once_with("HEAD")
+            ancestry_mock.assert_called_once_with(base_sha, head_sha)
+            return result
+
+        synthetic_mode, synthetic_errors = runtime(
+            observed_head=checkout_sha,
+            observed_parents=[base_sha, head_sha],
+            observed_message=f"Merge {head_sha} into {base_sha}\n".encode("ascii"),
+            observed_event=event(commits=2),
+            ancestry=False,
+        )
+        self.assertEqual("github_pull_request", synthetic_mode)
+        self.assertEqual([], synthetic_errors)
+
+        direct_event = event(commits=2)
+        direct_event["github_sha"] = head_sha
+        direct_mode, direct_errors = runtime(
+            observed_head=head_sha,
+            observed_parents=["c" * 40],
+            observed_message=b"maintenance candidate\n",
+            observed_event=direct_event,
+            ancestry=True,
+        )
+        self.assertEqual("github_pull_request", direct_mode)
+        self.assertEqual([], direct_errors)
+
+        _mode, unproven_errors = runtime(
+            observed_head=head_sha,
+            observed_parents=["c" * 40],
+            observed_message=b"maintenance candidate\n",
+            observed_event=direct_event,
+            ancestry=False,
+        )
+        self.assertTrue(
+            any("ancestry is not proven locally" in error for error in unproven_errors)
+        )
+
     def test_001d_raw_commit_parent_headers_are_closed_and_ordered(self) -> None:
         first = "1" * 40
         second = "2" * 40
@@ -3146,12 +3634,30 @@ class V0417R1DomainContractTests(unittest.TestCase):
             )
             return b"\n".join(headers) + b"\n\nmessage\n"
 
-        self.assertEqual([first], _parse_commit_parent_oids(raw_commit([first])))
+        with_trailing_lf = raw_commit([first])
+        without_trailing_lf = with_trailing_lf[:-1]
+        self.assertEqual([first], _parse_commit_parent_oids(with_trailing_lf))
+        self.assertEqual([first], _parse_commit_parent_oids(without_trailing_lf))
         self.assertEqual(
             [first, second],
             _parse_commit_parent_oids(raw_commit([first, second])),
         )
+        github_style = (
+            b"tree "
+            + b"a" * 40
+            + f"\nparent {first}\nparent {second}\n".encode("ascii")
+            + b"author Test <test@example.invalid> 1 +0000\n"
+            + b"committer Test <test@example.invalid> 1 +0000\n"
+            + b"gpgsig -----BEGIN PGP SIGNATURE-----\n signature\n"
+            + b" -----END PGP SIGNATURE-----\n\n"
+            + f"Merge {second} into {first}".encode("ascii")
+        )
+        self.assertEqual(
+            [first, second],
+            _parse_commit_parent_oids(github_style),
+        )
         malformed = [
+            b"",
             raw_commit([first]).replace(
                 f"parent {first}".encode("ascii"), b"parent not-an-oid"
             ),
@@ -3172,12 +3678,23 @@ class V0417R1DomainContractTests(unittest.TestCase):
                 b"author Other <other@example.invalid> 2 +0000\ncommitter Test",
             ),
             raw_commit([first]).replace(b"\n\nmessage\n", b"\nmessage\n"),
-            raw_commit([first])[:-1],
+            raw_commit([first]).replace(b"\n\nmessage\n", b"\n\n"),
+            raw_commit([first]).replace(
+                b"committer Test <test@example.invalid> 1 +0000",
+                b"committer",
+            ),
         ]
         for raw in malformed:
             with self.subTest(raw=raw[:100]):
                 with self.assertRaises(AssertionError):
                     _parse_commit_parent_oids(raw)
+        with mock.patch.object(
+            subprocess,
+            "check_output",
+            return_value=raw_commit([first]).replace(b"\n\nmessage\n", b"\n\n"),
+        ):
+            with self.assertRaisesRegex(AssertionError, "missing its message"):
+                _commit_object_evidence("HEAD")
 
     def test_001e_real_depth_one_direct_and_synthetic_runtime_evidence(self) -> None:
         git_environment = os.environ.copy()
@@ -3389,6 +3906,11 @@ class V0417R1DomainContractTests(unittest.TestCase):
                             "HEAD"
                         )
                         self.assertEqual(parents, observed_parents)
+                        if branch == "candidate":
+                            self.assertFalse(
+                                _git_is_ancestor(base_oid, candidate_oid),
+                                "depth-one direct checkout must not invent ancestry",
+                            )
                         if branch == "synthetic":
                             self.assertEqual(
                                 f"{github_merge_message}\n".encode("ascii"),
