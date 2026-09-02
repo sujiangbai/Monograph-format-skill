@@ -24,12 +24,15 @@
 | 0.4.1.6 | 历史 | [v0.4.1.6-registry-semantic-closure-and-matrix-succession.md](v0.4.1.6-registry-semantic-closure-and-matrix-succession.md) | P3a-R registry semantic closure、matrix 1.2/1.3 身份与 current-closure 交接修订 |
 | 0.4.1.7 | 历史 | [v0.4.1.7-r1-semantic-domain-completion-and-r2-restart.md](v0.4.1.7-r1-semantic-domain-completion-and-r2-restart.md) | R1 semantic-domain machine contract、独立接受绑定与 R2 restart 门禁修订；docs-only |
 | 0.4.1.8 | 历史、未实施 | [v0.4.1.8-atomic-ownership-authority-correction.md](v0.4.1.8-atomic-ownership-authority-correction.md) | 171 个冻结决策的非重叠原子责任、唯一 primary owner、真实 route intersection、P7 最终化实施/验证拆分与 Z-009 边界修订；docs-only planning candidate |
-| 0.5.0 | 当前唯一实施基线 | [v0.5.0-product-convergence-and-vertical-delivery.md](v0.5.0-product-convergence-and-vertical-delivery.md) | 收敛到 macOS + Microsoft Word 的真实专著纵向交付；长文能力分层，高保障与实验平台不再阻塞核心路线 |
+| 0.5.0 | V0.5.1 合并前有效，合并后为历史 | [v0.5.0-product-convergence-and-vertical-delivery.md](v0.5.0-product-convergence-and-vertical-delivery.md) | 收敛到 macOS + Microsoft Word 的真实专著纵向交付；长文能力分层，高保障与实验平台不再阻塞核心路线 |
+| 0.5.1 | 用户已批准，合入 main 后为唯一实施基线 | [v0.5.1-bounded-content-safe-format-delivery.md](v0.5.1-bounded-content-safe-format-delivery.md) | 明确内容零改写、V0.4.0 轻量整书流程、最小任务 Profile/三类核心控制与证据工件、macOS→Windows 平台顺序及防过度开发边界；不自动授权具体实现批次 |
 
 ## 版本规则
 
 方案文件是不可变快照。任何修订必须在新分支创建新版本文件并通过 PR 合并，不得修改已有版本正文。
 
-V0.5.0 是当前唯一的日常实施入口。V0.4.1—V0.4.1.8 保留为历史设计与证据，不再需要执行员拼接读取，也不再以其未完成的 registry、matrix、ownership、C2、P3b 或后续阶段阻塞核心纵向交付。
+V0.5.1 方案 PR 合入 `main` 前，V0.5.0 仍是唯一的日常实施入口；合入后，V0.5.1 成为唯一日常实施入口，V0.5.0 转为历史。V0.4.1—V0.4.1.8 保留为历史设计与证据，不再需要执行员拼接读取，也不再以其未完成的 registry、matrix、ownership、C2、P3b 或后续阶段阻塞核心纵向交付。
+
+用户已于 2026-09-03 明确批准 V0.5.1 最终文本。方案批准不等于 PR 合并或产品实现授权；方案 PR 仍须获得明确合并授权并合入 `main` 后生效，具体开发批次另按用户批准范围执行。本索引的生效条件不表示尚未合并的分支已经替代稳定基线。
 
 历史方案中已经合并的代码、格式值、测试和安全不变量不会因状态改为“历史”而自动删除或失效。任何高保障能力恢复、暂停 R2 的复用、实验平台转为正式支持或安全边界调整，仍需新的用户范围授权。
