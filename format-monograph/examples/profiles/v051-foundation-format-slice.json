@@ -1,0 +1,230 @@
+{
+  "schema_version": "1.1",
+  "profile_id": "v051-foundation-format-slice",
+  "name": "V0.5.1 基础页节、书名、标题与正文格式切片",
+  "locale": "zh-CN",
+  "scope": {
+    "document_type": "monograph",
+    "input_format": "DOCX",
+    "notes": "仅格式化结构图中逐项批准的书名、普通标题和普通正文角色；页节默认保持；不创建、删除、改写或重排内容。"
+  },
+  "target_applications": [
+    "Microsoft 365"
+  ],
+  "source_precedence": [
+    "user_requirement",
+    "written_requirement"
+  ],
+  "sources": [
+    {
+      "id": "SRC-501",
+      "type": "user_requirement",
+      "label": "V0.5.1 P3 foundation slice approval",
+      "summary": "Approved V0.4.0 foundation values for existing page/section, title, heading levels 1-4, and ordinary body roles; all other roles remain excluded.",
+      "public": true
+    }
+  ],
+  "rules": [
+    {
+      "id": "FMT-PAGE-501",
+      "category": "page",
+      "selector": {"kind": "document", "value": "all"},
+      "properties": {"page_size_policy": "preserve"},
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Preserve every existing section and page property by default.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-FRONT-501",
+      "category": "front_matter",
+      "selector": {"kind": "paragraph_role", "value": "title"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "STHeiti Medium",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 22,
+        "bold": true,
+        "italic": false,
+        "color_hex": "000000",
+        "alignment": "center",
+        "line_spacing_rule": "at_least",
+        "line_spacing_pt": 33,
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 0,
+        "space_after_pt": 0
+      },
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Format only a caller-approved existing title role; preserve its text and position.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-501",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "chapter_title"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "STHeiti Medium",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 18,
+        "bold": true,
+        "italic": false,
+        "color_hex": "000000",
+        "alignment": "center",
+        "line_spacing_rule": "at_least",
+        "line_spacing_pt": 27,
+        "space_before_pt": 24,
+        "space_after_pt": 18,
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "keep_with_next": true,
+        "keep_together": true,
+        "widow_control": true
+      },
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Approved chapter-title values; preserve existing page-break state and numbering text.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-502",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "level_2_section"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "STHeiti Medium",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 14,
+        "bold": true,
+        "italic": false,
+        "color_hex": "000000",
+        "alignment": "left",
+        "line_spacing_rule": "at_least",
+        "line_spacing_pt": 21,
+        "space_before_pt": 18,
+        "space_after_pt": 9,
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "keep_with_next": true,
+        "keep_together": true,
+        "widow_control": true
+      },
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Approved level-2 heading values; preserve existing page-break state and numbering text.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-503",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "level_3_section"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "STHeiti Medium",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 12,
+        "bold": true,
+        "italic": false,
+        "color_hex": "000000",
+        "alignment": "left",
+        "line_spacing_rule": "at_least",
+        "line_spacing_pt": 18,
+        "space_before_pt": 12,
+        "space_after_pt": 6,
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "keep_with_next": true,
+        "keep_together": true,
+        "widow_control": true
+      },
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Approved level-3 heading values; preserve existing page-break state and numbering text.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-HEAD-504",
+      "category": "heading",
+      "selector": {"kind": "paragraph_role", "value": "level_4_section"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "STHeiti Medium",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 10.5,
+        "bold": true,
+        "italic": false,
+        "color_hex": "000000",
+        "alignment": "left",
+        "line_spacing_rule": "at_least",
+        "line_spacing_pt": 18,
+        "space_before_pt": 9,
+        "space_after_pt": 3,
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "keep_with_next": true,
+        "keep_together": true,
+        "widow_control": true
+      },
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Approved level-4 heading values; preserve existing page-break state and numbering text.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-BODY-501",
+      "category": "body",
+      "selector": {"kind": "paragraph_role", "value": "body_text"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "Songti",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 10.5,
+        "bold": false,
+        "alignment": "justify",
+        "line_spacing_rule": "at_least",
+        "line_spacing_pt": 18,
+        "first_line_indent_chars": 2,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 0,
+        "space_after_pt": 0,
+        "keep_with_next": false,
+        "keep_together": false,
+        "widow_control": true
+      },
+      "source_ids": ["SRC-501"],
+      "evidence_summary": "Apply only to explicitly approved ordinary body paragraphs; excluded roles remain untouched.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    }
+  ],
+  "conflicts": [],
+  "open_questions": [],
+  "approval": {
+    "status": "approved",
+    "approved_by": "V0.5.1 project manager",
+    "approved_at": "2026-09-04T00:00:00Z",
+    "notes": "Limited to the approved P3 foundation slice; no TOC, field, numbering, page rewrite, or excluded-role formatting."
+  },
+  "runtime_policy": {
+    "caller_requirements_highest": true,
+    "editable_equations_required": true,
+    "formula_image_policy": "block",
+    "legacy_equation_policy": "qa",
+    "field_rebuild_policy": "report_only"
+  }
+}

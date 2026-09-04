@@ -149,7 +149,7 @@ must neither duplicate TC fields nor change their source mapping.
 
 A short centered paragraph directly following a standalone image may be proposed as `figure_caption_unnumbered`. A short text row directly beneath mapped image cells may be proposed as `figure_panel_label`. Both remain unapproved candidates until the caller confirms the role; approval changes style only and never inserts a number or edits wording.
 
-For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered and vertically centered title-page section, an optional `book_title_format`, and insertion of the derived `目    录` heading (four ASCII spaces) before the main TOC. The technical-textbook fallback title uses 22 pt bold text with at least 33 pt line spacing and zero paragraph spacing so wrapped glyphs are not clipped. Legacy approved maps using `目录` remain readable. The `TOC` field does not create its own heading; the skill inserts and maintains the separate derived paragraph. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
+For schema 1.4, `front_matter` may approve one hashed whole-book title locator, a separate unnumbered and vertically centered title-page section, and an optional `book_title_format`. `insert_toc_heading_if_missing=true` retains the technical-textbook behavior that inserts and maintains a derived `目    录` heading (four ASCII spaces) before the main TOC; legacy approved maps using `目录` remain readable. `insert_toc_heading_if_missing=false` is preservation-only: an existing standard, spaced, or custom TOC title remains byte-for-byte text content, and a missing title remains missing. The `TOC` field does not create its own heading. `block_spacing` may approve one real empty paragraph after each approved data table and complete approved figure block. These spacer paragraphs are derived structure and must be removed by target-software pagination when they would start a new page.
 
 ### Trailing sections
 
@@ -166,11 +166,11 @@ Candidates report visible payload, header/footer references and payload, page-nu
 - `toc_source`: authorize the exact text-only TOC source set and its single deterministic source mode.
 - `pagination_groups`: apply only approved `keepNext`/`cantSplit` relationships to figures, captions, and tables.
 - `pagination_sections`: create and audit approved TOC/body numbering sections and odd/even PAGE footers.
-- `front_matter`: separate the whole-book title page from the TOC and insert the approved TOC heading.
+- `front_matter`: separate the approved whole-book title page from the TOC; TOC-heading insertion occurs only when its existing boolean is explicitly true.
 - `block_spacing`: insert idempotent same-page-only empty paragraphs after approved figure/table blocks.
 - `trailing_empty_sections`: remove safe approved final sections from the end inward.
 
-Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. Approved font rules also clear the corresponding theme-font attributes and are audited after resolving run, character-style, paragraph-style, base-style, document-default, and theme inheritance. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, revisions, and formula formatting.
+Style rules clear conflicting direct formatting only for the properties they control and only on approved role targets. The V0.5.1 foundation title/body/heading slice assigns those targets a deterministic local derived style based on the existing role style, so unapproved paragraphs that share `Normal`, `Title`, or `Heading 1-4` are not changed. Approved font rules also clear the corresponding theme-font attributes and are audited after resolving run, character-style, paragraph-style, base-style, document-default, and theme inheritance. They preserve uncontrolled color, language, character styles, superscript/subscript, hyperlinks, fields, bookmarks, comments, revisions, and formula formatting.
 
 ## Privacy and integrity
 

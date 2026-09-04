@@ -19,6 +19,7 @@ from _common import (
     field_inventory,
     load_document,
     protected_object_manifest,
+    semantic_title_heading_role,
     style_effective_font,
     theme_font_inventory,
     word_xml_counts,
@@ -104,10 +105,14 @@ def inventory(path: Path) -> dict:
         {
             "index": index,
             "style": paragraph.style.name,
+            "semantic_role": semantic_title_heading_role(paragraph.style),
             "text": paragraph.text[:160],
         }
         for index, paragraph in enumerate(document.paragraphs)
-        if paragraph.style and paragraph.style.name.startswith("Heading")
+        if paragraph.style
+        and (semantic_title_heading_role(paragraph.style) or "").startswith(
+            "heading_"
+        )
     ]
     outline_paragraphs = [
         index
