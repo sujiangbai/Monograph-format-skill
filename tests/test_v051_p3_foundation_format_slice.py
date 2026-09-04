@@ -30,11 +30,14 @@ sys.path.insert(0, str(SCRIPTS))
 from _common import (  # noqa: E402
     FormatMonographError,
     apply_style_rule_to_paragraphs,
+    available_font_names,
     content_fingerprint,
+    missing_profile_fonts,
     protected_object_manifest,
     semantic_title_heading_role,
     style_effective_font,
 )
+from finalize_docx import effective_font_failures  # noqa: E402
 from structure_map import (  # noqa: E402
     _apply_front_matter,
     approved_role_paragraphs,
@@ -46,13 +49,47 @@ from structure_map import (  # noqa: E402
 from validate_profile import validate  # noqa: E402
 
 
+PORTABLE_TEST_FONT = next(
+    iter(
+        sorted(
+            available_font_names()
+            - {"STHeiti Medium", "Songti", "Times New Roman"}
+        )
+    ),
+    None,
+)
+
+
 class V051P3FoundationFormatSliceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.portable_font = PORTABLE_TEST_FONT
+        self.portable_profile = self.root / "portable-foundation-profile.json"
+        if self.portable_font is not None:
+            profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+            profile["profile_id"] = "v051-foundation-format-slice-portable-test"
+            for rule in profile["rules"]:
+                for key in (
+                    "font_name",
+                    "font_name_ascii",
+                    "font_name_east_asia",
+                    "font_name_complex_script",
+                ):
+                    if key in rule.get("properties", {}):
+                        rule["properties"][key] = self.portable_font
+            self.portable_profile.write_text(
+                json.dumps(profile, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def _strict_portable_profile(self) -> Path:
+        if self.portable_font is None:
+            self.skipTest("No host font is available for strict integration testing.")
+        return self.portable_profile
 
     @staticmethod
     def _rule(role: str, properties: dict[str, object]) -> dict[str, object]:
@@ -268,6 +305,154 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
         self.assertFalse(title["italic"])
         self.assertEqual("000000", title["color_hex"])
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS live-font gate")
+    def test_shipping_profile_strict_fonts_are_available_on_macos(self) -> None:
+        profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+        self.assertEqual([], missing_profile_fonts(profile))
+
+    def test_final_effective_font_audit_targets_derived_styles_and_keeps_legacy(self) -> None:
+        profile_path = self._strict_portable_profile()
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        source, structure_path, _ = self._synthetic_source_and_map()
+        output = self.root / "font-audit"
+        applied = self._run_script(
+            "apply_profile.py",
+            source,
+            "--profile",
+            profile_path,
+            "--structure-map",
+            structure_path,
+            "--output-dir",
+            output,
+        )
+        self.assertEqual(0, applied.returncode, applied.stdout + applied.stderr)
+        formatted = output / "fictional-foundation-slice-formatted.docx"
+        structure = load_structure_map(structure_path)
+        self.assertEqual([], effective_font_failures(formatted, profile, structure))
+
+        normal_changed = self.root / "normal-cambria.docx"
+        normal_document = Document(formatted)
+        normal_document.styles["Normal"].font.name = "Cambria"
+        normal_document.save(normal_changed)
+        self.assertEqual(
+            [],
+            effective_font_failures(normal_changed, profile, structure),
+            "an unapproved global Normal font must not replace approved-target auditing",
+        )
+
+        tampered_path = self.root / "tampered-derived-font.docx"
+        tampered = Document(formatted)
+        target = next(
+            paragraph
+            for paragraph in tampered.paragraphs
+            if paragraph.text == "1.1 Approved Scope"
+        )
+        target.style.font.name = "Definitely Wrong Font"
+        tampered.save(tampered_path)
+        failures = effective_font_failures(tampered_path, profile, structure)
+        self.assertTrue(
+            any(
+                item.get("rule") == "FMT-HEAD-502"
+                and item.get("property") == "font_name_ascii"
+                for item in failures
+            ),
+            failures,
+        )
+
+        rebound_path = self.root / "rebound-approved-target.docx"
+        rebound = Document(formatted)
+        rebound_target = next(
+            paragraph
+            for paragraph in rebound.paragraphs
+            if paragraph.text == "1.1 Approved Scope"
+        )
+        rebound_target.style = rebound.styles["Heading 2"]
+        rebound.save(rebound_path)
+        rebound_failures = effective_font_failures(rebound_path, profile, structure)
+        self.assertTrue(
+            any(
+                item.get("rule") == "FMT-HEAD-502"
+                and item.get("reason") == "derived_target_style_mismatch"
+                for item in rebound_failures
+            ),
+            rebound_failures,
+        )
+
+        body_rule = next(
+            rule
+            for rule in profile["rules"]
+            if rule["selector"]
+            == {"kind": "paragraph_role", "value": "body_text"}
+        )
+        no_target_path = self.root / "no-approved-body-target.docx"
+        no_target = Document()
+        no_target.styles["Normal"].font.name = "Cambria"
+        self.assertEqual(
+            0,
+            apply_style_rule_to_paragraphs(
+                no_target, body_rule, [], isolate_targets=True
+            ),
+        )
+        self.assertEqual(
+            0,
+            apply_style_rule_to_paragraphs(
+                no_target, body_rule, [], isolate_targets=True
+            ),
+        )
+        derived_name = self._derived_style_name("body_text", "Normal")
+        self.assertNotIn(derived_name, {style.name for style in no_target.styles})
+        no_target.save(no_target_path)
+        empty_semantic_map = {
+            "schema_version": "1.5",
+            "paragraph_roles": [],
+            "toc_ranges": [],
+        }
+        self.assertEqual(
+            [],
+            effective_font_failures(
+                no_target_path,
+                {"rules": [body_rule]},
+                empty_semantic_map,
+            ),
+        )
+
+        unused_path = self.root / "unused-derived-without-approved-target.docx"
+        unused = Document()
+        unused_derived = unused.styles.add_style(
+            derived_name, WD_STYLE_TYPE.PARAGRAPH
+        )
+        unused_derived.base_style = unused.styles["Normal"]
+        with self.assertRaises(FormatMonographError):
+            apply_style_rule_to_paragraphs(
+                unused, body_rule, [], isolate_targets=True
+            )
+        unused.save(unused_path)
+        unused_failures = effective_font_failures(
+            unused_path,
+            {"rules": [body_rule]},
+            empty_semantic_map,
+        )
+        self.assertTrue(
+            any(
+                item.get("rule") == body_rule["id"]
+                and item.get("reason")
+                == "derived_style_without_approved_target"
+                for item in unused_failures
+            ),
+            unused_failures,
+        )
+
+        legacy_path = self.root / "legacy-global-style.docx"
+        legacy = Document()
+        legacy.add_paragraph("Legacy body")
+        legacy.styles["Normal"].font.name = self.portable_font
+        legacy.save(legacy_path)
+        legacy_rule = deepcopy(body_rule)
+        legacy_rule["properties"] = {"font_name_ascii": self.portable_font}
+        self.assertEqual(
+            [], effective_font_failures(legacy_path, {"rules": [legacy_rule]})
+        )
+
     @staticmethod
     def _add_omml(paragraph: object) -> None:
         math = OxmlElement("m:oMath")
@@ -472,6 +657,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
 
     def test_prepare_approved_map_apply_audit_preserves_exclusions_and_is_idempotent(self) -> None:
         source, structure, approved_body = self._synthetic_source_and_map()
+        profile_path = self._strict_portable_profile()
         before = self._package_contract(source)
         source_document = Document(source)
         excluded_texts = {
@@ -508,7 +694,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
             "apply_profile.py",
             source,
             "--profile",
-            PROFILE,
+            profile_path,
             "--structure-map",
             structure,
             "--output-dir",
@@ -523,7 +709,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
             source,
             formatted_one,
             "--profile",
-            PROFILE,
+            profile_path,
             "--structure-map",
             structure,
         )
@@ -605,7 +791,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
             "apply_profile.py",
             formatted_one,
             "--profile",
-            PROFILE,
+            profile_path,
             "--structure-map",
             structure,
             "--output-dir",
@@ -627,12 +813,13 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
 
     def test_formatted_inspect_and_prepare_preserve_title_and_heading_semantics(self) -> None:
         source, structure, _ = self._synthetic_source_and_map()
+        profile_path = self._strict_portable_profile()
         output = self.root / "formatted-inspection"
         applied = self._run_script(
             "apply_profile.py",
             source,
             "--profile",
-            PROFILE,
+            profile_path,
             "--structure-map",
             structure,
             "--output-dir",
@@ -683,7 +870,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
             "prepare",
             formatted,
             "--profile",
-            PROFILE,
+            profile_path,
             "--work-dir",
             prepare_work,
         )
@@ -696,6 +883,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
         self.assertEqual(5, len(prepared_map["headings"]))
 
     def test_combined_front_matter_title_rule_and_pagination_audit_repeat(self) -> None:
+        profile_path = self._strict_portable_profile()
         for insert_heading in (False, True):
             with self.subTest(insert_heading=insert_heading):
                 source = self.root / f"front-combined-{insert_heading}.docx"
@@ -728,6 +916,14 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
                 structure["front_matter"]["book_title_format"].pop(
                     "right_indent_pt", None
                 )
+                for key in (
+                    "font_name_ascii",
+                    "font_name_east_asia",
+                    "font_name_complex_script",
+                ):
+                    structure["front_matter"]["book_title_format"][key] = (
+                        self.portable_font
+                    )
                 structure["pagination_sections"]["approved"] = True
                 structure_path = self.root / f"front-combined-{insert_heading}.json"
                 structure_path.write_text(
@@ -740,7 +936,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
                     "apply_profile.py",
                     source,
                     "--profile",
-                    PROFILE,
+                    profile_path,
                     "--structure-map",
                     structure_path,
                     "--output-dir",
@@ -753,7 +949,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
                     source,
                     formatted,
                     "--profile",
-                    PROFILE,
+                    profile_path,
                     "--structure-map",
                     structure_path,
                 )
@@ -765,7 +961,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
                 repeated_document = Document(formatted)
                 prime_structure_map_locators(repeated_document, loaded)
                 self.assertEqual(1, _apply_front_matter(repeated_document, loaded))
-                profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+                profile = json.loads(profile_path.read_text(encoding="utf-8"))
                 title_rule = next(
                     rule
                     for rule in profile["rules"]
@@ -791,7 +987,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
                     source,
                     repeated,
                     "--profile",
-                    PROFILE,
+                    profile_path,
                     "--structure-map",
                     structure_path,
                 )

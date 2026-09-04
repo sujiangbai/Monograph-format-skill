@@ -71,6 +71,26 @@ ROLE_STYLE_MAP = {
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
+ISOLATED_APPROVED_PARAGRAPH_ROLES = frozenset(
+    {
+        "body",
+        "body_text",
+        "title",
+        "chapter_title",
+        "heading_1",
+        "heading1",
+        "level_2_section",
+        "heading_2",
+        "heading2",
+        "level_3_section",
+        "heading_3",
+        "heading3",
+        "level_4_section",
+        "heading_4",
+        "heading4",
+    }
+)
+
 STYLE_PROPERTIES = {
     "font_name",
     "font_name_ascii",
@@ -508,6 +528,21 @@ def style_name_for_selector(selector: dict[str, str]) -> str | None:
     return None
 
 
+def isolated_approved_style_name(selector: dict[str, str]) -> str | None:
+    if (
+        selector.get("kind") != "paragraph_role"
+        or selector.get("value") not in ISOLATED_APPROVED_PARAGRAPH_ROLES
+    ):
+        return None
+    base_style = style_name_for_selector(selector)
+    if base_style is None:
+        return None
+    identity = f"{selector['kind']}:{selector['value']}:{base_style}"
+    return "Monograph Approved " + hashlib.sha256(
+        identity.encode("utf-8")
+    ).hexdigest()[:12]
+
+
 def supported_properties(rule: dict[str, Any]) -> set[str]:
     kind = rule["selector"]["kind"]
     if kind in {"document", "section_role"}:
@@ -912,13 +947,24 @@ def apply_style_rule_to_paragraphs(
             f"Rule {rule['id']} has no paragraph style mapping."
         )
     targets = list(paragraphs)
-    style = ensure_paragraph_style(document, style_name)
     if isolate_targets:
         selector = rule["selector"]
-        identity = f"{selector['kind']}:{selector['value']}:{style_name}"
-        derived_name = "Monograph Approved " + hashlib.sha256(
-            identity.encode("utf-8")
-        ).hexdigest()[:12]
+        derived_name = isolated_approved_style_name(selector)
+        if derived_name is None:
+            raise FormatMonographError(
+                "The rule is not eligible for approved-target style isolation."
+            )
+        if not targets:
+            try:
+                document.styles[derived_name]
+            except KeyError:
+                return 0
+            raise FormatMonographError(
+                "The isolated approved-role style already exists but is not "
+                "used by an approved target."
+            )
+    style = ensure_paragraph_style(document, style_name)
+    if isolate_targets:
         existed = True
         try:
             derived = document.styles[derived_name]
@@ -2312,30 +2358,12 @@ def apply_rule(
             f"Rule {rule['id']} uses an unsupported automatic selector: {selector}"
         )
     if paragraph_targets is not None:
-        isolated_foundation_roles = {
-            "body",
-            "body_text",
-            "title",
-            "chapter_title",
-            "heading_1",
-            "heading1",
-            "level_2_section",
-            "heading_2",
-            "heading2",
-            "level_3_section",
-            "heading_3",
-            "heading3",
-            "level_4_section",
-            "heading_4",
-            "heading4",
-        }
         return apply_style_rule_to_paragraphs(
             document,
             rule,
             paragraph_targets,
             isolate_targets=(
-                selector["kind"] == "paragraph_role"
-                and selector["value"] in isolated_foundation_roles
+                isolated_approved_style_name(selector) is not None
             ),
         )
     style = ensure_paragraph_style(document, style_name)
