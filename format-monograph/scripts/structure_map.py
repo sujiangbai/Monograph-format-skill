@@ -37,6 +37,8 @@ from _common import (
     content_fingerprint,
     ensure_paragraph_style,
     normalize_structural_paragraph,
+    semantic_title_heading_role,
+    style_inherits_name,
 )
 from docx_pagination import apply_pagination_sections, section_index_for_paragraph
 
@@ -546,7 +548,7 @@ def approved_role_paragraphs(
                     paragraph
                     for paragraph in document.paragraphs
                     if paragraph.style
-                    and paragraph.style.name == expected_style
+                    and style_inherits_name(paragraph.style, expected_style)
                     and (
                         normalized_hash is None
                         or text_sha256(paragraph.text) == normalized_hash
@@ -900,12 +902,10 @@ def _numbering_anomalies(headings: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _role_for_paragraph(paragraph: Any, detected_level: int | None) -> str:
     if detected_level:
         return f"heading_{detected_level}"
+    semantic_role = semantic_title_heading_role(paragraph.style)
+    if semantic_role is not None:
+        return semantic_role
     style_name = paragraph.style.name if paragraph.style else ""
-    if style_name == "Title":
-        return "title"
-    match = re.fullmatch(r"Heading (\d+)", style_name)
-    if match and 1 <= int(match.group(1)) <= 4:
-        return f"heading_{match.group(1)}"
     if style_name == "Quote":
         return "long_quote"
     if style_name == "Bibliography":
@@ -1988,13 +1988,9 @@ def _effective_outline_level(paragraph: Any) -> int | None:
             return int(outline.get(qn("w:val"), "9"))
         except ValueError:
             return None
-    if paragraph.style and paragraph.style.name in {
-        "Heading 1",
-        "Heading 2",
-        "Heading 3",
-        "Heading 4",
-    }:
-        return int(paragraph.style.name[-1]) - 1
+    semantic_role = semantic_title_heading_role(paragraph.style)
+    if semantic_role is not None and semantic_role.startswith("heading_"):
+        return int(semantic_role.split("_")[-1]) - 1
     return None
 
 
@@ -2067,6 +2063,12 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
     for index, paragraph in enumerate(document.paragraphs):
         value = paragraph.text
         detected_level = None
+        semantic_role = semantic_title_heading_role(paragraph.style)
+        style_level = (
+            int(semantic_role.split("_")[-1])
+            if semantic_role is not None and semantic_role.startswith("heading_")
+            else None
+        )
         appendix_match = APPENDIX_PATTERN.match(value)
         if appendix_match and value.strip():
             appendix_number = value[appendix_match.start() : appendix_match.end()]
@@ -2085,25 +2087,30 @@ def candidate_structure_map(path: Path) -> dict[str, Any]:
         for level, pattern in (() if appendix_match else HEADING_PATTERNS):
             if pattern.match(value):
                 detected_level = level
-                entry = {
-                    "paragraph": index,
-                    "locator": _body_locator(index, body_values),
-                    "text_sha256": text_sha256(value),
-                    "level": level,
-                    "cached_number": list(_heading_number(value, level) or ()),
-                    "source_style": paragraph.style.name if paragraph.style else None,
-                    "direct_format_sha256": _paragraph_style_signature(paragraph),
-                    "normalized_text_sha256": _heading_authored_text_hash(
-                        value, level
-                    ),
-                    "approved": False,
-                }
-                headings.append(entry)
-                if level == 1:
-                    chapter = _chapter_number(value)
-                    if chapter is not None:
-                        chapter_starts.append(chapter)
                 break
+        if detected_level is None and not appendix_match and value.strip():
+            detected_level = style_level
+        if detected_level is not None:
+            entry = {
+                "paragraph": index,
+                "locator": _body_locator(index, body_values),
+                "text_sha256": text_sha256(value),
+                "level": detected_level,
+                "cached_number": list(
+                    _heading_number(value, detected_level) or ()
+                ),
+                "source_style": paragraph.style.name if paragraph.style else None,
+                "direct_format_sha256": _paragraph_style_signature(paragraph),
+                "normalized_text_sha256": _heading_authored_text_hash(
+                    value, detected_level
+                ),
+                "approved": False,
+            }
+            headings.append(entry)
+            if detected_level == 1:
+                chapter = _chapter_number(value)
+                if chapter is not None:
+                    chapter_starts.append(chapter)
         nearby = "\n".join(body_values[max(0, index - 2) : index + 3])
         caption = _caption_entry(value, _body_locator(index, body_values), nearby)
         if caption:
@@ -2527,7 +2534,17 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                     raise FormatMonographError(
                         "Approved title page must be unnumbered and excluded from TOC pagination."
                     )
-                if front_matter.get("toc_heading_text") not in {"目录", "目    录"}:
+                insert_toc_heading = front_matter.get(
+                    "insert_toc_heading_if_missing"
+                )
+                if not isinstance(insert_toc_heading, bool):
+                    raise FormatMonographError(
+                        "Approved front_matter requires a boolean "
+                        "insert_toc_heading_if_missing value."
+                    )
+                if insert_toc_heading and front_matter.get(
+                    "toc_heading_text"
+                ) not in {"目录", "目    录"}:
                     raise FormatMonographError(
                         "The technical-textbook TOC heading must be 目录 or 目    录."
                     )
@@ -2560,10 +2577,6 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                 }:
                     raise FormatMonographError(
                         "Approved technical-textbook title pages must be vertically centered."
-                    )
-                if front_matter.get("insert_toc_heading_if_missing") is not True:
-                    raise FormatMonographError(
-                        "Approved front_matter must insert a missing TOC heading."
                     )
             block_spacing = value.get("block_spacing", {})
             if block_spacing.get("approved"):
@@ -3662,7 +3675,14 @@ def _apply_headings(document: Any, structure_map: dict[str, Any]) -> int:
             if entry.get("locator")
             else _verified_paragraph(document, entry)
         )
-        style = ensure_paragraph_style(document, f"Heading {level}")
+        existing_style = paragraph.style
+        style = (
+            existing_style
+            if existing_style is not None
+            and existing_style.name.startswith("Monograph Approved ")
+            and semantic_title_heading_role(existing_style) == f"heading_{level}"
+            else ensure_paragraph_style(document, f"Heading {level}")
+        )
         paragraph.style = style
         normalize_structural_paragraph(
             paragraph,
@@ -3874,7 +3894,14 @@ def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
         if not entry.get("approved"):
             continue
         role = normalized_role(str(entry.get("role", "unknown")))
-        if role.startswith("heading_") or role in {"title", "subtitle"}:
+        if role.startswith("heading_") or role in {
+            "title",
+            "subtitle",
+            "chapter_title",
+            "level_2_section",
+            "level_3_section",
+            "level_4_section",
+        }:
             continue
         paragraph = _verified_locator_paragraph(document, entry)
         touched = False
@@ -3943,12 +3970,18 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     title = resolve_paragraph_locator(document, settings["book_title"])
     title_format = dict(DEFAULT_BOOK_TITLE_FORMAT)
     title_format.update(settings.get("book_title_format", {}))
-    title_style = _special_paragraph_style(
-        document,
-        BOOK_TITLE_STYLE,
-        size_pt=float(title_format["font_size_pt"]),
-        bold=bool(title_format["bold"]),
-    )
+    title_style = title.style
+    if not (
+        title_style is not None
+        and title_style.name.startswith("Monograph Approved ")
+        and semantic_title_heading_role(title_style) == "title"
+    ):
+        title_style = _special_paragraph_style(
+            document,
+            BOOK_TITLE_STYLE,
+            size_pt=float(title_format["font_size_pt"]),
+            bold=bool(title_format["bold"]),
+        )
     apply_style_properties(title_style, title_format)
     title.style = title_style
     clear_controlled_direct_format(title, title_format)
@@ -3959,6 +3992,10 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     )
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.first_line_indent = Pt(0)
+    setattr(document, "_format_monograph_book_title", title)
+
+    if not settings.get("insert_toc_heading_if_missing"):
+        return 1
 
     toc = resolve_paragraph_locator(
         document, structure_map["pagination_sections"]["toc_start"]
@@ -3991,7 +4028,6 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     toc_heading.paragraph_format.first_line_indent = Pt(0)
     for run in toc_heading.runs:
         run.bold = True
-    setattr(document, "_format_monograph_book_title", title)
     setattr(document, "_format_monograph_toc_heading", toc_heading)
     return 1 + int(inserted)
 
@@ -4550,7 +4586,7 @@ def audit_structure_heading_operations(
                 paragraph
                 for paragraph in document.paragraphs
                 if paragraph.style is not None
-                and paragraph.style.name == f"Heading {level}"
+                and style_inherits_name(paragraph.style, f"Heading {level}")
                 and normalized_hash
                 and text_sha256(paragraph.text) == normalized_hash
             ]
@@ -4561,7 +4597,9 @@ def audit_structure_heading_operations(
                 continue
             paragraph = candidates[0]
 
-        if paragraph.style is None or paragraph.style.name != f"Heading {level}":
+        if paragraph.style is None or not style_inherits_name(
+            paragraph.style, f"Heading {level}"
+        ):
             failures.append(
                 {
                     "level": level,
@@ -4583,7 +4621,10 @@ def audit_structure_heading_operations(
                 }
             )
 
-        style_p_pr = paragraph.style.element.pPr
+        heading_style = paragraph.style
+        while heading_style is not None and heading_style.name != f"Heading {level}":
+            heading_style = heading_style.base_style
+        style_p_pr = None if heading_style is None else heading_style.element.pPr
         style_ind = None if style_p_pr is None else style_p_pr.find(qn("w:ind"))
         style_values = {
             attribute: (
@@ -5158,6 +5199,24 @@ def structure_content_inventory(
     heading_entries = [
         entry for entry in structure_map.get("headings", []) if entry.get("approved")
     ]
+    role_levels = {
+        "chapter_title": 1,
+        "level_2_section": 2,
+        "level_3_section": 3,
+        "level_4_section": 4,
+    }
+    for entry in structure_map.get("paragraph_roles", []):
+        if not entry.get("approved") or not entry.get("normalized_text_sha256"):
+            continue
+        role_value = (
+            entry.get("canonical_role")
+            if structure_map.get("schema_version") == "1.5"
+            else entry.get("role")
+        )
+        role = normalized_role(str(role_value or entry.get("role", "unknown")))
+        level = role_levels.get(role)
+        if level is not None:
+            heading_entries.append({**entry, "level": level})
     caption_entries = [
         entry
         for entry in structure_map.get("captions", [])

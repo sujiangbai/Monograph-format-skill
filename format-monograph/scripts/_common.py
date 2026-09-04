@@ -71,6 +71,26 @@ ROLE_STYLE_MAP = {
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
+ISOLATED_APPROVED_PARAGRAPH_ROLES = frozenset(
+    {
+        "body",
+        "body_text",
+        "title",
+        "chapter_title",
+        "heading_1",
+        "heading1",
+        "level_2_section",
+        "heading_2",
+        "heading2",
+        "level_3_section",
+        "heading_3",
+        "heading3",
+        "level_4_section",
+        "heading_4",
+        "heading4",
+    }
+)
+
 STYLE_PROPERTIES = {
     "font_name",
     "font_name_ascii",
@@ -164,8 +184,8 @@ FIELD_PROPERTIES = {
 }
 
 FONT_ALIAS_GROUPS = (
-    {"宋体", "simsun", "nsimsun", "新宋体"},
-    {"黑体", "simhei"},
+    {"宋体", "simsun", "nsimsun", "新宋体", "Songti"},
+    {"黑体", "simhei", "STHeiti Medium"},
     {"楷体", "kaiti", "simkai", "楷体_gb2312"},
     {"仿宋", "fangsong", "simfang", "仿宋_gb2312"},
 )
@@ -508,6 +528,21 @@ def style_name_for_selector(selector: dict[str, str]) -> str | None:
     return None
 
 
+def isolated_approved_style_name(selector: dict[str, str]) -> str | None:
+    if (
+        selector.get("kind") != "paragraph_role"
+        or selector.get("value") not in ISOLATED_APPROVED_PARAGRAPH_ROLES
+    ):
+        return None
+    base_style = style_name_for_selector(selector)
+    if base_style is None:
+        return None
+    identity = f"{selector['kind']}:{selector['value']}:{base_style}"
+    return "Monograph Approved " + hashlib.sha256(
+        identity.encode("utf-8")
+    ).hexdigest()[:12]
+
+
 def supported_properties(rule: dict[str, Any]) -> set[str]:
     kind = rule["selector"]["kind"]
     if kind in {"document", "section_role"}:
@@ -737,6 +772,58 @@ def ensure_paragraph_style(document: Any, style_name: str) -> Any:
         return style
 
 
+def style_inherits_name(style: Any, style_name: str) -> bool:
+    current = style
+    visited: set[str] = set()
+    while current is not None and current.style_id not in visited:
+        if current.name == style_name:
+            return True
+        visited.add(current.style_id)
+        current = current.base_style
+    return False
+
+
+def semantic_title_heading_role(style: Any) -> str | None:
+    """Resolve the approved Title/Heading 1-4 identity through style ancestry."""
+    if style is None:
+        return None
+    if style_inherits_name(style, "Title"):
+        return "title"
+    for level in range(1, 5):
+        if style_inherits_name(style, f"Heading {level}"):
+            return f"heading_{level}"
+    return None
+
+
+def _neutralize_paragraph_borders(style: Any, paragraphs: Iterable[Any]) -> None:
+    p_pr = style.element.get_or_add_pPr()
+    existing = p_pr.find(qn("w:pBdr"))
+    sides = ("top", "left", "bottom", "right", "between", "bar")
+    already_neutral = existing is not None and all(
+        (
+            border := existing.find(qn(f"w:{side}"))
+        ) is not None
+        and border.get(qn("w:val")) == "nil"
+        for side in sides
+    )
+    if not already_neutral:
+        if existing is not None:
+            p_pr.remove(existing)
+        borders = OxmlElement("w:pBdr")
+        for side in sides:
+            border = OxmlElement(f"w:{side}")
+            border.set(qn("w:val"), "nil")
+            borders.append(border)
+        p_pr.append(borders)
+    for paragraph in paragraphs:
+        paragraph_p_pr = paragraph._p.pPr
+        if paragraph_p_pr is None:
+            continue
+        direct = paragraph_p_pr.find(qn("w:pBdr"))
+        if direct is not None:
+            paragraph_p_pr.remove(direct)
+
+
 def _drop_attributes(element: Any, names: tuple[str, ...]) -> None:
     for name in names:
         element.attrib.pop(qn(f"w:{name}"), None)
@@ -848,16 +935,96 @@ def clear_controlled_direct_format(paragraph: Any, properties: dict[str, Any]) -
 
 
 def apply_style_rule_to_paragraphs(
-    document: Any, rule: dict[str, Any], paragraphs: Iterable[Any]
+    document: Any,
+    rule: dict[str, Any],
+    paragraphs: Iterable[Any],
+    *,
+    isolate_targets: bool = False,
 ) -> int:
     style_name = style_name_for_selector(rule["selector"])
     if style_name is None:
         raise FormatMonographError(
             f"Rule {rule['id']} has no paragraph style mapping."
         )
-    style = ensure_paragraph_style(document, style_name)
-    apply_style_properties(style, rule["properties"])
     targets = list(paragraphs)
+    if isolate_targets:
+        selector = rule["selector"]
+        derived_name = isolated_approved_style_name(selector)
+        if derived_name is None:
+            raise FormatMonographError(
+                "The rule is not eligible for approved-target style isolation."
+            )
+        if not targets:
+            try:
+                document.styles[derived_name]
+            except KeyError:
+                return 0
+            raise FormatMonographError(
+                "The isolated approved-role style already exists but is not "
+                "used by an approved target."
+            )
+    style = ensure_paragraph_style(document, style_name)
+    if isolate_targets:
+        existed = True
+        try:
+            derived = document.styles[derived_name]
+        except KeyError:
+            existed = False
+            derived = document.styles.add_style(
+                derived_name, WD_STYLE_TYPE.PARAGRAPH
+            )
+            derived.base_style = style
+        if derived.type != WD_STYLE_TYPE.PARAGRAPH:
+            raise FormatMonographError(
+                "The isolated approved-role style name collides with a "
+                "non-paragraph style."
+            )
+        if (
+            derived.base_style is None
+            or derived.base_style.style_id != style.style_id
+        ):
+            raise FormatMonographError(
+                "The isolated approved-role style has an unexpected base style."
+            )
+        target_ids = {id(paragraph._p) for paragraph in targets}
+        target_uses_derived = any(
+            paragraph.style is not None
+            and paragraph.style.style_id == derived.style_id
+            for paragraph in targets
+        )
+        if existed and not target_uses_derived:
+            raise FormatMonographError(
+                "The isolated approved-role style already exists but is not "
+                "used by an approved target."
+            )
+        if any(
+            paragraph.style is not None
+            and paragraph.style.style_id == derived.style_id
+            and id(paragraph._p) not in target_ids
+            for paragraph in iter_document_paragraphs(document)
+        ):
+            raise FormatMonographError(
+                "The isolated approved-role style is already used by an "
+                "unapproved paragraph."
+            )
+        style = derived
+        if selector["kind"] == "paragraph_role" and selector["value"] in {
+            "title",
+            "chapter_title",
+            "heading_1",
+            "heading1",
+            "level_2_section",
+            "heading_2",
+            "heading2",
+            "level_3_section",
+            "heading_3",
+            "heading3",
+            "level_4_section",
+            "heading_4",
+            "heading4",
+        }:
+            _neutralize_paragraph_borders(style, targets)
+    apply_style_properties(style, rule["properties"])
     for paragraph in targets:
         paragraph.style = style
         clear_controlled_direct_format(paragraph, rule["properties"])
@@ -1625,12 +1792,12 @@ def _heading_prefix_pattern(level: int) -> re.Pattern[str]:
 def _strip_manual_heading_prefixes(document: Any, levels: int) -> int:
     changed = 0
     for index, paragraph in enumerate(document.paragraphs):
-        if not paragraph.style or not paragraph.style.name.startswith("Heading "):
+        if not paragraph.style:
             continue
-        try:
-            level = int(paragraph.style.name.split()[-1])
-        except ValueError:
+        semantic_role = semantic_title_heading_role(paragraph.style)
+        if semantic_role is None or not semantic_role.startswith("heading_"):
             continue
+        level = int(semantic_role.split("_")[-1])
         if level > levels:
             continue
         text = paragraph.text
@@ -2191,7 +2358,14 @@ def apply_rule(
             f"Rule {rule['id']} uses an unsupported automatic selector: {selector}"
         )
     if paragraph_targets is not None:
-        return apply_style_rule_to_paragraphs(document, rule, paragraph_targets)
+        return apply_style_rule_to_paragraphs(
+            document,
+            rule,
+            paragraph_targets,
+            isolate_targets=(
+                isolated_approved_style_name(selector) is not None
+            ),
+        )
     style = ensure_paragraph_style(document, style_name)
     apply_style_properties(style, rule["properties"])
     return sum(

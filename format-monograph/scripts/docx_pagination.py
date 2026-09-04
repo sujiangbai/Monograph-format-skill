@@ -18,6 +18,8 @@ from _common import (
     NS,
     STRUCTURAL_INDENT_ATTRIBUTES,
     FormatMonographError,
+    font_alias_keys,
+    semantic_title_heading_role,
     style_effective_font,
 )
 
@@ -119,6 +121,27 @@ def _nonzero_indent_attributes(ind: Any | None) -> dict[str, str]:
         if value is not None and value != "0":
             result[attribute] = value
     return result
+
+
+def _effective_style_indent_attributes(style: Any | None) -> dict[str, str | None]:
+    values: dict[str, str | None] = {
+        attribute: None for attribute in STRUCTURAL_INDENT_ATTRIBUTES
+    }
+    unresolved = set(values)
+    current = style
+    visited: set[str] = set()
+    while current is not None and current.style_id not in visited and unresolved:
+        visited.add(current.style_id)
+        p_pr = current.element.pPr
+        ind = None if p_pr is None else p_pr.find(qn("w:ind"))
+        if ind is not None:
+            for attribute in tuple(unresolved):
+                value = ind.get(qn(f"w:{attribute}"))
+                if value is not None:
+                    values[attribute] = value
+                    unresolved.remove(attribute)
+        current = current.base_style
+    return values
 
 
 def _boundary_after_title(
@@ -782,28 +805,39 @@ def audit_pagination_sections(
             resolver,
         )
         title_section = section_index_for_paragraph(document, title_paragraph)
-        toc_headings = [
-            paragraph
-            for paragraph in document.paragraphs
-            if paragraph.text.strip() == front_matter.get("toc_heading_text")
-            and paragraph.style is not None
-            and paragraph.style.name == "Monograph TOC Heading"
-        ]
-        if len(toc_headings) != 1:
+        if front_matter.get("insert_toc_heading_if_missing"):
+            toc_headings = [
+                paragraph
+                for paragraph in document.paragraphs
+                if paragraph.text.strip() == front_matter.get("toc_heading_text")
+                and paragraph.style is not None
+                and paragraph.style.name == "Monograph TOC Heading"
+            ]
+            if len(toc_headings) != 1:
+                failures.append(
+                    {
+                        "property": "toc_heading",
+                        "expected": front_matter.get("toc_heading_text"),
+                        "actual_count": len(toc_headings),
+                    }
+                )
+            elif section_index_for_paragraph(document, toc_headings[0]) != toc:
+                failures.append(
+                    {"property": "toc_heading_section", "expected": toc}
+                )
+        title_style = title_paragraph.style
+        if title_style is None or not (
+            title_style.name == "Monograph Book Title"
+            or (
+                title_style.name.startswith("Monograph Approved ")
+                and semantic_title_heading_role(title_style) == "title"
+            )
+        ):
             failures.append(
                 {
-                    "property": "toc_heading",
-                    "expected": front_matter.get("toc_heading_text"),
-                    "actual_count": len(toc_headings),
+                    "property": "book_title_style",
+                    "expected": "Monograph Book Title or approved Title ancestry",
                 }
-            )
-        elif section_index_for_paragraph(document, toc_headings[0]) != toc:
-            failures.append(
-                {"property": "toc_heading_section", "expected": toc}
-            )
-        if title_paragraph.style is None or title_paragraph.style.name != "Monograph Book Title":
-            failures.append(
-                {"property": "book_title_style", "expected": "Monograph Book Title"}
             )
         title_alignment = title_paragraph.alignment
         if title_alignment is None and title_paragraph.style is not None:
@@ -839,44 +873,27 @@ def audit_pagination_sections(
             "bold": True,
         }
         expected_title_format.update(front_matter.get("book_title_format", {}))
-        title_style = title_paragraph.style
         if title_style is not None:
-            style_p_pr = title_style.element.pPr
-            style_indent = (
-                None if style_p_pr is None else style_p_pr.find(qn("w:ind"))
-            )
-            style_indent_conflicts = _nonzero_indent_attributes(style_indent)
-            required_zero_attributes = {
-                attribute: (
-                    None
-                    if style_indent is None
-                    else style_indent.get(qn(f"w:{attribute}"))
-                )
-                for attribute in (
-                    "left",
-                    "leftChars",
-                    "right",
-                    "rightChars",
-                    "firstLine",
-                    "firstLineChars",
-                )
+            effective_indent = _effective_style_indent_attributes(title_style)
+            style_indent_conflicts = {
+                attribute: value
+                for attribute, value in effective_indent.items()
+                if value not in {None, "0"}
             }
-            if style_indent_conflicts or any(
-                value != "0" for value in required_zero_attributes.values()
-            ):
+            if style_indent_conflicts:
                 failures.append(
                     {
                         "property": "book_title_style_indent",
                         "expected": 0,
-                        "actual": {
-                            **required_zero_attributes,
-                            **style_indent_conflicts,
-                        },
+                        "actual": style_indent_conflicts,
                     }
                 )
             actual_ascii = style_effective_font(document, title_style, "ascii")[0]
             actual_east_asia = style_effective_font(document, title_style, "eastAsia")[0]
-            if actual_ascii != expected_title_format["font_name_ascii"]:
+            if not (
+                font_alias_keys(actual_ascii)
+                & font_alias_keys(expected_title_format["font_name_ascii"])
+            ):
                 failures.append(
                     {
                         "property": "book_title_font_name_ascii",
@@ -884,7 +901,10 @@ def audit_pagination_sections(
                         "actual": actual_ascii,
                     }
                 )
-            if actual_east_asia != expected_title_format["font_name_east_asia"]:
+            if not (
+                font_alias_keys(actual_east_asia)
+                & font_alias_keys(expected_title_format["font_name_east_asia"])
+            ):
                 failures.append(
                     {
                         "property": "book_title_font_name_east_asia",

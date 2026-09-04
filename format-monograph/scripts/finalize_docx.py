@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from lxml import etree
 from docx.enum.section import WD_HEADER_FOOTER
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -40,6 +41,7 @@ from _common import (
     ensure_docx,
     field_cache_inventory,
     font_alias_keys,
+    isolated_approved_style_name,
     load_document,
     protected_payload_manifest,
     run_effective_font,
@@ -3197,6 +3199,26 @@ def effective_font_failures(
             continue
         selector = rule.get("selector", {})
         selector_kind = selector.get("kind")
+
+        def audit_style_fonts(style: Any, style_label: str) -> None:
+            for property_name, attribute in property_attributes.items():
+                expected = rule.get("properties", {}).get(property_name)
+                if not expected:
+                    continue
+                actual, source = style_effective_font(document, style, attribute)
+                if not actual or not (
+                    font_alias_keys(str(actual)) & font_alias_keys(str(expected))
+                ):
+                    result.append(
+                        {
+                            "rule": rule.get("id"),
+                            "style": style_label,
+                            "property": property_name,
+                            "expected": str(expected),
+                            "actual": actual,
+                            "source": source,
+                        }
+                    )
         if selector_kind == "table_role":
             try:
                 targets = (
@@ -3254,6 +3276,13 @@ def effective_font_failures(
             and selector_kind
             in {"paragraph_role", "caption_role", "bibliography_role"}
         ):
+            derived_name = isolated_approved_style_name(selector)
+            derived_style = None
+            if derived_name is not None:
+                try:
+                    derived_style = document.styles[derived_name]
+                except KeyError:
+                    pass
             try:
                 targets = approved_role_paragraphs(document, structure_map, selector)
             except FormatMonographError:
@@ -3265,6 +3294,55 @@ def effective_font_failures(
                     }
                 )
                 continue
+            if not targets and derived_name is not None:
+                if derived_style is not None:
+                    result.append(
+                        {
+                            "rule": rule.get("id"),
+                            "style": derived_name,
+                            "reason": "derived_style_without_approved_target",
+                        }
+                    )
+                continue
+            if derived_style is not None:
+                expected_base = style_name_for_selector(selector)
+                if (
+                    derived_style.type != WD_STYLE_TYPE.PARAGRAPH
+                    or derived_style.base_style is None
+                    or derived_style.base_style.name != expected_base
+                ):
+                    result.append(
+                        {
+                            "rule": rule.get("id"),
+                            "style": derived_name,
+                            "reason": "derived_style_binding_mismatch",
+                            "expected_base": expected_base,
+                            "actual_base": (
+                                None
+                                if derived_style.base_style is None
+                                else derived_style.base_style.name
+                            ),
+                        }
+                    )
+                for paragraph_index, paragraph in enumerate(targets):
+                    if (
+                        paragraph.style is None
+                        or paragraph.style.style_id != derived_style.style_id
+                    ):
+                        result.append(
+                            {
+                                "rule": rule.get("id"),
+                                "paragraph": paragraph_index,
+                                "reason": "derived_target_style_mismatch",
+                                "expected_style": derived_name,
+                                "actual_style": (
+                                    None
+                                    if paragraph.style is None
+                                    else paragraph.style.name
+                                ),
+                            }
+                        )
+                audit_style_fonts(derived_style, derived_name)
             if targets:
                 for property_name, attribute in property_attributes.items():
                     expected = rule.get("properties", {}).get(property_name)
@@ -3303,24 +3381,7 @@ def effective_font_failures(
                 {"rule": rule.get("id"), "style": style_name, "reason": "missing_style"}
             )
             continue
-        for property_name, attribute in property_attributes.items():
-            expected = rule.get("properties", {}).get(property_name)
-            if not expected:
-                continue
-            actual, source = style_effective_font(document, style, attribute)
-            if not actual or not (
-                font_alias_keys(str(actual)) & font_alias_keys(str(expected))
-            ):
-                result.append(
-                    {
-                        "rule": rule.get("id"),
-                        "style": style_name,
-                        "property": property_name,
-                        "expected": str(expected),
-                        "actual": actual,
-                        "source": source,
-                    }
-                )
+        audit_style_fonts(style, style_name)
     return result
 
 

@@ -69,6 +69,10 @@ V0.3.3 继续使用统一运行入口：
 
 详细执行规则见 [`format-monograph/SKILL.md`](format-monograph/SKILL.md)。
 
+V0.5.1 P3 的首个基础切片候选 profile 位于
+[`format-monograph/examples/profiles/v051-foundation-format-slice.json`](format-monograph/examples/profiles/v051-foundation-format-slice.json)。它仅对 structure map 中逐项批准的现有书名、四级普通标题和普通正文角色应用格式；页节属性默认保持，目录题名、字段、编号与所有排除角色不在该 profile 的自动修改范围内。
+该首发候选以 macOS 为第一平台，直接使用已安装的 `STHeiti Medium`（V0.4.0 黑体语义等价）与 `Songti`（V0.4.0 宋体语义等价），Times New Roman 保持不变；Windows 字体实体映射留待 P5，当前不引入新的字体解析器或适配层。
+
 ## 仓库结构
 
 - `format-monograph/`：可安装的开放 Agent Skill 核心。
