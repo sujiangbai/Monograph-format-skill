@@ -6,7 +6,7 @@
   "scope": {
     "document_type": "monograph",
     "input_format": "DOCX",
-    "notes": "仅格式化结构图中逐项批准的书名、普通标题和普通正文角色；页节默认保持；不创建、删除、改写或重排内容。"
+    "notes": "仅格式化结构图中逐项批准的书名、既有标准目录题名、普通标题和普通正文角色；页节默认保持；目录题名缺失时不创建，自定义或未批准题名保持。唯一文字例外是把获批既有精确文字“目录”规范为“目    录”（四个 ASCII 半角空格）。"
   },
   "target_applications": [
     "Microsoft 365"
@@ -22,6 +22,13 @@
       "label": "V0.5.1 P3 foundation slice approval",
       "summary": "Approved V0.4.0 foundation values for existing page/section, title, heading levels 1-4, and ordinary body roles; all other roles remain excluded.",
       "public": true
+    },
+    {
+      "id": "SRC-502",
+      "type": "user_requirement",
+      "label": "V0.5.1 P3 existing TOC-title approval",
+      "summary": "Preservation-only TOC-title boundary: format one location-bound existing standard title, normalize only the approved four-ASCII-space difference, preserve custom or missing titles, and never create or update TOC fields.",
+      "public": true
     }
   ],
   "rules": [
@@ -32,6 +39,32 @@
       "properties": {"page_size_policy": "preserve"},
       "source_ids": ["SRC-501"],
       "evidence_summary": "Preserve every existing section and page property by default.",
+      "confidence": "high",
+      "status": "approved",
+      "application": "automatic"
+    },
+    {
+      "id": "FMT-TOCTITLE-501",
+      "category": "front_matter",
+      "selector": {"kind": "paragraph_role", "value": "toc_heading"},
+      "properties": {
+        "font_name_ascii": "Times New Roman",
+        "font_name_east_asia": "STHeiti Medium",
+        "font_name_complex_script": "Times New Roman",
+        "font_size_pt": 18,
+        "bold": true,
+        "italic": false,
+        "color_hex": "000000",
+        "alignment": "center",
+        "first_line_indent_chars": 0,
+        "left_indent_pt": 0,
+        "right_indent_pt": 0,
+        "space_before_pt": 0,
+        "space_after_pt": 18,
+        "keep_with_next": true
+      },
+      "source_ids": ["SRC-502"],
+      "evidence_summary": "Format only one approved existing standard TOC title immediately before the approved TOC start; never create a missing title or alter a custom title.",
       "confidence": "high",
       "status": "approved",
       "application": "automatic"
@@ -218,7 +251,7 @@
     "status": "approved",
     "approved_by": "V0.5.1 project manager",
     "approved_at": "2026-09-04T00:00:00Z",
-    "notes": "Limited to the approved P3 foundation slice; no TOC, field, numbering, page rewrite, or excluded-role formatting."
+    "notes": "Limited to the approved P3 foundation slice plus one approved existing standard TOC title. No missing-title creation, TOC entry formatting, field update, numbering, page rewrite, or excluded-role formatting."
   },
   "runtime_policy": {
     "caller_requirements_highest": true,

@@ -68,6 +68,7 @@ ROLE_STYLE_MAP = {
     "table_of_contents_level_1": "TOC 1",
     "table_of_contents_level_2": "TOC 2",
     "table_of_contents_level_3": "TOC 3",
+    "toc_heading": "Monograph TOC Heading",
     **{f"heading{i}": f"Heading {i}" for i in range(1, 10)},
 }
 
@@ -88,6 +89,7 @@ ISOLATED_APPROVED_PARAGRAPH_ROLES = frozenset(
         "level_4_section",
         "heading_4",
         "heading4",
+        "toc_heading",
     }
 )
 
@@ -543,6 +545,109 @@ def isolated_approved_style_name(selector: dict[str, str]) -> str | None:
     ).hexdigest()[:12]
 
 
+def validate_isolated_approved_style_targets(
+    document: Any,
+    selector: dict[str, str],
+    paragraphs: Iterable[Any],
+) -> str:
+    """Validate an isolated approved-role style without changing the package."""
+    style_name = style_name_for_selector(selector)
+    derived_name = isolated_approved_style_name(selector)
+    if style_name is None or derived_name is None:
+        raise FormatMonographError(
+            "The rule is not eligible for approved-target style isolation."
+        )
+    targets = list(paragraphs)
+    try:
+        derived = document.styles[derived_name]
+    except KeyError:
+        derived = None
+    derived_style_id = (
+        derived.style_id if derived is not None else derived_name.replace(" ", "")
+    )
+    if selector == {"kind": "paragraph_role", "value": "toc_heading"}:
+        target_ids = {id(paragraph._p) for paragraph in targets}
+        style_reference_xpath = etree.XPath(
+            ".//w:p[w:pPr/w:pStyle[@w:val=$style_id]]",
+            namespaces=NS,
+        )
+        for part in document.part.package.parts:
+            part_name = str(part.partname)
+            if not part_name.startswith("/word/") or not part_name.endswith(".xml"):
+                continue
+            try:
+                root = (
+                    document.element
+                    if part is document.part
+                    else getattr(part, "_element", None)
+                )
+                if root is None:
+                    root = etree.fromstring(part.blob)
+                references = style_reference_xpath(
+                    root, style_id=derived_style_id
+                )
+            except (TypeError, ValueError, etree.XMLSyntaxError) as exc:
+                raise FormatMonographError(
+                    "The isolated approved-role style references in an existing "
+                    "DOCX XML part could not be inspected before mutation."
+                ) from exc
+            if any(
+                part is not document.part or id(paragraph) not in target_ids
+                for paragraph in references
+            ):
+                raise FormatMonographError(
+                    "The isolated approved-role style is already referenced by "
+                    "an unapproved paragraph in an existing DOCX XML part."
+                )
+    if derived is None:
+        return derived_name
+    if not targets:
+        raise FormatMonographError(
+            "The isolated approved-role style already exists but is not "
+            "used by an approved target."
+        )
+    if derived.type != WD_STYLE_TYPE.PARAGRAPH:
+        raise FormatMonographError(
+            "The isolated approved-role style name collides with a "
+            "non-paragraph style."
+        )
+    try:
+        expected_base = document.styles[style_name]
+    except KeyError as exc:
+        raise FormatMonographError(
+            "The isolated approved-role style has an unexpected base style."
+        ) from exc
+    if (
+        derived.base_style is None
+        or derived.base_style.style_id != expected_base.style_id
+    ):
+        raise FormatMonographError(
+            "The isolated approved-role style has an unexpected base style."
+        )
+    target_ids = {id(paragraph._p) for paragraph in targets}
+    target_uses_derived = any(
+        paragraph.style is not None
+        and paragraph.style.style_id == derived.style_id
+        for paragraph in targets
+    )
+    if not target_uses_derived:
+        raise FormatMonographError(
+            "The isolated approved-role style already exists but is not "
+            "used by an approved target."
+        )
+    if any(
+        paragraph.style is not None
+        and paragraph.style.style_id == derived.style_id
+        and id(paragraph._p) not in target_ids
+        for paragraph in iter_document_paragraphs(document)
+    ):
+        raise FormatMonographError(
+            "The isolated approved-role style is already used by an "
+            "unapproved paragraph."
+        )
+    return derived_name
+
+
 def supported_properties(rule: dict[str, Any]) -> set[str]:
     kind = rule["selector"]["kind"]
     if kind in {"document", "section_role"}:
@@ -949,20 +1054,11 @@ def apply_style_rule_to_paragraphs(
     targets = list(paragraphs)
     if isolate_targets:
         selector = rule["selector"]
-        derived_name = isolated_approved_style_name(selector)
-        if derived_name is None:
-            raise FormatMonographError(
-                "The rule is not eligible for approved-target style isolation."
-            )
+        derived_name = validate_isolated_approved_style_targets(
+            document, selector, targets
+        )
         if not targets:
-            try:
-                document.styles[derived_name]
-            except KeyError:
-                return 0
-            raise FormatMonographError(
-                "The isolated approved-role style already exists but is not "
-                "used by an approved target."
-            )
+            return 0
     style = ensure_paragraph_style(document, style_name)
     if isolate_targets:
         existed = True

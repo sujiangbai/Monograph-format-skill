@@ -841,10 +841,8 @@ class V026DeterministicFontTests(unittest.TestCase):
         title_p_pr = reloaded.paragraphs[0]._p.pPr
         self.assertIsNone(title_p_pr.find(qn("w:numPr")))
         self.assertIsNotNone(title_p_pr.find(qn("w:sectPr")))
-        self.assertEqual(
-            "Monograph TOC Heading",
-            reloaded.paragraphs[1].style.name,
-        )
+        self.assertEqual("[[TOC]]", reloaded.paragraphs[1].text)
+        self.assertNotEqual("Monograph TOC Heading", reloaded.paragraphs[1].style.name)
         direct_title_ind = title_p_pr.find(qn("w:ind"))
         if direct_title_ind is not None:
             self.assertTrue(
@@ -880,7 +878,7 @@ class V026DeterministicFontTests(unittest.TestCase):
         )
         self.assertEqual("黑体", style_effective_font(reloaded, title_style, "eastAsia")[0])
         self.assertEqual(
-            1,
+            0,
             sum(
                 paragraph.style is not None
                 and paragraph.style.name == "Monograph TOC Heading"
@@ -894,14 +892,6 @@ class V026DeterministicFontTests(unittest.TestCase):
                 for section in reloaded.sections[:2]
             ],
         )
-        toc_heading = next(
-            paragraph
-            for paragraph in reloaded.paragraphs
-            if paragraph.style is not None
-            and paragraph.style.name == "Monograph TOC Heading"
-        )
-        self.assertEqual("目    录", toc_heading.text)
-        self.assertIs(False, toc_heading.paragraph_format.page_break_before)
         pagination_failures, _ = audit_pagination_sections(
             output,
             reloaded,
