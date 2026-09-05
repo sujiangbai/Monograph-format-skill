@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from copy import deepcopy
@@ -635,6 +636,7 @@ def _schema_errors(
     *,
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
+    validator_override: Draft202012Validator | None = None,
     matrix_version: str = "1.0",
 ) -> list[str]:
     try:
@@ -645,14 +647,17 @@ def _schema_errors(
         )
     except ArtifactContractError as exc:
         return [str(exc)]
-    Draft202012Validator.check_schema(schema)
-    validator = Draft202012Validator(
-        schema,
-        registry=_offline_schema_registry(
-            schema_documents_override, matrix_version=matrix_version
-        ),
-        format_checker=FormatChecker(),
-    )
+    if validator_override is None:
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(
+            schema,
+            registry=_offline_schema_registry(
+                schema_documents_override, matrix_version=matrix_version
+            ),
+            format_checker=FormatChecker(),
+        )
+    else:
+        validator = validator_override
     return _format_errors(validator, document)
 
 
@@ -1564,6 +1569,7 @@ def _validate_artifact_contract(
     resolved_schema: dict[str, Any] | None = None,
     schema_override: dict[str, Any] | None = None,
     schema_documents_override: Mapping[str, dict[str, Any]] | None = None,
+    validator_override: Draft202012Validator | None = None,
     matrix_version: str = "1.0",
 ) -> ProfileReadResult:
     if not profile_v2_schema_enabled(features):
@@ -1596,6 +1602,7 @@ def _validate_artifact_contract(
         document,
         schema_override=effective_schema,
         schema_documents_override=schema_documents_override,
+        validator_override=validator_override,
         matrix_version=matrix_version,
     )
     if not errors:
@@ -1659,20 +1666,146 @@ def validate_artifact(
     )
 
 
+def _session_digest(value: Any) -> str:
+    """Content-bind one private validation session without a process-wide cache."""
+
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+class _IntentValidationSessionV041:
+    """One compose/apply-local set of immutable validation preparation resources."""
+
+    def __init__(self) -> None:
+        self._closed = False
+        verify_contract_matrix_alignment(matrix_version="1.1")
+        self._matrix = load_artifact_contract_matrix("1.1")
+        self._matrix_digest = _session_digest(self._matrix)
+        self._routes = _contract_routes_from_matrix(self._matrix)
+        self._schemas = _schema_documents(matrix_version="1.1")
+        self._schema_documents_digest = _session_digest(self._schemas)
+        registry = Registry()
+        for schema_id, schema in self._schemas.items():
+            registry = registry.with_resource(schema_id, Resource.from_contents(schema))
+        self._offline_registry = registry
+        self._registries: dict[tuple[str, str], tuple[dict[str, Any], str]] = {}
+        self._authorities: dict[str, tuple[dict[str, Any], str]] = {}
+        self._validators: dict[
+            tuple[str, str, str, str, str, str, str, str], Draft202012Validator
+        ] = {}
+
+    @property
+    def registry(self) -> dict[str, Any]:
+        return self._registry_for("2.2", "declaration_intent")[0]
+
+    def close(self) -> None:
+        self._closed = True
+        self._validators.clear()
+        self._registries.clear()
+        self._authorities.clear()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise ArtifactContractError("Intent validation session is closed.")
+
+    def _registry_for(self, version: str, context: str) -> tuple[dict[str, Any], str]:
+        self._require_open()
+        key = (version, context)
+        cached = self._registries.get(key)
+        if cached is None:
+            try:
+                registry = load_registry(version=version, validation_context=context)
+                validate_registry_document(registry, validation_context=context)
+                verify_committed_catalog(registry, version=version, validation_context=context)
+            except RegistryContractError as exc:
+                raise ArtifactRouteError(str(exc)) from exc
+            cached = (registry, _session_digest(registry))
+            self._registries[key] = cached
+        return cached
+
+    def _authority_for(self, version: str) -> tuple[dict[str, Any], str]:
+        self._require_open()
+        cached = self._authorities.get(version)
+        if cached is None:
+            try:
+                authority = load_authority_contract(version)
+                verify_authority_projection(version)
+            except AuthorityContractError as exc:
+                raise ArtifactRouteError(str(exc)) from exc
+            cached = (authority, _session_digest(authority))
+            self._authorities[version] = cached
+        return cached
+
+    def _resources_for(
+        self, document: Mapping[str, Any]
+    ) -> tuple[ContractRoute, dict[str, Any], dict[str, Any], Draft202012Validator]:
+        self._require_open()
+        route = _route_artifact_contract_from_routes(document, self._routes)
+        try:
+            schema = self._schemas[route.schema_id]
+        except KeyError as exc:
+            raise ArtifactRouteError(
+                f"Route {route.route_id} has no committed schema document."
+            ) from exc
+        registry, registry_digest = self._registry_for(
+            route.registry_contract_version, route.registry_validation_context
+        )
+        if route.authority_contract_version == "none":
+            authority_digest = "none"
+        else:
+            _, authority_digest = self._authority_for(route.authority_contract_version)
+        validator_key = (
+            route.artifact_kind,
+            route.schema_version,
+            route.registry_contract_version,
+            route.authority_contract_version,
+            self._matrix_digest,
+            self._schema_documents_digest,
+            registry_digest,
+            authority_digest,
+        )
+        validator = self._validators.get(validator_key)
+        if validator is None:
+            Draft202012Validator.check_schema(schema)
+            validator = Draft202012Validator(
+                schema,
+                registry=self._offline_registry,
+                format_checker=FormatChecker(),
+            )
+            self._validators[validator_key] = validator
+        return route, schema, registry, validator
+
+    def validate(self, document: dict[str, Any]) -> ProfileReadResult:
+        """Fully validate one independent document with this session's resources."""
+
+        self._require_open()
+        _, schema, registry, validator = self._resources_for(document)
+        return _validate_artifact_contract(
+            document,
+            features={"profile_v2_schema": True},
+            registry=registry,
+            resolved_schema=schema,
+            validator_override=validator,
+            matrix_version="1.1",
+        )
+
+
+def _new_intent_validation_session_v041() -> _IntentValidationSessionV041:
+    """Create a compose/apply-local private session; callers must close it."""
+
+    return _IntentValidationSessionV041()
+
+
 def validate_intent_artifact_v041(document: dict[str, Any]) -> ProfileReadResult:
     """Validate one append-only P3 declaration/intent artifact contract."""
 
-    verify_contract_matrix_alignment(matrix_version="1.1")
-    _, effective_schema, effective_registry, _ = load_routed_contracts(
-        document, matrix_version="1.1"
-    )
-    return _validate_artifact_contract(
-        document,
-        features={"profile_v2_schema": True},
-        registry=effective_registry,
-        resolved_schema=effective_schema,
-        matrix_version="1.1",
-    )
+    session = _new_intent_validation_session_v041()
+    try:
+        return session.validate(document)
+    finally:
+        session.close()
 
 
 def _is_obvious_placeholder_fingerprint(value: Any) -> bool:

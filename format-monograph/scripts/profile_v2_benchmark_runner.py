@@ -34,7 +34,6 @@ from profile_v2_benchmark import (
 )
 from profile_v2_canonical import canonical_data_digest, stamp_intent_semantic_fingerprint_v041
 from profile_v2_composer import apply_intent_resolutions_v041, compose_intent_profile_v041
-from profile_v2_artifacts import validate_intent_artifact_v041
 from profile_v2_registry import load_registry
 from profile_v2_scope import normalize_scope, normalized_property_scope_key
 
@@ -224,11 +223,8 @@ def compose_cell(config: dict[str, Any], *, scale_id: str, scenario_id: str, gen
     assets, expected = generate_assets(config, scale_id, scenario_id, generation_seed, permutation_seed=permutation_seed)
     generation_seconds = time.perf_counter() - generated_at
     manifest = feature_manifest()
-    validation_at = time.perf_counter()
-    for asset in assets:
-        validate_intent_artifact_v041(asset)
-    validate_intent_artifact_v041(manifest)
-    validation_seconds = time.perf_counter() - validation_at
+    # Composer owns asset and manifest contract validation for its private snapshot.
+    validation_seconds = None
     composed_at = time.perf_counter()
     composed = compose_intent_profile_v041(assets, manifest, input_fingerprint=_sha(b"c2b-source"), structure_fingerprint=_sha(b"c2b-structure"), artifact_id="conflict-report:c2b-%s-%s" % (scale_id, scenario_id), created_by_tool=_tool(), generated_at="2026-08-23T00:00:00Z", include_metrics=True)
     compose_seconds = time.perf_counter() - composed_at
@@ -381,7 +377,7 @@ def _run_record(
         "run_status": "completed" if completed else ("timeout" if supervised["status"] == "timeout" else "process_crash"),
         "timings": {
             "synthetic_generation": _measured(stages["synthetic_generation"]) if completed else _not_reached(),
-            "schema_registry_validation": _measured(stages["schema_registry_validation"]) if completed else _not_reached(),
+            "schema_registry_validation": (_not_applicable() if stages["schema_registry_validation"] is None else _measured(stages["schema_registry_validation"])) if completed else _not_reached(),
             "compose": _measured(stages["compose"]) if completed else _not_reached(),
             "approval_generation": approval, "apply": apply,
             "canonical_serialization": _measured(stages["canonical_serialization"]) if completed else _not_reached(),
