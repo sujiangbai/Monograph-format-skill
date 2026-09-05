@@ -45,6 +45,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
         document = Document()
         document.add_paragraph("[[TOC]]")
         document.add_paragraph("Synthetic TOC entry")
+        document.add_section(WD_SECTION.NEW_PAGE)
         document.add_paragraph("第1章 Synthetic body")
         table = document.add_table(rows=2, cols=4)
         for index, value in enumerate(("Value", "Unit", "Code", "Description")):

@@ -543,7 +543,7 @@ class V032SelectiveFieldWritebackTests(unittest.TestCase):
             document.sections[0].footer,
             document.sections[0].even_page_footer,
         ):
-            add_simple_field(footer.paragraphs[0], "PAGE", "1")
+            add_complex_field(footer.paragraphs[0], "PAGE", "1", dirty=False)
         document.add_section(WD_SECTION.NEW_PAGE)
         document.add_paragraph("Contents")
         document.add_section(WD_SECTION.NEW_PAGE)
