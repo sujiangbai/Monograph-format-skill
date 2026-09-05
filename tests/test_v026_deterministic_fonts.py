@@ -283,11 +283,58 @@ class V026DeterministicFontTests(unittest.TestCase):
         paragraph = footer.paragraphs[0]
         add_page_field(paragraph)
         add_page_field(paragraph)
-        self.assertTrue(_ensure_page_field(footer, 2))
-        self.assertEqual(1, _page_field_count(footer._element))
-        self.assertEqual(1, len(footer.paragraphs))
-        self.assertFalse(_ensure_page_field(footer, 2))
-        self.assertEqual(1, _page_field_count(footer._element))
+        before = (
+            etree.tostring(document.element),
+            etree.tostring(document.settings.element),
+            tuple(
+                sorted(
+                    (rel_id, rel.reltype, rel.target_ref, rel.is_external)
+                    for rel_id, rel in document.part.rels.items()
+                )
+            ),
+            tuple(
+                sorted(
+                    (rel_id, etree.tostring(part.element))
+                    for rel_id, part in document.part.related_parts.items()
+                    if hasattr(part, "element")
+                    and str(getattr(part, "partname", "")).startswith(
+                        ("/word/footer", "/word/header")
+                    )
+                )
+            ),
+        )
+        with self.assertRaises(FormatMonographError):
+            _ensure_page_field(footer, 2)
+        after = (
+            etree.tostring(document.element),
+            etree.tostring(document.settings.element),
+            tuple(
+                sorted(
+                    (rel_id, rel.reltype, rel.target_ref, rel.is_external)
+                    for rel_id, rel in document.part.rels.items()
+                )
+            ),
+            tuple(
+                sorted(
+                    (rel_id, etree.tostring(part.element))
+                    for rel_id, part in document.part.related_parts.items()
+                    if hasattr(part, "element")
+                    and str(getattr(part, "partname", "")).startswith(
+                        ("/word/footer", "/word/header")
+                    )
+                )
+            ),
+        )
+        self.assertEqual(before, after)
+
+        single = Document()
+        single_footer = single.sections[0].footer
+        add_page_field(single_footer.paragraphs[0])
+        self.assertTrue(_ensure_page_field(single_footer, 2))
+        self.assertEqual(1, _page_field_count(single_footer._element))
+        self.assertEqual(1, len(single_footer.paragraphs))
+        self.assertFalse(_ensure_page_field(single_footer, 2))
+        self.assertEqual(1, _page_field_count(single_footer._element))
 
         protected = Document().sections[0].footer
         protected.paragraphs[0].text = "Synthetic chapter footer"
