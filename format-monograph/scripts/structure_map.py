@@ -31,6 +31,7 @@ from _common import (
     _heading_prefix_pattern,
     _paragraph_text_without_field_results,
     _unique_row_cells,
+    apply_style_rule_to_paragraphs,
     apply_table_properties,
     apply_style_properties,
     clear_controlled_direct_format,
@@ -39,6 +40,7 @@ from _common import (
     normalize_structural_paragraph,
     semantic_title_heading_role,
     style_inherits_name,
+    validate_isolated_approved_style_targets,
 )
 from docx_pagination import apply_pagination_sections, section_index_for_paragraph
 
@@ -78,6 +80,24 @@ DEFAULT_BOOK_TITLE_FORMAT = {
     "space_before_pt": 0,
     "space_after_pt": 0,
 }
+DEFAULT_TOC_HEADING_FORMAT = {
+    "font_name_east_asia": "STHeiti Medium",
+    "font_name_ascii": "Times New Roman",
+    "font_name_complex_script": "Times New Roman",
+    "font_size_pt": 18,
+    "bold": True,
+    "italic": False,
+    "color_hex": "000000",
+    "alignment": "center",
+    "first_line_indent_chars": 0,
+    "left_indent_pt": 0,
+    "right_indent_pt": 0,
+    "space_before_pt": 0,
+    "space_after_pt": 18,
+    "keep_with_next": True,
+}
+STANDARD_TOC_HEADING_TEXT = "目    录"
+LEGACY_TOC_HEADING_TEXT = "目录"
 EMU_PER_INCH = 914400
 EMU_PER_MM = 36000
 ARCHITECTURE_TERMS = ("建筑", "平面图", "立面图", "剖面图", "详图", "大样")
@@ -411,6 +431,28 @@ def _resolve_replaced_caption_target(document: Any, entry: dict[str, Any]) -> An
     return candidates[0]
 
 
+def _resolved_front_matter_toc_heading(
+    document: Any, structure_map: dict[str, Any]
+) -> Any | None:
+    settings = structure_map.get("front_matter", {})
+    locator = settings.get("toc_heading")
+    if not settings.get("approved") or not isinstance(locator, dict):
+        return None
+    paragraph = resolve_paragraph_locator(document, locator)
+    expected = locator.get("text_sha256")
+    actual = text_sha256(paragraph.text)
+    normalized_legacy = bool(
+        settings.get("toc_heading_action") == "normalize_and_format_standard"
+        and expected == text_sha256(LEGACY_TOC_HEADING_TEXT)
+        and actual == text_sha256(STANDARD_TOC_HEADING_TEXT)
+    )
+    if expected and actual != expected and not normalized_legacy:
+        raise FormatMonographError(
+            f"TOC-heading locator hash mismatch at {_locator_key(locator)}."
+        )
+    return paragraph
+
+
 def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -> None:
     if not has_semantic_structure_map(structure_map):
         return
@@ -457,6 +499,12 @@ def prime_structure_map_locators(document: Any, structure_map: dict[str, Any]) -
                     )
                 key = _locator_key(locator)
                 cache[key] = paragraph
+                verified.add(key)
+            toc_heading = _resolved_front_matter_toc_heading(document, structure_map)
+            toc_heading_locator = front_matter.get("toc_heading")
+            if toc_heading is not None and isinstance(toc_heading_locator, dict):
+                key = _locator_key(toc_heading_locator)
+                cache[key] = toc_heading
                 verified.add(key)
         for image in structure_map.get("images", []):
             if not image.get("approved"):
@@ -507,6 +555,19 @@ def approved_role_paragraphs(
     if not has_semantic_structure_map(structure_map):
         return []
     wanted = normalized_role(selector["value"])
+    if wanted == "toc_heading":
+        settings = structure_map.get("front_matter", {})
+        if settings.get("toc_heading_action") != "normalize_and_format_standard":
+            return []
+        evidence = _preflight_v15_toc_heading(document, structure_map)
+        paragraph = evidence.get("paragraph")
+        if (
+            evidence.get("status") != "approved_standard"
+            or paragraph is None
+            or paragraph.text != STANDARD_TOC_HEADING_TEXT
+        ):
+            return []
+        return [paragraph]
     caption_roles = {
         "figure_caption",
         "figure_caption_unnumbered",
@@ -804,6 +865,27 @@ def _candidate_front_matter(
         ),
         None,
     )
+    toc_heading = None
+    if toc_index is not None and 0 <= toc_index < len(document.paragraphs):
+        previous = document.paragraphs[toc_index]._p.getprevious()
+        if previous is not None and previous.tag == qn("w:p"):
+            candidate = Paragraph(previous, document)
+            candidate_index = next(
+                (
+                    index
+                    for index, paragraph in enumerate(document.paragraphs)
+                    if paragraph._p is candidate._p
+                ),
+                None,
+            )
+            if candidate_index is not None and (
+                candidate.text in {LEGACY_TOC_HEADING_TEXT, STANDARD_TOC_HEADING_TEXT}
+                or (
+                    candidate.style is not None
+                    and style_inherits_name(candidate.style, TOC_HEADING_STYLE)
+                )
+            ):
+                toc_heading = _body_locator(candidate_index, body_values)
     return {
         "approved": False,
         "book_title": (
@@ -813,8 +895,10 @@ def _candidate_front_matter(
         "title_page_numbering": "none",
         "title_page_vertical_alignment": "center",
         "book_title_format": dict(DEFAULT_BOOK_TITLE_FORMAT),
-        "toc_heading_text": "目    录",
-        "insert_toc_heading_if_missing": True,
+        "toc_heading": toc_heading,
+        "toc_heading_action": "preserve",
+        "toc_heading_text": STANDARD_TOC_HEADING_TEXT,
+        "insert_toc_heading_if_missing": False,
     }
 
 
@@ -2542,11 +2626,54 @@ def load_structure_map(path: Path) -> dict[str, Any]:
                         "Approved front_matter requires a boolean "
                         "insert_toc_heading_if_missing value."
                     )
+                if value.get("schema_version") == "1.5" and insert_toc_heading:
+                    raise FormatMonographError(
+                        "Structure map 1.5 does not authorize creation of a missing "
+                        "TOC heading."
+                    )
                 if insert_toc_heading and front_matter.get(
                     "toc_heading_text"
                 ) not in {"目录", "目    录"}:
                     raise FormatMonographError(
                         "The technical-textbook TOC heading must be 目录 or 目    录."
+                    )
+                toc_heading_action = front_matter.get(
+                    "toc_heading_action", "preserve"
+                )
+                if toc_heading_action not in {
+                    "preserve",
+                    "normalize_and_format_standard",
+                }:
+                    raise FormatMonographError(
+                        "front_matter.toc_heading_action must be preserve or "
+                        "normalize_and_format_standard."
+                    )
+                toc_heading_locator = front_matter.get("toc_heading")
+                if toc_heading_locator is not None and (
+                    not isinstance(toc_heading_locator, dict)
+                    or toc_heading_locator.get("kind") != "body_paragraph"
+                    or not toc_heading_locator.get("text_sha256")
+                ):
+                    raise FormatMonographError(
+                        "front_matter.toc_heading must be a hashed body-paragraph "
+                        "locator."
+                    )
+                if (
+                    toc_heading_action == "normalize_and_format_standard"
+                    and not isinstance(toc_heading_locator, dict)
+                ):
+                    raise FormatMonographError(
+                        "TOC-heading normalization requires one approved existing "
+                        "toc_heading locator."
+                    )
+                if (
+                    toc_heading_action == "normalize_and_format_standard"
+                    and front_matter.get("toc_heading_text")
+                    != STANDARD_TOC_HEADING_TEXT
+                ):
+                    raise FormatMonographError(
+                        "The V0.5.1 standard TOC heading must contain exactly four "
+                        "ASCII spaces."
                     )
                 book_title_format = front_matter.get("book_title_format", {})
                 if not isinstance(book_title_format, dict):
@@ -3963,10 +4090,161 @@ def _special_paragraph_style(
     return style
 
 
+def _body_paragraph_index(document: Any, paragraph: Any) -> int:
+    index = next(
+        (
+            candidate_index
+            for candidate_index, candidate in enumerate(document.paragraphs)
+            if candidate._p is paragraph._p
+        ),
+        None,
+    )
+    if index is None:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=target_not_in_main_body"
+        )
+    return index
+
+
+def _preflight_v15_toc_heading(
+    document: Any, structure_map: dict[str, Any]
+) -> dict[str, Any]:
+    settings = structure_map.get("front_matter", {})
+    evidence: dict[str, Any] = {
+        "status": "preserved_missing",
+        "approved": False,
+        "text_normalized": False,
+        "format_applied": False,
+    }
+    if not settings.get("approved"):
+        return evidence
+    if settings.get("insert_toc_heading_if_missing"):
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=creation_not_authorized"
+        )
+    if structure_map.get("schema_version") != "1.5":
+        return evidence
+
+    from field_writeback import parse_fields
+
+    toc_fields = [
+        record
+        for record in parse_fields(document.element)
+        if record.field_type == "TOC"
+    ]
+    if len(toc_fields) > 1:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=multiple_main_toc_fields "
+            f"count={len(toc_fields)}"
+        )
+
+    locator = settings.get("toc_heading")
+    action = settings.get("toc_heading_action", "preserve")
+    if locator is None:
+        if action != "preserve":
+            raise FormatMonographError(
+                "TOC_TITLE_BOUNDARY_BLOCKED reason=approved_heading_missing"
+            )
+        return evidence
+    if not isinstance(locator, dict):
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=invalid_heading_locator"
+        )
+    toc_start_locator = structure_map.get("pagination_sections", {}).get(
+        "toc_start"
+    )
+    if not isinstance(toc_start_locator, dict):
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=approved_toc_start_missing"
+        )
+    heading = _resolved_front_matter_toc_heading(document, structure_map)
+    assert heading is not None
+    toc_start = resolve_paragraph_locator(document, toc_start_locator)
+    heading_index = _body_paragraph_index(document, heading)
+    toc_start_index = _body_paragraph_index(document, toc_start)
+    if heading_index + 1 != toc_start_index or heading._p.getnext() is not toc_start._p:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=heading_not_immediately_before_toc"
+        )
+
+    book_title = resolve_paragraph_locator(document, settings["book_title"])
+    book_title_index = _body_paragraph_index(document, book_title)
+    if not book_title_index < heading_index:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=heading_outside_approved_front_matter"
+        )
+    candidates = {
+        id(candidate._p)
+        for candidate in document.paragraphs[book_title_index + 1 : toc_start_index]
+        if candidate.text in {LEGACY_TOC_HEADING_TEXT, STANDARD_TOC_HEADING_TEXT}
+        or (
+            candidate.style is not None
+            and style_inherits_name(candidate.style, TOC_HEADING_STYLE)
+        )
+    }
+    candidates.add(id(heading._p))
+    if len(candidates) != 1:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=multiple_heading_candidates "
+            f"count={len(candidates)}"
+        )
+
+    evidence.update({"approved": action == "normalize_and_format_standard"})
+    if action == "preserve":
+        evidence["status"] = "preserved_unapproved"
+    elif heading.text in {LEGACY_TOC_HEADING_TEXT, STANDARD_TOC_HEADING_TEXT}:
+        forbidden_payload = heading._p.xpath(
+            ".//w:fldSimple | .//w:fldChar | .//w:instrText | .//w:drawing | "
+            ".//w:pict | .//w:object | .//w:txbxContent | .//w:hyperlink | "
+            ".//w:ins | .//w:del | .//w:tab | .//w:br"
+        )
+        if forbidden_payload:
+            raise FormatMonographError(
+                "TOC_TITLE_BOUNDARY_BLOCKED reason=heading_not_plain_text"
+            )
+        validate_isolated_approved_style_targets(
+            document,
+            {"kind": "paragraph_role", "value": "toc_heading"},
+            [heading],
+        )
+        evidence["status"] = "approved_standard"
+    else:
+        evidence["status"] = "preserved_custom"
+    evidence["paragraph"] = heading
+    return evidence
+
+
+def _normalize_legacy_toc_heading_text(paragraph: Any) -> bool:
+    if paragraph.text == STANDARD_TOC_HEADING_TEXT:
+        return False
+    if paragraph.text != LEGACY_TOC_HEADING_TEXT:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=nonstandard_heading_rewrite"
+        )
+    nodes = paragraph._p.xpath(".//w:t")
+    if "".join(node.text or "" for node in nodes) != LEGACY_TOC_HEADING_TEXT:
+        raise FormatMonographError(
+            "TOC_TITLE_BOUNDARY_BLOCKED reason=heading_text_nodes_mismatch"
+        )
+    offset = 0
+    for node in nodes:
+        value = node.text or ""
+        boundary = 1 - offset
+        if 0 <= boundary <= len(value):
+            node.text = value[:boundary] + "    " + value[boundary:]
+            node.set(qn("xml:space"), "preserve")
+            return True
+        offset += len(value)
+    raise FormatMonographError(
+        "TOC_TITLE_BOUNDARY_BLOCKED reason=heading_text_boundary_missing"
+    )
+
+
 def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     settings = structure_map.get("front_matter", {})
     if not settings.get("approved"):
         return 0
+    toc_heading_evidence = _preflight_v15_toc_heading(document, structure_map)
     title = resolve_paragraph_locator(document, settings["book_title"])
     title_format = dict(DEFAULT_BOOK_TITLE_FORMAT)
     title_format.update(settings.get("book_title_format", {}))
@@ -3994,42 +4272,35 @@ def _apply_front_matter(document: Any, structure_map: dict[str, Any]) -> int:
     title.paragraph_format.first_line_indent = Pt(0)
     setattr(document, "_format_monograph_book_title", title)
 
-    if not settings.get("insert_toc_heading_if_missing"):
-        return 1
-
-    toc = resolve_paragraph_locator(
-        document, structure_map["pagination_sections"]["toc_start"]
-    )
-    previous = toc._p.getprevious()
-    toc_heading = None
-    if previous is not None and previous.tag == qn("w:p"):
-        candidate = Paragraph(previous, document)
-        if (
-            candidate.text.strip() == settings["toc_heading_text"]
-            or (
-                candidate.style is not None
-                and candidate.style.name == TOC_HEADING_STYLE
+    if structure_map.get("schema_version") == "1.5":
+        toc_heading = toc_heading_evidence.pop("paragraph", None)
+        if toc_heading_evidence["status"] == "approved_standard":
+            apply_style_rule_to_paragraphs(
+                document,
+                {
+                    "id": "FMT-TOCTITLE-501",
+                    "selector": {
+                        "kind": "paragraph_role",
+                        "value": "toc_heading",
+                    },
+                    "properties": dict(DEFAULT_TOC_HEADING_FORMAT),
+                },
+                [toc_heading],
+                isolate_targets=True,
             )
-        ):
-            toc_heading = candidate
-    inserted = False
-    if toc_heading is None:
-        element = OxmlElement("w:p")
-        toc._p.addprevious(element)
-        toc_heading = Paragraph(element, document)
-        toc_heading.add_run(settings["toc_heading_text"])
-        inserted = True
-    elif toc_heading.text != settings["toc_heading_text"]:
-        toc_heading.text = settings["toc_heading_text"]
-    toc_heading.style = _special_paragraph_style(
-        document, TOC_HEADING_STYLE, size_pt=18, bold=True
-    )
-    toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    toc_heading.paragraph_format.first_line_indent = Pt(0)
-    for run in toc_heading.runs:
-        run.bold = True
-    setattr(document, "_format_monograph_toc_heading", toc_heading)
-    return 1 + int(inserted)
+            toc_heading_evidence["text_normalized"] = (
+                _normalize_legacy_toc_heading_text(toc_heading)
+            )
+            toc_heading_evidence["status"] = "formatted_standard"
+            toc_heading_evidence["format_applied"] = True
+        setattr(
+            document,
+            "_format_monograph_toc_heading_evidence",
+            toc_heading_evidence,
+        )
+        return 1 + int(toc_heading_evidence["format_applied"])
+
+    return 1
 
 
 def _new_block_spacer(document: Any) -> Any:
@@ -4415,6 +4686,7 @@ def _cleanup_orphan_header_footer_relationships(document: Any) -> int:
 
 
 def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[dict[str, Any]]:
+    _preflight_v15_toc_heading(document, structure_map)
     trailing_targets = _apply_trailing_sections(document, structure_map)
     orphan_parts = _cleanup_orphan_header_footer_relationships(document)
     toc_targets = _apply_toc_ranges(document, structure_map)
@@ -4456,7 +4728,17 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
             caption_actions[action] = caption_actions.get(action, 0) + 1
     changes = [
         {"kind": "structure_toc", "targets": toc_targets},
-        {"kind": "structure_front_matter", "targets": front_matter_targets},
+        {
+            "kind": "structure_front_matter",
+            "targets": front_matter_targets,
+            "details": {
+                "toc_heading": getattr(
+                    document,
+                    "_format_monograph_toc_heading_evidence",
+                    None,
+                )
+            },
+        },
         {"kind": "structure_headings", "targets": heading_targets},
         {"kind": "structure_appendices", "targets": appendix_targets},
         {"kind": "structure_outline_cleanup", "targets": outline_targets},
@@ -5248,9 +5530,24 @@ def structure_content_inventory(
     has_migrated_captions = bool(
         migrated_caption_hashes - manual_migrated_caption_hashes
     )
-    approved_front_matter = structure_map.get("front_matter", {}).get("approved")
+    front_matter = structure_map.get("front_matter", {})
+    approved_toc_heading_index = None
+    if (
+        front_matter.get("approved")
+        and front_matter.get("toc_heading_action")
+        == "normalize_and_format_standard"
+    ):
+        from _common import load_document
+
+        inventory_document = load_document(path)
+        toc_heading_evidence = _preflight_v15_toc_heading(
+            inventory_document, structure_map
+        )
+        if toc_heading_evidence.get("status") == "approved_standard":
+            approved_toc_heading_index = _body_paragraph_index(
+                inventory_document, toc_heading_evidence["paragraph"]
+            )
     approved_block_spacing = structure_map.get("block_spacing", {}).get("approved")
-    toc_heading_style_id = TOC_HEADING_STYLE.replace(" ", "")
     block_spacer_style_id = BLOCK_SPACER_STYLE.replace(" ", "")
     result: dict[str, list[str]] = {}
     with zipfile.ZipFile(path) as package:
@@ -5293,8 +5590,6 @@ def structure_content_inventory(
                 if paragraph in approved_cell_cleanup_paragraphs:
                     continue
                 style_ids = paragraph.xpath("./w:pPr/w:pStyle/@w:val", namespaces=NS)
-                if approved_front_matter and style_ids == [toc_heading_style_id]:
-                    continue
                 if approved_block_spacing and style_ids == [block_spacer_style_id]:
                     continue
                 direct_body_paragraph = (
@@ -5317,6 +5612,12 @@ def structure_content_inventory(
                     continue
                 value = _paragraph_text_without_field_results(paragraph)
                 value = FIELD_MARKER_PATTERN.sub("", value)
+                if (
+                    current_index == approved_toc_heading_index
+                    and value
+                    in {LEGACY_TOC_HEADING_TEXT, STANDARD_TOC_HEADING_TEXT}
+                ):
+                    value = "[[APPROVED_TOC_HEADING]]"
                 value = _normalize_manual_identifier(value, identifier_replacements)
                 original_caption = CAPTION_PATTERN.match(value)
                 if text_sha256(value) in manual_migrated_caption_hashes:

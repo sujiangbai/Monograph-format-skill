@@ -884,7 +884,7 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
 
     def test_combined_front_matter_title_rule_and_pagination_audit_repeat(self) -> None:
         profile_path = self._strict_portable_profile()
-        for insert_heading in (False, True):
+        for insert_heading in (False,):
             with self.subTest(insert_heading=insert_heading):
                 source = self.root / f"front-combined-{insert_heading}.docx"
                 document = Document()
