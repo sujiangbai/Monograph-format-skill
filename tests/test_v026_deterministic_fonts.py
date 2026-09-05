@@ -11,6 +11,7 @@ import zlib
 from pathlib import Path
 
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
@@ -36,7 +37,6 @@ from audit_docx import audit_field_rule, audit_paragraph_rule, audit_table_rule 
 from docx_pagination import (  # noqa: E402
     apply_pagination_sections,
     audit_pagination_sections,
-    finalize_pagination_sections,
     _ensure_page_field,
     _page_field_count,
     _resolve_audit_boundary,
@@ -296,10 +296,8 @@ class V026DeterministicFontTests(unittest.TestCase):
 
         static_page = Document().sections[0].footer
         static_page.paragraphs[0].text = "315"
-        self.assertTrue(
+        with self.assertRaises(FormatMonographError):
             _ensure_page_field(static_page, 2, replace_static_page_text=True)
-        )
-        self.assertEqual(1, _page_field_count(static_page._element))
 
         duplicate_path = self.root / "duplicate-footer.docx"
         duplicated = Document()
@@ -325,9 +323,9 @@ class V026DeterministicFontTests(unittest.TestCase):
                     etree.Element("{urn:schemas-microsoft-com:vml}imagedata")
                 )
             legacy_paragraph._p.append(container)
-        self.assertTrue(_ensure_page_field(legacy, 2))
-        self.assertEqual(1, _page_field_count(legacy._element))
-        self.assertFalse(legacy._element.xpath(".//w:drawing | .//w:pict"))
+        with self.assertRaises(FormatMonographError):
+            _ensure_page_field(legacy, 2)
+        self.assertTrue(legacy._element.xpath(".//w:drawing | .//w:pict"))
 
         linked_vml_footer = Document().sections[0].footer
         pict = OxmlElement("w:pict")
@@ -340,7 +338,8 @@ class V026DeterministicFontTests(unittest.TestCase):
         image_data.set(qn("r:id"), "rIdSyntheticImage")
         pict.append(image_data)
         linked_vml_footer.paragraphs[0]._p.append(pict)
-        self.assertFalse(_ensure_page_field(linked_vml_footer, 2))
+        with self.assertRaises(FormatMonographError):
+            _ensure_page_field(linked_vml_footer, 2)
         self.assertTrue(linked_vml_footer._element.xpath(".//w:pict"))
 
         image_footer = Document().sections[0].footer
@@ -700,7 +699,7 @@ class V026DeterministicFontTests(unittest.TestCase):
             effective_font_failures(output, profile, structure_map),
         )
 
-    def test_body_section_suppresses_inherited_duplicate_page_break(self) -> None:
+    def test_pagination_requires_existing_exact_boundaries_before_mutation(self) -> None:
         document = Document()
         document.add_paragraph("Synthetic TOC")
         body = document.add_paragraph("Synthetic chapter", style="Heading 1")
@@ -717,52 +716,17 @@ class V026DeterministicFontTests(unittest.TestCase):
         def resolver(doc, locator):
             return next(p for p in doc.paragraphs if p.text == locator["text"])
 
-        result = apply_pagination_sections(document, settings, resolver)
-        self.assertTrue(result["suppressed_redundant_body_page_break"])
-        self.assertIs(False, body.paragraph_format.page_break_before)
-        body.paragraph_format.page_break_before = True
-        self.assertTrue(
-            finalize_pagination_sections(document, settings, resolver)
-        )
-        self.assertIs(False, body.paragraph_format.page_break_before)
-        output = self.root / "no-duplicate-page-break.docx"
-        document.save(output)
-        failures, _ = audit_pagination_sections(
-            output, Document(output), settings, resolver
-        )
-        self.assertFalse(failures)
-        formatted = Document(output)
-        self.assertFalse(
-            audit_paragraph_rule(
-                formatted,
-                {
-                    "selector": {
-                        "kind": "paragraph_role",
-                        "value": "chapter_title",
-                    },
-                    "properties": {"page_break_before": True},
-                },
-                [resolver(formatted, settings["body_start"])],
-            )
-        )
-
-        broken = Document(output)
-        resolver(broken, settings["body_start"]).paragraph_format.page_break_before = None
-        broken_path = self.root / "duplicate-page-break.docx"
-        broken.save(broken_path)
-        failures, _ = audit_pagination_sections(
-            broken_path, Document(broken_path), settings, resolver
-        )
-        self.assertIn(
-            "redundant_page_break_before_at_body_start",
-            {failure["property"] for failure in failures},
-        )
+        before = etree.tostring(document.element)
+        with self.assertRaisesRegex(FormatMonographError, "existing, exact section boundary"):
+            apply_pagination_sections(document, settings, resolver)
+        self.assertEqual(before, etree.tostring(document.element))
+        self.assertIsNone(body.paragraph_format.page_break_before)
 
         plain = Document()
         plain.add_paragraph("Synthetic TOC")
         plain_body = plain.add_paragraph("Synthetic chapter")
-        plain_result = apply_pagination_sections(plain, settings, resolver)
-        self.assertFalse(plain_result["suppressed_redundant_body_page_break"])
+        with self.assertRaisesRegex(FormatMonographError, "existing, exact section boundary"):
+            apply_pagination_sections(plain, settings, resolver)
         self.assertIsNone(plain_body.paragraph_format.page_break_before)
 
     def test_front_matter_blank_block_spacing_and_table_rules_are_structural(self) -> None:
@@ -783,7 +747,13 @@ class V026DeterministicFontTests(unittest.TestCase):
         title_p_pr.append(title_ind)
         title_num_pr = OxmlElement("w:numPr")
         title_p_pr.append(title_num_pr)
+        title_section = document.sections[0]._sectPr
+        vertical = OxmlElement("w:vAlign")
+        vertical.set(qn("w:val"), "center")
+        title_section.append(vertical)
+        document.add_section(WD_SECTION.NEW_PAGE)
         document.add_paragraph("[[TOC]]")
+        document.add_section(WD_SECTION.NEW_PAGE)
         document.add_paragraph("第1章 Synthetic body")
         table = document.add_table(rows=5, cols=4)
         table.cell(0, 0).merge(table.cell(0, 3)).text = "表 1.1 Synthetic table"
@@ -840,9 +810,11 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertEqual("Monograph Book Title", reloaded.paragraphs[0].style.name)
         title_p_pr = reloaded.paragraphs[0]._p.pPr
         self.assertIsNone(title_p_pr.find(qn("w:numPr")))
-        self.assertIsNotNone(title_p_pr.find(qn("w:sectPr")))
-        self.assertEqual("[[TOC]]", reloaded.paragraphs[1].text)
-        self.assertNotEqual("Monograph TOC Heading", reloaded.paragraphs[1].style.name)
+        self.assertIsNone(title_p_pr.find(qn("w:sectPr")))
+        toc_paragraph = next(
+            paragraph for paragraph in reloaded.paragraphs if paragraph.text == "[[TOC]]"
+        )
+        self.assertNotEqual("Monograph TOC Heading", toc_paragraph.style.name)
         direct_title_ind = title_p_pr.find(qn("w:ind"))
         if direct_title_ind is not None:
             self.assertTrue(
@@ -888,7 +860,11 @@ class V026DeterministicFontTests(unittest.TestCase):
         self.assertEqual(
             ["nextPage", "nextPage"],
             [
-                section._sectPr.find(qn("w:type")).get(qn("w:val"))
+                (
+                    "nextPage"
+                    if section._sectPr.find(qn("w:type")) is None
+                    else section._sectPr.find(qn("w:type")).get(qn("w:val"))
+                )
                 for section in reloaded.sections[:2]
             ],
         )
@@ -953,7 +929,7 @@ class V026DeterministicFontTests(unittest.TestCase):
         prime_structure_map_locators(formatted, structure)
         with self.assertRaisesRegex(
             FormatMonographError,
-            "Non-empty authored content between the book title and TOC requires QA",
+            "existing, exact section boundary",
         ):
             apply_structure_map(formatted, structure)
 

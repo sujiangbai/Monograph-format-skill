@@ -26,6 +26,20 @@ from _common import (
 
 FOOTER_PART = re.compile(r"word/footer\d+\.xml$")
 HEADER_FOOTER_PART = re.compile(r"word/(?:header|footer)\d+\.xml$")
+
+
+def _on_off_enabled(element: Any | None) -> bool:
+    if element is None:
+        return False
+    value = element.get(qn("w:val"))
+    if value is None:
+        return True
+    normalized = value.strip().lower()
+    if normalized in {"0", "false", "off", "no"}:
+        return False
+    return normalized in {"1", "true", "on", "yes"}
+
+
 def _section_properties(document: Any) -> list[Any]:
     return document.element.body.xpath("./w:p/w:pPr/w:sectPr | ./w:sectPr")
 
@@ -48,68 +62,6 @@ def section_index_for_paragraph(document: Any, paragraph: Any) -> int:
         if p_pr is not None and p_pr.find(qn("w:sectPr")) is not None:
             section_index += 1
     return section_index
-
-
-def _section_for_position(document: Any, position: int) -> Any:
-    children = list(document.element.body)
-    for child in children[position:]:
-        if child.tag == qn("w:p"):
-            p_pr = child.find(qn("w:pPr"))
-            sect_pr = None if p_pr is None else p_pr.find(qn("w:sectPr"))
-            if sect_pr is not None:
-                return sect_pr
-        elif child.tag == qn("w:sectPr"):
-            return child
-    raise FormatMonographError("The DOCX body has no section properties.")
-
-
-def _boundary_before(document: Any, paragraph: Any) -> tuple[Any, bool]:
-    body = document.element.body
-    children = list(body)
-    position = _body_position(document, paragraph)
-    if position:
-        previous = children[position - 1]
-        p_pr = previous.find(qn("w:pPr")) if previous.tag == qn("w:p") else None
-        existing = None if p_pr is None else p_pr.find(qn("w:sectPr"))
-        if existing is not None:
-            return existing, False
-
-    source = _section_for_position(document, position)
-    boundary = OxmlElement("w:p")
-    p_pr = OxmlElement("w:pPr")
-    sect_pr = copy.deepcopy(source)
-    section_type = sect_pr.find(qn("w:type"))
-    if section_type is None:
-        section_type = OxmlElement("w:type")
-        sect_pr.insert(0, section_type)
-    section_type.set(qn("w:val"), "nextPage")
-    p_pr.append(sect_pr)
-    boundary.append(p_pr)
-    body.insert(position, boundary)
-    return sect_pr, True
-
-
-def _paragraph_has_layout_payload(element: Any) -> bool:
-    if element.tag != qn("w:p"):
-        return True
-    if "".join(element.xpath(".//w:t/text()")).strip():
-        return True
-    return bool(
-        element.xpath(
-            ".//w:drawing | .//w:object | .//w:pict | .//w:br | .//w:fldChar | "
-            ".//w:instrText | .//w:footnoteReference | .//w:endnoteReference"
-        )
-    )
-
-
-def _is_generated_empty_section_boundary(element: Any) -> bool:
-    if element.tag != qn("w:p") or list(element) == []:
-        return False
-    children = list(element)
-    if len(children) != 1 or children[0].tag != qn("w:pPr"):
-        return False
-    properties = list(children[0])
-    return len(properties) == 1 and properties[0].tag == qn("w:sectPr")
 
 
 def _nonzero_indent_attributes(ind: Any | None) -> dict[str, str]:
@@ -144,43 +96,6 @@ def _effective_style_indent_attributes(style: Any | None) -> dict[str, str | Non
     return values
 
 
-def _boundary_after_title(
-    document: Any, title_paragraph: Any, toc_paragraph: Any
-) -> tuple[Any, bool]:
-    body = document.element.body
-    children = list(body)
-    title_position = _body_position(document, title_paragraph)
-    toc_position = _body_position(document, toc_paragraph)
-    if title_position >= toc_position:
-        raise FormatMonographError("The book title must precede the TOC heading.")
-
-    between = children[title_position + 1 : toc_position]
-    if any(_paragraph_has_layout_payload(element) for element in between):
-        raise FormatMonographError(
-            "Non-empty authored content between the book title and TOC requires QA."
-        )
-
-    title_p_pr = title_paragraph._p.get_or_add_pPr()
-    existing = title_p_pr.find(qn("w:sectPr"))
-    generated_boundaries = [
-        element for element in between if _is_generated_empty_section_boundary(element)
-    ]
-    source = existing
-    if source is None and generated_boundaries:
-        generated_p_pr = generated_boundaries[-1].find(qn("w:pPr"))
-        source = generated_p_pr.find(qn("w:sectPr"))
-    if source is None:
-        source = _section_for_position(document, title_position)
-
-    inserted = existing is None
-    if existing is None:
-        existing = copy.deepcopy(source)
-        title_p_pr.append(existing)
-    for boundary in generated_boundaries:
-        body.remove(boundary)
-    return existing, inserted
-
-
 def _set_page_numbering(sect_pr: Any, start: int | None, number_format: str) -> None:
     pg_num = sect_pr.find(qn("w:pgNumType"))
     if pg_num is None and start is None:
@@ -193,56 +108,6 @@ def _set_page_numbering(sect_pr: Any, start: int | None, number_format: str) -> 
         pg_num.attrib.pop(qn("w:start"), None)
     else:
         pg_num.set(qn("w:start"), str(start))
-
-
-def _suppress_redundant_body_page_break(paragraph: Any, sect_pr: Any) -> bool:
-    section_type = sect_pr.find(qn("w:type"))
-    section_value = (
-        section_type.get(qn("w:val")) if section_type is not None else "nextPage"
-    )
-    if section_value == "continuous":
-        return False
-    direct = paragraph.paragraph_format.page_break_before
-    if direct is False:
-        return False
-    inherited = (
-        paragraph.style.paragraph_format.page_break_before
-        if direct is None and paragraph.style is not None
-        else None
-    )
-    if direct is None and inherited is not True:
-        return False
-    paragraph.paragraph_format.page_break_before = False
-    return True
-
-
-def _hide_single_title_page_running_elements(sect_pr: Any) -> None:
-    title_page = sect_pr.find(qn("w:titlePg"))
-    if title_page is None:
-        title_page = OxmlElement("w:titlePg")
-        sect_pr.append(title_page)
-    title_page.set(qn("w:val"), "true")
-    page_number = sect_pr.find(qn("w:pgNumType"))
-    if page_number is not None:
-        sect_pr.remove(page_number)
-
-
-def _set_section_type(sect_pr: Any, value: str) -> None:
-    section_type = sect_pr.find(qn("w:type"))
-    if section_type is None:
-        section_type = OxmlElement("w:type")
-        sect_pr.insert(0, section_type)
-    section_type.set(qn("w:val"), value)
-
-
-def _set_vertical_alignment(sect_pr: Any, value: str) -> None:
-    if value not in {"top", "center", "both", "bottom"}:
-        raise FormatMonographError(f"Unsupported section vertical alignment: {value}")
-    alignment = sect_pr.find(qn("w:vAlign"))
-    if alignment is None:
-        alignment = OxmlElement("w:vAlign")
-        sect_pr.append(alignment)
-    alignment.set(qn("w:val"), value)
 
 
 def _field_instructions(root: Any) -> list[str]:
@@ -312,10 +177,7 @@ def _page_field_count(root: Any) -> int:
 
 def _page_only_footer(footer: Any) -> bool:
     root = footer._element
-    if root.xpath(
-        ".//w:tbl | .//w:object | "
-        ".//*[local-name()='blip']"
-    ):
+    if root.xpath(".//w:tbl | .//w:object | .//*[local-name()='blip']"):
         return False
     instructions = _field_instructions(root)
     field_types = _field_types(root)
@@ -345,9 +207,7 @@ def _page_only_footer(footer: Any) -> bool:
             if any(str(value).strip() for value in image_data.attrib.values()):
                 return False
     visible = [
-        value.strip()
-        for value in root.xpath(".//w:t/text()")
-        if value.strip()
+        value.strip() for value in root.xpath(".//w:t/text()") if value.strip()
     ]
     return all(
         value.isdigit() or re.fullmatch(r"[IVXLCDMivxlcdm]+", value)
@@ -368,6 +228,85 @@ def _page_only_payload(root: Any) -> bool:
     return not formulas or (formulas == ["=-1"] and page_count == 1)
 
 
+_PAGINATION_REWRITE_TAGS = {
+    qn("w:ftr"), qn("w:p"), qn("w:pPr"), qn("w:pStyle"), qn("w:jc"),
+    qn("w:r"), qn("w:rPr"), qn("w:rFonts"), qn("w:sz"), qn("w:szCs"),
+    qn("w:fldSimple"), qn("w:fldChar"), qn("w:instrText"), qn("w:t"),
+}
+
+
+def _pagination_rewrite_shape(root: Any) -> str:
+    """Classify the only footer shapes this batch is authorized to rewrite."""
+    def xpath(expression: str) -> list[Any]:
+        try:
+            return root.xpath(expression, namespaces=NS)
+        except TypeError:
+            return root.xpath(expression)
+
+    if any(element.tag not in _PAGINATION_REWRITE_TAGS for element in root.iter()):
+        return "blocked"
+    simple_fields = xpath(".//w:fldSimple")
+    instructions = [
+        re.sub(r"\s+", " ", field.get(qn("w:instr"), "")).strip().upper()
+        for field in simple_fields
+    ]
+    stack: list[dict[str, Any]] = []
+    complex_results: list[Any] = []
+    for element in root.iter():
+        if element.tag == qn("w:fldChar"):
+            kind = (element.get(qn("w:fldCharType")) or "").lower()
+            if kind == "begin":
+                if stack:
+                    return "blocked"
+                stack.append({"parts": [], "separated": False})
+            elif kind == "separate":
+                if len(stack) != 1 or stack[-1]["separated"]:
+                    return "blocked"
+                stack[-1]["separated"] = True
+            elif kind == "end":
+                if len(stack) != 1 or not stack[-1]["separated"]:
+                    return "blocked"
+                instructions.append(
+                    re.sub(r"\s+", " ", "".join(stack[-1]["parts"])).strip().upper()
+                )
+                stack.pop()
+            else:
+                return "blocked"
+        elif element.tag == qn("w:instrText"):
+            if len(stack) != 1 or stack[-1]["separated"]:
+                return "blocked"
+            stack[-1]["parts"].append(element.text or "")
+        elif element.tag == qn("w:t") and (element.text or "").strip() and stack:
+            if not stack[-1]["separated"]:
+                return "blocked"
+            complex_results.append(element)
+    if stack or any(instruction != "PAGE" for instruction in instructions):
+        return "blocked"
+    visible = [element for element in xpath(".//w:t") if (element.text or "").strip()]
+    if not instructions:
+        return "blank" if not visible else "blocked"
+    if len(instructions) != 1:
+        return "blocked"
+    if not visible or any(not (element.text or "").strip().isdigit() for element in visible):
+        return "blocked"
+    for element in visible:
+        try:
+            ancestors = element.xpath("ancestor::w:fldSimple", namespaces=NS)
+        except TypeError:
+            ancestors = element.xpath("ancestor::w:fldSimple")
+        if (
+            len(ancestors) != 1 or ancestors[0] not in simple_fields
+        ) and element not in complex_results:
+            return "blocked"
+    return "page"
+
+
+def _pagination_footer_shape(footer: Any) -> str:
+    if footer.part.rels:
+        return "blocked"
+    return _pagination_rewrite_shape(footer._element)
+
+
 def _replace_with_page_field(footer: Any, alignment: Any) -> None:
     paragraphs = list(footer.paragraphs)
     paragraph = paragraphs[0] if paragraphs else footer.add_paragraph()
@@ -380,6 +319,18 @@ def _replace_with_page_field(footer: Any, alignment: Any) -> None:
     field = OxmlElement("w:fldSimple")
     field.set(qn("w:instr"), "PAGE")
     run = OxmlElement("w:r")
+    run_properties = OxmlElement("w:rPr")
+    fonts = OxmlElement("w:rFonts")
+    fonts.set(qn("w:ascii"), "Times New Roman")
+    fonts.set(qn("w:hAnsi"), "Times New Roman")
+    fonts.set(qn("w:cs"), "Times New Roman")
+    fonts.set(qn("w:eastAsia"), "宋体")
+    size = OxmlElement("w:sz")
+    size.set(qn("w:val"), "18")
+    size_cs = OxmlElement("w:szCs")
+    size_cs.set(qn("w:val"), "18")
+    run_properties.extend((fonts, size, size_cs))
+    run.append(run_properties)
     text = OxmlElement("w:t")
     text.text = "1"
     run.append(text)
@@ -390,97 +341,300 @@ def _replace_with_page_field(footer: Any, alignment: Any) -> None:
 def _ensure_page_field(
     footer: Any, alignment: Any, *, replace_static_page_text: bool = False
 ) -> bool:
-    page_fields = _page_field_count(footer._element)
-    page_only = _page_only_footer(footer)
-    if page_fields > 1:
-        if not page_only:
-            raise FormatMonographError(
-                "Footer contains multiple PAGE fields mixed with non-page content."
-            )
-        _replace_with_page_field(footer, alignment)
-        return True
-    if page_fields == 1:
-        if page_only and len(footer.paragraphs) != 1:
-            _replace_with_page_field(footer, alignment)
-            return True
-        field = footer._element.xpath(
-            ".//w:fldSimple[starts-with(translate(normalize-space(@w:instr), 'page', 'PAGE'), 'PAGE')]"
-        )
-        paragraph = field[0].getparent() if field else footer.paragraphs[0]._p
-        while paragraph is not None and paragraph.tag != qn("w:p"):
-            paragraph = paragraph.getparent()
-        if paragraph is not None:
-            from docx.text.paragraph import Paragraph
-
-            Paragraph(paragraph, footer._element).alignment = alignment
-        return False
-    visible = "".join(footer._element.xpath(".//w:t/text()")).strip()
-    has_non_text_payload = bool(
-        footer._element.xpath(".//w:tbl | .//w:drawing | .//w:object | .//w:pict")
-    )
-    if visible or has_non_text_payload:
-        if replace_static_page_text and visible.isdigit() and not has_non_text_payload:
-            _replace_with_page_field(footer, alignment)
-            return True
+    del replace_static_page_text
+    if _pagination_footer_shape(footer) == "blocked":
         raise FormatMonographError(
-            "Footer contains non-page content; page fields require explicit QA."
+            "Footer is not blank or a relationship-free pure PAGE footer."
         )
-    paragraph = next((item for item in footer.paragraphs if not item.text.strip()), None)
-    if paragraph is None:
-        paragraph = footer.add_paragraph()
-    paragraph.alignment = alignment
-    field = OxmlElement("w:fldSimple")
-    field.set(qn("w:instr"), "PAGE")
-    run = OxmlElement("w:r")
-    text = OxmlElement("w:t")
-    text.text = "1"
-    run.append(text)
-    field.append(run)
-    paragraph._p.append(field)
-    return True
+    before = etree.tostring(footer._element)
+    _replace_with_page_field(footer, alignment)
+    return etree.tostring(footer._element) != before
 
 
-def _ensure_visible_footers(
+def _existing_boundary_before(document: Any, paragraph: Any, label: str) -> int:
+    position = _body_position(document, paragraph)
+    if position == 0:
+        return 0
+    previous = list(document.element.body)[position - 1]
+    p_pr = previous.find(qn("w:pPr")) if previous.tag == qn("w:p") else None
+    if p_pr is None or p_pr.find(qn("w:sectPr")) is None:
+        raise FormatMonographError(
+            f"Approved {label} must begin at an existing, exact section boundary."
+        )
+    return section_index_for_paragraph(document, paragraph)
+
+
+def _explicit_references(sect_pr: Any, kind: str) -> dict[str, str]:
+    return {
+        reference.get(qn("w:type"), "default"): reference.get(qn("r:id"))
+        for reference in sect_pr.findall(qn(f"w:{kind}Reference"))
+        if reference.get(qn("r:id"))
+    }
+
+
+def _effective_footer_references(document: Any) -> list[dict[str, str]]:
+    inherited: dict[str, str] = {}
+    result = []
+    for sect_pr in _section_properties(document):
+        inherited.update(_explicit_references(sect_pr, "footer"))
+        result.append(dict(inherited))
+    return result
+
+
+def _footer_part(document: Any, rel_id: str, *, section: int, kind: str) -> Any:
+    part = document.part.related_parts.get(rel_id)
+    if part is None or not hasattr(part, "element"):
+        raise FormatMonographError(
+            f"Section {section} {kind} footer relationship cannot be resolved."
+        )
+    return part
+
+
+def _footer_part_identity(part: Any) -> str:
+    return str(part.partname)
+
+
+def _validate_footer_part(document: Any, rel_id: str, *, section: int, kind: str) -> Any:
+    part = _footer_part(document, rel_id, section=section, kind=kind)
+    if part.rels or _pagination_rewrite_shape(part.element) == "blocked":
+        raise FormatMonographError(
+            f"Section {section} {kind} footer is not blank or a relationship-free pure PAGE footer."
+        )
+    return part
+
+
+def preflight_pagination_sections(
     document: Any,
-    start_index: int,
+    settings: dict[str, Any],
+    resolver: Callable[[Any, dict[str, Any]], Any],
     *,
-    restart_indexes: set[int] | None = None,
-    replace_static_page_text: bool = False,
-) -> int:
+    front_matter: dict[str, Any] | None = None,
+    approved_headings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Validate all pagination inputs without mutating the document."""
+    if not settings.get("approved"):
+        return {}
+    if settings.get("number_format") != "decimal":
+        raise FormatMonographError("Approved pagination number_format must be decimal.")
+    if settings.get("start_at") != {"toc": 1, "body": 1}:
+        raise FormatMonographError(
+            "Approved pagination starts must be exactly toc=1 and body=1."
+        )
+    if settings.get("continue_after_body_start") is not True:
+        raise FormatMonographError(
+            "Approved pagination must continue after the body start."
+        )
+    toc_locator = settings.get("toc_start")
+    body_locator = settings.get("body_start")
+    if not isinstance(toc_locator, dict) or not isinstance(body_locator, dict):
+        raise FormatMonographError(
+            "Approved pagination_sections requires toc_start and body_start locators."
+        )
+    toc_paragraph = resolver(document, toc_locator)
+    body_paragraph = resolver(document, body_locator)
+    front_matter = front_matter or {}
+    toc_anchor = getattr(document, "_format_monograph_toc_heading", None)
+    toc_heading_locator = front_matter.get("toc_heading")
+    if toc_anchor is None and front_matter.get("approved") and isinstance(
+        toc_heading_locator, dict
+    ):
+        toc_anchor = resolver(document, toc_heading_locator)
+    if toc_anchor is None:
+        toc_anchor = toc_paragraph
+    toc_index = _existing_boundary_before(document, toc_anchor, "TOC pagination start")
+    body_index = _existing_boundary_before(document, body_paragraph, "body pagination start")
+    if _body_position(document, toc_anchor) >= _body_position(document, body_paragraph):
+        raise FormatMonographError("TOC pagination start must precede body pagination start.")
+    if body_index <= toc_index:
+        raise FormatMonographError("TOC and body must begin in distinct existing sections.")
+
+    sections = _section_properties(document)
+    explicit_front_starts = []
+    for index, sect_pr in enumerate(sections[: toc_index + 1]):
+        pg_num = sect_pr.find(qn("w:pgNumType"))
+        if pg_num is not None and pg_num.get(qn("w:start")) is not None:
+            explicit_front_starts.append((index, pg_num.get(qn("w:start"))))
+    if explicit_front_starts:
+        if explicit_front_starts[0][1] != "1":
+            raise FormatMonographError(
+                "Existing front-matter page-number starts are ambiguous or inconsistent."
+            )
+        front_index = explicit_front_starts[0][0]
+    else:
+        front_index = toc_index
+
+    if (
+        front_matter.get("approved")
+        and front_matter.get("separate_title_page")
+        and isinstance(front_matter.get("book_title"), dict)
+    ):
+        title = resolver(document, front_matter["book_title"])
+        title_index = section_index_for_paragraph(document, title)
+        if title_index >= front_index:
+            raise FormatMonographError(
+                "The approved separate title page must precede the first numbered front section."
+            )
+
+    settings_element = document.settings.element
+    even_odd_enabled = _on_off_enabled(
+        settings_element.find(qn("w:evenAndOddHeaders"))
+    )
+    if not even_odd_enabled and any(
+        sect_pr.findall(qn("w:headerReference")) for sect_pr in sections
+    ):
+        raise FormatMonographError(
+            "Enabling odd/even footers would change existing header behavior."
+        )
+
+    effective = _effective_footer_references(document)
+    part_areas: dict[str, set[str]] = {}
+    for index, references in enumerate(effective):
+        area = "numbered" if index >= front_index else "unnumbered"
+        for kind, rel_id in references.items():
+            part = _footer_part(document, rel_id, section=index, kind=kind)
+            part_areas.setdefault(_footer_part_identity(part), set()).add(area)
+    for partname, areas in part_areas.items():
+        if areas == {"numbered", "unnumbered"}:
+            raise FormatMonographError(
+                f"Footer part {partname} is shared across unnumbered and numbered sections."
+            )
+    if not even_odd_enabled:
+        for index, references in enumerate(effective[:front_index]):
+            for kind, rel_id in references.items():
+                part = document.part.related_parts.get(rel_id)
+                if (
+                    part is None
+                    or not hasattr(part, "element")
+                    or part.rels
+                    or _pagination_rewrite_shape(part.element) != "blank"
+                ):
+                    raise FormatMonographError(
+                        f"Enabling odd/even footers would change section {index} "
+                        f"{kind} footer behavior."
+                    )
+    if not explicit_front_starts:
+        for index, references in enumerate(effective[:toc_index]):
+            for kind, rel_id in references.items():
+                part = document.part.related_parts.get(rel_id)
+                if (
+                    part is not None
+                    and hasattr(part, "element")
+                    and not part.rels
+                    and _pagination_rewrite_shape(part.element) == "page"
+                ):
+                    raise FormatMonographError(
+                        "Existing PAGE footer before the TOC has no unambiguous "
+                        "front-matter numbering start."
+                    )
+    first_page_sections = {toc_index, body_index}
+    for entry in approved_headings or []:
+        if not entry.get("approved") or int(entry.get("level", 0)) != 1:
+            continue
+        locator = entry.get("locator")
+        if not isinstance(locator, dict):
+            continue
+        paragraph = resolver(document, locator)
+        try:
+            index = _existing_boundary_before(
+                document, paragraph, "approved chapter heading"
+            )
+        except FormatMonographError:
+            continue
+        if index >= body_index:
+            first_page_sections.add(index)
+
+    relationship_roles: dict[str, set[str]] = {}
+    for index in range(front_index, len(sections)):
+        references = effective[index]
+        kinds = ["default", "even"]
+        if _on_off_enabled(sections[index].find(qn("w:titlePg"))):
+            kinds.append("first")
+        for kind in kinds:
+            rel_id = references.get(kind)
+            if rel_id:
+                part = _validate_footer_part(
+                    document, rel_id, section=index, kind=kind
+                )
+                relationship_roles.setdefault(_footer_part_identity(part), set()).add(
+                    "left" if kind == "even" else "right"
+                )
+        if (
+            _on_off_enabled(sections[index].find(qn("w:titlePg")))
+            and index not in first_page_sections
+        ):
+            rel_id = references.get("first")
+            part = None if rel_id is None else document.part.related_parts.get(rel_id)
+            if (
+                part is None
+                or not hasattr(part, "element")
+                or _pagination_rewrite_shape(part.element) != "page"
+                or _page_footer_format(part.element)
+                != {
+                    "alignment": "right",
+                    "font_ascii": "Times New Roman",
+                    "font_east_asia": "宋体",
+                    "font_size_half_points": "18",
+                    "font_size_cs_half_points": "18",
+                }
+            ):
+                raise FormatMonographError(
+                    f"Section {index} has titlePg but is not an approved numbered first-page target."
+                )
+    for partname, roles in relationship_roles.items():
+        if roles == {"left", "right"}:
+            raise FormatMonographError(
+                f"Footer part {partname} is shared by conflicting alignment roles."
+            )
+
+    create_footer_definitions = [
+        (front_index, kind)
+        for kind in ("default", "even")
+        if not effective[front_index].get(kind)
+    ]
+    first_available = bool(effective[front_index].get("first"))
+    for index in range(front_index, len(sections)):
+        if _explicit_references(sections[index], "footer").get("first"):
+            first_available = True
+        if (
+            index in first_page_sections
+            and _on_off_enabled(sections[index].find(qn("w:titlePg")))
+            and not first_available
+        ):
+            create_footer_definitions.append((index, "first"))
+            first_available = True
+
+    return {
+        "front_section": front_index,
+        "toc_section": toc_index,
+        "body_section": body_index,
+        "section_count": len(sections),
+        "first_page_sections": sorted(first_page_sections),
+        "create_footer_definitions": create_footer_definitions,
+    }
+
+
+def _ensure_visible_footers(document: Any, plan: dict[str, Any]) -> int:
     changed = 0
-    restart_indexes = restart_indexes or set()
     document.settings.odd_and_even_pages_header_footer = True
     sections = list(document.sections)
+    start_index = int(plan["front_section"])
+    for index, kind in plan.get("create_footer_definitions", []):
+        footer = {
+            "default": sections[index].footer,
+            "even": sections[index].even_page_footer,
+            "first": sections[index].first_page_footer,
+        }[kind]
+        if not footer._has_definition:
+            footer._add_definition()
     for index, section in enumerate(sections[start_index:], start=start_index):
-        section.different_first_page_header_footer = False
-        if index in restart_indexes and index > 0:
-            for footer in (section.footer, section.even_page_footer):
-                if not footer.is_linked_to_previous:
-                    continue
-                if not _page_only_footer(footer):
-                    raise FormatMonographError(
-                        "A restarted section inherits non-page footer content."
-                    )
-                footer.is_linked_to_previous = False
-                changed += 1
-        changed += int(
-            _ensure_page_field(
-                section.footer,
-                WD_ALIGN_PARAGRAPH.RIGHT,
-                replace_static_page_text=replace_static_page_text,
-            )
-        )
-        changed += int(
-            _ensure_page_field(
-                section.even_page_footer,
-                WD_ALIGN_PARAGRAPH.LEFT,
-                replace_static_page_text=replace_static_page_text,
-            )
-        )
-        if index > start_index:
-            # A missing relationship inherits the prior footer. Existing independent
-            # footer content is retained and receives its own PAGE field above.
-            pass
+        changed += int(_ensure_page_field(section.footer, WD_ALIGN_PARAGRAPH.RIGHT))
+        changed += int(_ensure_page_field(section.even_page_footer, WD_ALIGN_PARAGRAPH.LEFT))
+        if (
+            _on_off_enabled(section._sectPr.find(qn("w:titlePg")))
+            and index in plan.get("first_page_sections", [])
+        ):
+            first = section.first_page_footer
+            changed += int(_ensure_page_field(first, WD_ALIGN_PARAGRAPH.RIGHT))
     return changed
 
 
@@ -491,80 +645,33 @@ def apply_pagination_sections(
     *,
     replace_static_page_text: bool = False,
     front_matter: dict[str, Any] | None = None,
+    approved_headings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    if not settings.get("approved"):
-        return {}
-    toc_locator = settings.get("toc_start")
-    body_locator = settings.get("body_start")
-    if not isinstance(toc_locator, dict) or not isinstance(body_locator, dict):
-        raise FormatMonographError(
-            "Approved pagination_sections requires toc_start and body_start locators."
-        )
-    toc_paragraph = resolver(document, toc_locator)
-    body_paragraph = resolver(document, body_locator)
-    if _body_position(document, toc_paragraph) >= _body_position(document, body_paragraph):
-        raise FormatMonographError("TOC pagination start must precede body pagination start.")
-
-    front_matter = front_matter or {}
-    title_boundary_inserted = False
-    title_index = None
-    if front_matter.get("approved") and front_matter.get("separate_title_page"):
-        toc_section_start = getattr(
-            document, "_format_monograph_toc_heading", toc_paragraph
-        )
-        title_paragraph = getattr(document, "_format_monograph_book_title", None)
-        if title_paragraph is None:
-            title_paragraph = resolver(document, front_matter["book_title"])
-        title_boundary, title_boundary_inserted = _boundary_after_title(
-            document, title_paragraph, toc_section_start
-        )
-        _set_section_type(title_boundary, "nextPage")
-        _set_vertical_alignment(
-            title_boundary,
-            str(front_matter.get("title_page_vertical_alignment", "top")),
-        )
-        toc_section_start.paragraph_format.page_break_before = False
-        _hide_single_title_page_running_elements(title_boundary)
-        title_index = section_index_for_paragraph(document, title_paragraph)
-
-    body_boundary, inserted = _boundary_before(document, body_paragraph)
-    if front_matter.get("approved"):
-        _set_section_type(body_boundary, "nextPage")
-        body_paragraph.paragraph_format.page_break_before = False
-    page_break_suppressed = _suppress_redundant_body_page_break(
-        body_paragraph, body_boundary
+    del replace_static_page_text
+    plan = preflight_pagination_sections(
+        document,
+        settings,
+        resolver,
+        front_matter=front_matter,
+        approved_headings=approved_headings,
     )
-    toc_index = section_index_for_paragraph(document, toc_paragraph)
-    body_index = section_index_for_paragraph(document, body_paragraph)
-    if body_index != toc_index + 1:
-        raise FormatMonographError(
-            "The approved TOC and body starts must form adjacent pagination sections."
-        )
-
+    if not plan:
+        return {}
     sections = _section_properties(document)
     starts = settings.get("start_at", {})
     number_format = str(settings.get("number_format", "decimal"))
-    _set_page_numbering(sections[toc_index], int(starts.get("toc", 1)), number_format)
+    front_index = int(plan["front_section"])
+    toc_index = int(plan["toc_section"])
+    body_index = int(plan["body_section"])
+    _set_page_numbering(sections[front_index], int(starts.get("toc", 1)), number_format)
+    for sect_pr in sections[front_index + 1 : body_index]:
+        _set_page_numbering(sect_pr, None, number_format)
     _set_page_numbering(sections[body_index], int(starts.get("body", 1)), number_format)
     if settings.get("continue_after_body_start", True):
         for sect_pr in sections[body_index + 1 :]:
             _set_page_numbering(sect_pr, None, number_format)
-
-    fields_added = _ensure_visible_footers(
-        document,
-        toc_index,
-        restart_indexes={toc_index, body_index},
-        replace_static_page_text=replace_static_page_text,
-    )
-    return {
-        "title_section": title_index,
-        "toc_section": toc_index,
-        "body_section": body_index,
-        "inserted_title_section_break": title_boundary_inserted,
-        "inserted_body_section_break": inserted,
-        "suppressed_redundant_body_page_break": page_break_suppressed,
-        "page_fields_added": fields_added,
-    }
+    fields_changed = _ensure_visible_footers(document, plan)
+    return {**plan, "page_fields_changed": fields_changed}
 
 
 def finalize_pagination_sections(
@@ -573,34 +680,16 @@ def finalize_pagination_sections(
     resolver: Callable[[Any, dict[str, Any]], Any],
     *,
     front_matter: dict[str, Any] | None = None,
+    approved_headings: list[dict[str, Any]] | None = None,
 ) -> bool:
-    if not settings.get("approved"):
-        return False
-    body_locator = settings.get("body_start")
-    if not isinstance(body_locator, dict):
-        raise FormatMonographError(
-            "Approved pagination_sections requires a body_start locator."
-        )
-    body_paragraph = resolver(document, body_locator)
-    body_index = section_index_for_paragraph(document, body_paragraph)
-    sections = _section_properties(document)
-    if not 0 <= body_index < len(sections):
-        raise FormatMonographError("Body pagination section is out of range.")
-    front_matter = front_matter or {}
-    if front_matter.get("approved"):
-        title_paragraph = getattr(document, "_format_monograph_book_title", None)
-        if title_paragraph is None:
-            title_paragraph = resolver(document, front_matter["book_title"])
-        title_index = section_index_for_paragraph(document, title_paragraph)
-        _hide_single_title_page_running_elements(sections[title_index])
-        _set_section_type(sections[title_index], "nextPage")
-        toc_heading = getattr(document, "_format_monograph_toc_heading", None)
-        if toc_heading is not None:
-            toc_heading.paragraph_format.page_break_before = False
-        _set_section_type(sections[body_index], "nextPage")
-        body_paragraph.paragraph_format.page_break_before = False
-        return True
-    return _suppress_redundant_body_page_break(body_paragraph, sections[body_index])
+    preflight_pagination_sections(
+        document,
+        settings,
+        resolver,
+        front_matter=front_matter,
+        approved_headings=approved_headings,
+    )
+    return False
 
 
 def _relationship_targets(package: zipfile.ZipFile) -> dict[str, str]:
@@ -615,6 +704,37 @@ def _relationship_targets(package: zipfile.ZipFile) -> dict[str, str]:
         if identifier:
             result[identifier] = posixpath.normpath(posixpath.join("word", target))
     return result
+
+
+def _page_footer_format(root: Any) -> dict[str, Any]:
+    try:
+        fields = root.xpath(".//w:fldSimple", namespaces=NS)
+    except TypeError:
+        fields = root.xpath(".//w:fldSimple")
+    if len(fields) != 1:
+        return {}
+    paragraph = fields[0]
+    while paragraph is not None and paragraph.tag != qn("w:p"):
+        paragraph = paragraph.getparent()
+    justification = None
+    if paragraph is not None:
+        p_pr = paragraph.find(qn("w:pPr"))
+        jc = None if p_pr is None else p_pr.find(qn("w:jc"))
+        justification = None if jc is None else jc.get(qn("w:val"))
+    run = fields[0].find(qn("w:r"))
+    run_properties = None if run is None else run.find(qn("w:rPr"))
+    fonts = None if run_properties is None else run_properties.find(qn("w:rFonts"))
+    size = None if run_properties is None else run_properties.find(qn("w:sz"))
+    size_cs = None if run_properties is None else run_properties.find(qn("w:szCs"))
+    return {
+        "alignment": justification,
+        "font_ascii": None if fonts is None else fonts.get(qn("w:ascii")),
+        "font_east_asia": None if fonts is None else fonts.get(qn("w:eastAsia")),
+        "font_size_half_points": None if size is None else size.get(qn("w:val")),
+        "font_size_cs_half_points": (
+            None if size_cs is None else size_cs.get(qn("w:val"))
+        ),
+    }
 
 
 def pagination_inventory(path: Path) -> dict[str, Any]:
@@ -648,6 +768,7 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
             footer_fields = {}
             footer_page_field_counts = {}
             footer_non_page_payload = {}
+            footer_formats = {}
             for kind, rel_id in effective.items():
                 target = relationships.get(rel_id)
                 if target and target in package.namelist():
@@ -661,17 +782,19 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                         if value.strip()
                     ]
                     footer_non_page_payload[kind] = bool(
-                        not _page_only_payload(footer_root)
+                        _pagination_rewrite_shape(footer_root) != "page"
                         or footer_root.xpath(
                             ".//w:tbl | .//w:drawing | .//w:object | .//w:pict",
                             namespaces=NS,
                         )
                         or any(not value.isdigit() for value in visible)
                     )
+                    footer_formats[kind] = _page_footer_format(footer_root)
                 else:
                     footer_fields[kind] = []
                     footer_page_field_counts[kind] = 0
                     footer_non_page_payload[kind] = False
+                    footer_formats[kind] = {}
             pg_num = sect_pr.find(qn("w:pgNumType"))
             vertical_alignment = sect_pr.find(qn("w:vAlign"))
             sections.append(
@@ -683,7 +806,9 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                     "page_number_format": (
                         None if pg_num is None else pg_num.get(qn("w:fmt"))
                     ),
-                    "different_first_page": sect_pr.find(qn("w:titlePg")) is not None,
+                    "different_first_page": _on_off_enabled(
+                        sect_pr.find(qn("w:titlePg"))
+                    ),
                     "vertical_alignment": (
                         None
                         if vertical_alignment is None
@@ -694,6 +819,7 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
                     "footer_fields": footer_fields,
                     "footer_page_field_counts": footer_page_field_counts,
                     "footer_non_page_payload": footer_non_page_payload,
+                    "footer_formats": footer_formats,
                     "missing_page_footer_types": [
                         kind
                         for kind in ("default", "even")
@@ -712,9 +838,8 @@ def pagination_inventory(path: Path) -> dict[str, Any]:
             )
         }
         return {
-            "odd_and_even_pages_header_footer": bool(
-                settings is not None
-                and settings.xpath("./w:evenAndOddHeaders", namespaces=NS)
+            "odd_and_even_pages_header_footer": _on_off_enabled(
+                None if settings is None else settings.find(qn("w:evenAndOddHeaders"))
             ),
             "sections": sections,
             "page_number_restarts": [
@@ -930,27 +1055,6 @@ def audit_pagination_sections(
             for run in title_paragraph.runs
         ):
             failures.append({"property": "book_title_bold", "expected": True})
-        title_inventory = inventory["sections"][title_section]
-        title_section_properties = (
-            None if title_p_pr is None else title_p_pr.find(qn("w:sectPr"))
-        )
-        if title_section_properties is None:
-            failures.append(
-                {
-                    "property": "book_title_section_boundary",
-                    "expected": "attached_to_book_title_paragraph",
-                }
-            )
-        expected_vertical = front_matter.get("title_page_vertical_alignment")
-        if expected_vertical and title_inventory.get("vertical_alignment") != expected_vertical:
-            failures.append(
-                {
-                    "section": title_section,
-                    "property": "title_page_vertical_alignment",
-                    "expected": expected_vertical,
-                    "actual": title_inventory.get("vertical_alignment"),
-                }
-            )
         expected_spacing = expected_title_format.get("line_spacing_pt")
         if expected_spacing is not None and title_style is not None:
             actual_spacing = title_style.paragraph_format.line_spacing
@@ -980,54 +1084,34 @@ def audit_pagination_sections(
                         "actual": actual_rule,
                     }
                 )
-        if not title_inventory["different_first_page"]:
-            failures.append(
-                {"section": title_section, "property": "title_page_number_visible"}
-            )
-        if title_inventory["footer_page_field_counts"].get("first", 0):
-            failures.append(
-                {"section": title_section, "property": "title_page_first_footer_page_field"}
-            )
-    direct_page_break = body_paragraph.paragraph_format.page_break_before
-    inherited_page_break = (
-        body_paragraph.style.paragraph_format.page_break_before
-        if body_paragraph.style is not None
-        else None
-    )
-    if front_matter.get("approved"):
-        body_section_type = document.sections[body]._sectPr.find(qn("w:type"))
-        body_section_value = (
-            "nextPage"
-            if body_section_type is None
-            else body_section_type.get(qn("w:val"), "nextPage")
-        )
-        if direct_page_break is not True and body_section_value == "continuous":
-            failures.append(
-                {
-                    "section": body,
-                    "property": "body_page_break_for_continuous_restart",
-                    "expected": True,
-                    "actual": direct_page_break,
-                }
-            )
-    elif direct_page_break is True or (
-        direct_page_break is None and inherited_page_break is True
-    ):
+    sections = inventory["sections"]
+    explicit_front_starts = [
+        item for item in sections[: toc + 1] if item["page_number_start"] is not None
+    ]
+    if len(explicit_front_starts) != 1 or explicit_front_starts[0]["page_number_start"] != "1":
         failures.append(
             {
-                "section": body,
-                "property": "redundant_page_break_before_at_body_start",
-                "expected": False,
-                "actual": True,
+                "property": "front_page_number_start",
+                "expected": "one unambiguous decimal start at 1",
+                "actual": [item["index"] for item in explicit_front_starts],
             }
         )
+    front = toc if not explicit_front_starts else explicit_front_starts[0]["index"]
     starts = settings.get("start_at", {})
-    expected = {toc: str(starts.get("toc", 1)), body: str(starts.get("body", 1))}
-    sections = inventory["sections"]
+    expected = {front: str(starts.get("toc", 1)), body: str(starts.get("body", 1))}
     for index, start in expected.items():
         if index >= len(sections) or sections[index]["page_number_start"] != start:
             failures.append(
                 {"section": index, "property": "page_number_start", "expected": start}
+            )
+    for item in sections[front + 1 : body]:
+        if item["page_number_start"] is not None:
+            failures.append(
+                {
+                    "section": item["index"],
+                    "property": "unexpected_front_page_number_restart",
+                    "actual": item["page_number_start"],
+                }
             )
     if settings.get("continue_after_body_start", True):
         for item in sections[body + 1 :]:
@@ -1041,11 +1125,7 @@ def audit_pagination_sections(
                 )
     if not inventory["odd_and_even_pages_header_footer"]:
         failures.append({"property": "odd_and_even_pages_header_footer", "expected": True})
-    for item in sections[toc:]:
-        if item["different_first_page"]:
-            failures.append(
-                {"section": item["index"], "property": "show_on_first_page", "expected": True}
-            )
+    for item in sections[front:]:
         if item["missing_page_footer_types"]:
             failures.append(
                 {
@@ -1073,6 +1153,51 @@ def audit_pagination_sections(
                         "property": "page_footer_non_page_payload",
                         "footer_type": kind,
                         "expected": False,
+                    }
+                )
+            expected_alignment = "right" if kind == "default" else "left"
+            expected_format = {
+                "alignment": expected_alignment,
+                "font_ascii": "Times New Roman",
+                "font_east_asia": "宋体",
+                "font_size_half_points": "18",
+                "font_size_cs_half_points": "18",
+            }
+            if item["footer_formats"].get(kind, {}) != expected_format:
+                failures.append(
+                    {
+                        "section": item["index"],
+                        "property": "page_footer_format",
+                        "footer_type": kind,
+                        "expected": expected_format,
+                        "actual": item["footer_formats"].get(kind, {}),
+                    }
+                )
+        if item["different_first_page"]:
+            count = item["footer_page_field_counts"].get("first", 0)
+            if count != 1 or item["footer_non_page_payload"].get("first", False):
+                failures.append(
+                    {
+                        "section": item["index"],
+                        "property": "first_page_footer",
+                        "expected": "one bare PAGE field",
+                        "actual": count,
+                    }
+                )
+            expected_first = {
+                "alignment": "right",
+                "font_ascii": "Times New Roman",
+                "font_east_asia": "宋体",
+                "font_size_half_points": "18",
+                "font_size_cs_half_points": "18",
+            }
+            if item["footer_formats"].get("first", {}) != expected_first:
+                failures.append(
+                    {
+                        "section": item["index"],
+                        "property": "first_page_footer_format",
+                        "expected": expected_first,
+                        "actual": item["footer_formats"].get("first", {}),
                     }
                 )
     if inventory["orphan_header_footer_parts"]:

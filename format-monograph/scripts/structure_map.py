@@ -42,7 +42,11 @@ from _common import (
     style_inherits_name,
     validate_isolated_approved_style_targets,
 )
-from docx_pagination import apply_pagination_sections, section_index_for_paragraph
+from docx_pagination import (
+    apply_pagination_sections,
+    preflight_pagination_sections,
+    section_index_for_paragraph,
+)
 
 
 HEADING_PATTERNS = (
@@ -4687,6 +4691,13 @@ def _cleanup_orphan_header_footer_relationships(document: Any) -> int:
 
 def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[dict[str, Any]]:
     _preflight_v15_toc_heading(document, structure_map)
+    preflight_pagination_sections(
+        document,
+        structure_map.get("pagination_sections", {}),
+        resolve_paragraph_locator,
+        front_matter=structure_map.get("front_matter", {}),
+        approved_headings=structure_map.get("headings", []),
+    )
     trailing_targets = _apply_trailing_sections(document, structure_map)
     orphan_parts = _cleanup_orphan_header_footer_relationships(document)
     toc_targets = _apply_toc_ranges(document, structure_map)
@@ -4707,11 +4718,7 @@ def apply_structure_map(document: Any, structure_map: dict[str, Any]) -> list[di
         structure_map.get("pagination_sections", {}),
         resolve_paragraph_locator,
         front_matter=structure_map.get("front_matter", {}),
-        replace_static_page_text=any(
-            entry.get("approved_delete")
-            and entry.get("evidence", {}).get("approved_derived_footer_only")
-            for entry in structure_map.get("trailing_empty_sections", [])
-        ),
+        approved_headings=structure_map.get("headings", []),
     )
     image_targets = _apply_images(document, structure_map)
     image_visibility_targets = _apply_image_visibility(document, structure_map)

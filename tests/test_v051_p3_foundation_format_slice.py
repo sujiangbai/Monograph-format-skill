@@ -889,7 +889,12 @@ class V051P3FoundationFormatSliceTests(unittest.TestCase):
                 source = self.root / f"front-combined-{insert_heading}.docx"
                 document = Document()
                 document.add_paragraph("Fictional Systems Handbook", style="Title")
+                vertical = OxmlElement("w:vAlign")
+                vertical.set(qn("w:val"), "center")
+                document.sections[0]._sectPr.append(vertical)
+                document.add_section(WD_SECTION.NEW_PAGE)
                 document.add_paragraph("[[TOC]]")
+                document.add_section(WD_SECTION.NEW_PAGE)
                 document.add_paragraph("Chapter One", style="Heading 1")
                 document.save(source)
                 structure = candidate_structure_map(source)
