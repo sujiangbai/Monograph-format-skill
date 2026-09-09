@@ -1,12 +1,12 @@
 {
   "schema_version": "1.1",
   "profile_id": "v051-foundation-format-slice",
-  "name": "V0.5.1 基础页节、书名、标题与正文格式切片",
+  "name": "V0.5.1 基础页节、书名、标题、正文与独立图题格式切片",
   "locale": "zh-CN",
   "scope": {
     "document_type": "monograph",
     "input_format": "DOCX",
-    "notes": "仅格式化结构图中逐项批准的书名、既有标准目录题名、普通标题和普通正文角色；页节默认保持；目录题名缺失时不创建，自定义或未批准题名保持。唯一文字例外是把获批既有精确文字“目录”规范为“目    录”（四个 ASCII 半角空格）。"
+    "notes": "仅格式化结构图中逐项批准的书名、既有标准目录题名、普通标题、普通正文及 P3-D 正文单张嵌入图片与紧邻已有图题；图片配对/后续语义须批准，不缩放或改号，同页待视觉验证。页节默认保持；目录题名缺失时不创建，自定义或未批准题名保持。唯一文字例外是把获批既有精确文字“目录”规范为“目    录”（四个 ASCII 半角空格）。"
   },
   "target_applications": [
     "Microsoft 365"
@@ -17,10 +17,15 @@
   ],
   "sources": [
     {
+      "id": "SRC-503", "type": "user_requirement", "public": true,
+      "label": "V0.5.1 P3-D bounded image/caption approval",
+      "summary": "V040 M003/M006/M007: approved body single inline image and immediately following existing caption only. Image: centered, zero indents, auto single, before 6 pt/after 0, keepNext. Caption trailing spacing: 18 pt before approved body/list; 0 before approved heading/image/table/display equation/page break. No resizing, movement, numbering or content edits. M004 remains subject to visual verification."
+    },
+    {
       "id": "SRC-501",
       "type": "user_requirement",
       "label": "V0.5.1 P3 foundation slice approval",
-      "summary": "Approved V0.4.0 foundation values for existing page/section, title, heading levels 1-4, and ordinary body roles; all other roles remain excluded.",
+      "summary": "Approved V0.4.0 foundation values for existing page/section, title, heading levels 1-4, and ordinary body roles; all other roles remain excluded under this original SRC-501 approval. Separately approved P3-D pairs are governed by SRC-503.",
       "public": true
     },
     {
@@ -32,6 +37,20 @@
     }
   ],
   "rules": [
+    {
+      "id": "FMT-FIGCAP-501", "category": "caption",
+      "selector": {"kind": "caption_role", "value": "figure_caption"},
+      "properties": {
+        "font_name_ascii": "Times New Roman", "font_name_east_asia": "Songti",
+        "font_name_complex_script": "Times New Roman", "font_size_pt": 9,
+        "alignment": "center", "line_spacing_rule": "at_least", "line_spacing_pt": 15,
+        "space_before_pt": 0, "keep_together": true,
+        "numbering_mode": "manual_text", "preserve_identifier": true,
+        "allow_automatic_renumbering": false, "preserve_table_cell_caption_position": true
+      },
+      "source_ids": ["SRC-503"], "confidence": "high", "status": "approved", "application": "automatic",
+      "evidence_summary": "Bounded P3-D pair formatting only; requires source-bound image evidence and separately approved caption style_only, semantic role, pagination pair and following semantic object. Image resize approval stays false. Shared Caption unchanged; skipped cases reported; keepNext is not same-page proof."
+    },
     {
       "id": "FMT-PAGE-501",
       "category": "page",
@@ -251,7 +270,7 @@
     "status": "approved",
     "approved_by": "V0.5.1 project manager",
     "approved_at": "2026-09-04T00:00:00Z",
-    "notes": "Limited to the approved P3 foundation slice plus one approved existing standard TOC title. No missing-title creation, TOC entry formatting, field update, numbering, page rewrite, or excluded-role formatting."
+    "notes": "Limited to the approved P3 foundation slice, one existing standard TOC title, and bounded P3-D image/caption pairs. No missing-title creation, TOC entry formatting, field update, numbering, image resizing/movement, page rewrite, or excluded-role formatting. P3-D same-page verification remains pending."
   },
   "runtime_policy": {
     "caller_requirements_highest": true,

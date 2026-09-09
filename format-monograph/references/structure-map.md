@@ -14,6 +14,67 @@ New maps use schema `1.5`; readers continue to accept `1.0` through `1.4`. Versi
 
 ## Schema 1.5
 
+### P3-D: bounded image paragraph and existing caption
+
+The foundation rule `FMT-FIGCAP-501` is limited to a single body inline image
+immediately followed by an existing, plain-text figure caption. The calling
+Agent proposes the pairing and following semantic role; the user approves
+ambiguities and scope. Scripts corroborate identities and adjacency, not infer
+semantic permission from a Caption style or physical proximity.
+
+Use the existing `pagination_groups` entry (`kind=figure_with_caption`, hashed
+`anchor` and `caption`, `approved=true`), the existing image identity, an approved
+`figure_caption` paragraph role, and an approved caption `action=style_only`.
+For an existing unnumbered caption, use the already supported approved
+`figure_caption_unnumbered` role and an approved pair; if no caption action entry
+exists, that role's existing style-only semantics apply. Never create a number.
+Keep `images[].approved` and `resize.approved` false: those authorize resizing,
+not this batch. Do not approve visibility repair or legacy table/spacing/numbering
+operations for this batch. No new map version or fields are required.
+
+Approve the immediate successor in existing `paragraph_roles` using its locator,
+text hash, `role` and `canonical_role`: `body_text`/`body` or `list`/`list_item`
+select 18 pt after the caption; `chapter_title`, `level_2_section` through
+`level_4_section`, `image`, `display_equation` or `page_break` select 0 pt.
+Image/equation/page-break roles require matching physical payload. For a following
+table, use its unique source-bound `tables` identity entry with `approved=false`:
+the approved pair and caller-confirmed successor must match the actual immediately
+following table index and content identity. This read-only lookup grants no table
+write permission and does not bypass the existing gates for genuinely approved
+layout-table operations. No table formatting is performed by this rule.
+On this P3-D apply route only, both formatted and review saves retain omitted
+zero-byte ZIP directory markers with their original metadata. No actual file is
+restored, no surviving entry overwritten, and no relationship or content-type
+declaration modified by this step. Missing files and nonempty directory markers
+fail closed. The original strict content/object comparisons still run after each
+save. This is directory metadata preservation, not a general DOCX repair facility.
+Before this batch mutates an isolated caption style, package-level inspection
+rejects existing or dangling non-target story/paragraph and inheritance references
+to that style. It does not rewrite those references. Audit also binds each image
+to its source part, relationship ID/type/mode and resolved target part: equal bytes
+in a different member are not the same image identity; equivalent relative paths
+resolving to the same member are allowed. No extra relationship manifest is stored.
+The following paragraph is read-only context for caption spacing, including its
+explicit outline and style. An independently approved paragraph-format rule may
+still authorize that paragraph; the context restriction does not disable it.
+These successor decisions do not authorize changing
+the successor. Keep unrelated profile rules unapproved if it must remain untouched.
+
+The image paragraph receives center alignment, zero indentation, auto single
+spacing, 6/0 pt before/after and keepNext. The caption receives the approved
+profile font/spacing through an isolated style, plus context-dependent trailing
+spacing. The shared Caption style, text, numbering, media, extent and anchor are
+not changed. Apply and audit use the same target/context calculation. Reported
+skips (including missing/ambiguous approval, mixed/floating/table/multiple images,
+notes and unknown successors) are not whole-book conformance. Existing crop XML
+is preserved byte-for-byte at the drawing level; this does not authorize cropping.
+
+Use the existing `apply_profile.py --profile ... --structure-map ...` and then
+`audit_docx.py` with the same source, profile and map. Review the existing format
+report's pair counts/skips. `pending_visual_verification` is mandatory: keepNext
+does not prove M004. The calling Agent must later inspect target Word pages;
+an unreadable or unsplittable pair is blocked, never resized or moved to pass.
+
 Schema 1.5 adds canonical semantic roles, appendix preservation, grouped QA,
 local frozen scopes, table classification, and bounded representative trial
 selection. Legacy `heading_1` through `heading_4` role names normalize to
