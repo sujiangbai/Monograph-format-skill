@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -54,6 +55,22 @@ class V051MacosWordFinalizationTests(unittest.TestCase):
         self.addCleanup(self.host.stop)
         self.temp = tempfile.TemporaryDirectory(prefix="v051-macos-word-")
         self.root = Path(self.temp.name).resolve()
+        self.pdf_workspace_requests = []
+
+        def isolated_temporary_directory(*args, **kwargs):
+            if kwargs.get("prefix") == "mw-pdf-":
+                # Assert the macOS production request before test-only routing.
+                self.assertEqual("/private/tmp", kwargs.get("dir"))
+                self.pdf_workspace_requests.append(dict(kwargs))
+                kwargs["dir"] = self.root
+            return tempfile.TemporaryDirectory(*args, **kwargs)
+
+        temporary_module = patch.object(
+            adapter, "tempfile",
+            SimpleNamespace(TemporaryDirectory=isolated_temporary_directory),
+        )
+        temporary_module.start()
+        self.addCleanup(temporary_module.stop)
         self.input = self.root / "input.docx"
         document = Document()
         add_field(document.add_paragraph(), " PAGE ", "1")
@@ -1052,7 +1069,11 @@ class V051MacosWordFinalizationTests(unittest.TestCase):
             path = Path(command[4])
             observed["path"] = path
             self.assertNotEqual(path, target)
-            self.assertEqual(Path("/private/tmp"), path.parent.parent)
+            self.assertEqual(self.root, path.parent.parent)
+            self.assertEqual(
+                [{"prefix": "mw-pdf-", "dir": "/private/tmp"}],
+                self.pdf_workspace_requests,
+            )
             self.assertEqual(0o700, path.parent.stat().st_mode & 0o777)
             self.assertFalse(target.exists())
             with pymupdf.open() as pdf:
