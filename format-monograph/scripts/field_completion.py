@@ -10,6 +10,7 @@ from backend_evidence import (
     canonical_backend_shape_errors,
 )
 from target_software import LIBREOFFICE, MICROSOFT_WORD, UNSUPPORTED
+from field_writeback import DEFAULT_ALLOWED_FIELD_TYPES
 
 
 FINALIZATION_EVIDENCE_VERSION = 1
@@ -94,6 +95,10 @@ def _field_cache_shape_errors(label: str, value: Any) -> list[str]:
     if not isinstance(value.get("update_on_open"), bool):
         errors.append(f"{label}.update_on_open must be a boolean")
     field_types = value.get("field_types")
+    if value.get("status") == "absent" and (
+        field_types or value.get("main_toc_fields") or value.get("dirty_fields")
+    ):
+        errors.append(f"{label} absent state contradicts field inventory")
     if not isinstance(field_types, dict):
         errors.append(f"{label}.field_types must be an object")
     else:
@@ -403,6 +408,8 @@ def completion_evidence(finalization: dict[str, Any]) -> dict[str, Any]:
     completion = finalization.get("field_completion", {})
     return {
         "delivery_status": finalization.get("delivery_field_status"),
+        "input_field_types": finalization.get("input_field_cache", {}).get("field_types"),
+        "output_field_types": finalization.get("output_field_cache", {}).get("field_types"),
         "input_cache_status": finalization.get("input_field_cache", {}).get(
             "status"
         ),
@@ -444,6 +451,8 @@ def final_ready_evidence_errors(evidence: dict[str, Any]) -> list[str]:
         {
             "input_cache_status": "absent",
             "output_cache_status": "absent",
+            "input_field_types": {},
+            "output_field_types": {},
             "backend": "not_needed",
             "writeback_status": "not_needed",
             "selective_writeback_status": None,
@@ -463,7 +472,6 @@ def final_ready_evidence_errors(evidence: dict[str, Any]) -> list[str]:
         }
         if no_fields
         else {
-            "input_cache_status": "stale",
             "output_cache_status": "refreshed",
             "backend": "external",
             "field_cache_verified": True,
@@ -487,6 +495,20 @@ def final_ready_evidence_errors(evidence: dict[str, Any]) -> list[str]:
         if evidence.get(name) != value
     ]
     if word_verified:
+        input_types = evidence.get("input_field_types")
+        cached_scalars = (
+            evidence.get("input_cache_status") == "refreshed"
+            and isinstance(input_types, dict)
+            and bool(input_types)
+            and set(input_types) <= DEFAULT_ALLOWED_FIELD_TYPES - {"TOC"}
+            and all(type(count) is int and count > 0 for count in input_types.values())
+            and evidence.get("output_field_types") == input_types
+        )
+        if evidence.get("input_cache_status") not in ("stale", "code_only") and not cached_scalars:
+            errors.append(
+                f"input_cache_status={evidence.get('input_cache_status')!r}, "
+                "expected stale/code_only or an unchanged supported scalar inventory with cached input"
+            )
         calculation_pages = evidence.get("calculation_page_count")
         verification_pages = evidence.get("verification_page_count")
         if (

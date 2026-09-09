@@ -202,13 +202,16 @@ class V025WordPaginationTableTests(unittest.TestCase):
             "import json, shutil, sys\n"
             "request = json.load(sys.stdin)\n"
             "assert request['target_software']=='microsoft_word'\n"
+            "assert request['protocol_version']=='1.1' and request['operation']=='refresh_fields'\n"
             "shutil.copy2(request['input_path'], request['output_path'])\n"
-            "print(json.dumps({'status':'success','backend':'test_word','software':'Microsoft Word',"
+            "print(json.dumps({'protocol_version':'1.1','operation':'refresh_fields',"
+            "'status':'success','backend':'test_word','software':'Microsoft Word',"
             "'repaginated':True,'saved':True,'field_cache_verified':True,"
             "'structural_changes_applied':0,'updated_field_types':[]}))\n",
             encoding="utf-8",
         )
         output = self.root / "external.docx"
+        original = self.source.read_bytes()
         response = external_refresh(
             self.source,
             output,
@@ -221,6 +224,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
         self.assertEqual("test_word", response["backend"])
         self.assertTrue(output.is_file())
         self.assertNotEqual(self.source.resolve(), output.resolve())
+        self.assertEqual(original, self.source.read_bytes())
 
         helper.write_text(
             helper.read_text(encoding="utf-8").replace(
@@ -228,7 +232,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        with self.assertRaises(FormatMonographError):
+        with self.assertRaisesRegex(FormatMonographError, "non-approved field type"):
             external_refresh(
                 self.source,
                 self.root / "rejected.docx",
@@ -238,6 +242,7 @@ class V025WordPaginationTableTests(unittest.TestCase):
                 None,
                 "Microsoft Word",
             )
+        self.assertEqual(original, self.source.read_bytes())
 
     def test_external_backend_rejects_unsupported_word_substrings_before_launch(self) -> None:
         for target in ("WordPerfect", "random-word-target", "Password Writer"):
