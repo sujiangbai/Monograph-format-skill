@@ -1652,6 +1652,8 @@ def _effective_paragraph_alignment(paragraph: Any) -> Any:
 
 
 def _apply_images(document: Any, structure_map: dict[str, Any]) -> int:
+    if getattr(document, "_foundation_figures_only", False):
+        return 0
     planned = _planned_image_extents(document, structure_map)
     changed = 0
     for entry in structure_map.get("images", []):
@@ -1700,6 +1702,8 @@ def _relax_exact_row_height(row: Any) -> bool:
 
 
 def _apply_image_visibility(document: Any, structure_map: dict[str, Any]) -> int:
+    if getattr(document, "_foundation_figures_only", False):
+        return 0
     changed = 0
     seen_paragraphs: set[int] = set()
     seen_rows: set[tuple[int, int]] = set()
@@ -4025,6 +4029,10 @@ def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
         if not entry.get("approved"):
             continue
         role = normalized_role(str(entry.get("role", "unknown")))
+        if getattr(document, "_foundation_figures_only", False) and role in {
+            "figure_caption", "figure_caption_unnumbered", "image", "display_equation", "page_break", "list", "list_item"
+        }:
+            continue
         if role.startswith("heading_") or role in {
             "title",
             "subtitle",
@@ -4036,6 +4044,8 @@ def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
             continue
         paragraph = _verified_locator_paragraph(document, entry)
         touched = False
+        if paragraph._p in getattr(document, '_foundation_readonly_contexts', ()):
+            continue
         p_pr = paragraph._p.get_or_add_pPr()
         outline = p_pr.find(qn("w:outlineLvl"))
         if outline is not None:
@@ -4062,6 +4072,8 @@ def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> in
         if not group.get("approved"):
             continue
         kind = group["kind"]
+        if kind == "figure_with_caption" and getattr(document, "_foundation_figures_only", False):
+            continue
         if kind in {"figure_with_caption", "table_caption_with_table"}:
             paragraph = resolve_paragraph_locator(document, group["anchor"])
             changed += int(_set_paragraph_property(paragraph, "keepNext", True))
@@ -4080,6 +4092,178 @@ def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> in
                 _set_row_property(row, "cantSplit", True)
                 changed += int(before is None)
     return changed
+
+
+FOUNDATION_FIGURE_RULE = "FMT-FIGCAP-501"
+FOUNDATION_IMAGE_PROPERTIES = {
+    "alignment": "center", "first_line_indent_pt": 0,
+    "left_indent_pt": 0, "right_indent_pt": 0,
+    "line_spacing_rule": "single", "space_before_pt": 6,
+    "space_after_pt": 0, "keep_with_next": True,
+}
+
+
+def _foundation_figure_plan(document: Any, mapping: dict[str, Any], rule: dict[str, Any]):
+    """Derive local formatting targets from existing, separately approved entries.
+
+    No semantic classification is inferred from proximity, styles or drawing
+    presence. Physical checks below only corroborate the caller's decisions.
+    """
+    plans, skipped = [], []
+    if not mapping or mapping.get("status") != "approved":
+        return plans, [{"reason": "missing_approved_structure"}]
+    if mapping.get("block_spacing", {}).get("approved") or any(
+        e.get("approved") for e in mapping.get("table_cell_cleanups", [])
+    ):
+        raise FormatMonographError("P3D forbids legacy blank insertion or cell content cleanup")
+    if any(e.get("approved") and e.get("action") not in {"preserve", "style_only"}
+           for e in mapping.get("captions", [])):
+        raise FormatMonographError("P3D forbids caption movement or numbering changes")
+    if any(e.get("approved") or e.get("resize", {}).get("approved")
+           for e in mapping.get("images", [])):
+        raise FormatMonographError("P3D forbids image resizing")
+    roles = {}
+    for entry in mapping.get("paragraph_roles", []):
+        if entry.get("approved"):
+            paragraph = _verified_locator_paragraph(document, entry)
+            roles.setdefault(paragraph._p, []).append(normalized_role(
+                entry.get("canonical_role") or entry.get("role", "unknown")))
+    used = set()
+    for ordinal, group in enumerate(mapping.get("pagination_groups", [])):
+        if group.get("kind") != "figure_with_caption":
+            continue
+        reason = None
+        if not group.get("approved"):
+            skipped.append({"group": ordinal, "reason": "pair_not_approved"})
+            continue
+        if any(group.get(key, {}).get("kind") != "body_paragraph" for key in ("anchor", "caption")):
+            skipped.append({"group": ordinal, "reason": "not_body_pair"})
+            continue
+        image = resolve_paragraph_locator(document, group["anchor"])
+        caption = resolve_paragraph_locator(document, group["caption"])
+        if image._p.getnext() is not caption._p:
+            raise FormatMonographError("P3D approved pair adjacency changed")
+        if image._p in used or caption._p in used:
+            raise FormatMonographError("P3D ambiguous/reused pair")
+        used.update((image._p, caption._p))
+        if roles.get(caption._p) not in [["figure_caption"], ["figure_caption_unnumbered"]]:
+            reason = "caption_role_not_uniquely_approved"
+        if _image_paragraph_payload(image)[0] != "image_only" or len(image._p.xpath('.//w:drawing')) != 1:
+            reason = "not_single_inline_image_only"
+        if image._p.xpath('.//m:oMath | .//m:oMathPara | .//w:fldChar | .//w:fldSimple | .//w:sdt | .//w:ins | .//w:del'):
+            reason = "mixed_protected_image_paragraph"
+        entries = [entry for entry in mapping.get("images", [])
+                   if entry.get("locator") == group["anchor"]]
+        if len(entries) != 1:
+            reason = "image_identity_not_unique"
+        elif not reason:
+            entry = entries[0]
+            _, drawing = _resolve_image_drawing(document, entry, mapping)
+            state = _drawing_state(image, drawing)
+            if entry.get("approved") or entry.get("resize", {}).get("approved"):
+                raise FormatMonographError("P3D forbids image resizing")
+            for key in ("media_sha256", "relationship_id", "source_extent_emu", "has_crop", "object_type"):
+                if state[key] != entry.get(key):
+                    raise FormatMonographError("P3D image evidence changed: " + key)
+        if caption._p.xpath('.//w:drawing | .//w:pict | .//w:object | .//m:oMath | .//w:fldChar | .//w:fldSimple | .//w:hyperlink | .//w:sdt | .//w:ins | .//w:del'):
+            reason = "complex_caption_out_of_scope"
+        actions = [entry for entry in mapping.get("captions", [])
+                   if entry.get("approved") and entry.get("locator") == group["caption"]]
+        unnumbered_style_only = not actions and roles.get(caption._p) == ["figure_caption_unnumbered"]
+        if not unnumbered_style_only and (len(actions) != 1 or actions[0].get("action") != "style_only"):
+            reason = "caption_style_only_not_approved"
+        following = caption._p.getnext()
+        next_roles = roles.get(following, [])
+        after = None
+        if len(next_roles) == 1:
+            role = next_roles[0]
+            if role in {"body_text", "body", "list", "list_item"}:
+                after = 18
+            elif role in {"chapter_title", "level_2_section", "level_3_section", "level_4_section", "image", "display_equation", "page_break"}:
+                after = 0
+        if following is not None and following.tag == qn("w:tbl"):
+            # Read-only successor identity is not permission to operate on a table.
+            # The approved pair and exact adjacent node still constrain this lookup.
+            matches = [entry for entry in mapping.get("tables", [])
+                       if type(entry.get("table")) is int
+                       and 0 <= entry["table"] < len(document.tables)
+                       and document.tables[entry['table']]._tbl is following]
+            if len(matches) == 1:
+                if _table_text_hash(document.tables[int(matches[0]['table'])]) != matches[0].get('table_text_sha256'):
+                    raise FormatMonographError("P3D following table evidence changed")
+                after = 0
+        if after is None:
+            reason = "following_semantics_not_uniquely_approved"
+        if len(next_roles) == 1 and following is not None and following.tag == qn('w:p'):
+            role = next_roles[0]
+            if role == 'image' and not following.xpath('.//w:drawing'):
+                reason = 'following_image_payload_missing'
+            if role == 'display_equation' and not following.xpath('.//m:oMathPara | .//w:object'):
+                reason = 'following_equation_payload_missing'
+            if role == 'page_break' and not following.xpath('./w:pPr/w:pageBreakBefore | .//w:br[@w:type="page"]'):
+                reason = 'following_page_break_missing'
+            if role in {'body', 'body_text', 'list', 'list_item'} and following.xpath('.//w:drawing | .//w:object | .//m:oMathPara'):
+                reason = 'following_body_has_protected_object'
+        if reason:
+            skipped.append({"group": ordinal, "reason": reason})
+            continue
+        properties = dict(rule["properties"], space_after_pt=after)
+        plans.append((image, caption, properties))
+    paired_anchors = [g.get("anchor") for g in mapping.get("pagination_groups", [])
+                      if g.get("kind") == "figure_with_caption"]
+    unpaired = sum(entry.get("locator") not in paired_anchors for entry in mapping.get("images", []))
+    if unpaired:
+        skipped.append({"reason": "unpaired_images_preserved", "count": unpaired})
+    if plans:
+        validate_isolated_approved_style_targets(document, rule['selector'], [p[1] for p in plans])
+    return plans, skipped
+
+
+def _foundation_readonly_contexts(document, mapping, plans, rules):
+    # A skipped pair still grants no write authority over its semantic context.
+    contexts = {resolve_paragraph_locator(document, group['caption'])._p.getnext()
+                for group in mapping.get('pagination_groups', [])
+                if group.get('kind') == 'figure_with_caption' and group.get('approved')
+                and all(group.get(key, {}).get('kind') == 'body_paragraph'
+                        for key in ('anchor', 'caption'))}
+    # Adjacent approved pairs can share a boundary: the next image is an actual
+    # write target, not read-only context merely because it follows a caption.
+    contexts.difference_update(p._p for image, caption, properties in plans for p in (image, caption))
+    for rule in rules:
+        if (rule['id'] != FOUNDATION_FIGURE_RULE and rule['status'] == 'approved'
+                and rule['application'] == 'automatic' and rule['selector']['kind'] == 'paragraph_role'):
+            contexts.difference_update(p._p for p in approved_role_paragraphs(document, mapping, rule['selector']))
+    return contexts - {None}
+
+
+def _foundation_image_relationship_identity(paragraph):
+    ids = paragraph._p.xpath('.//w:drawing//a:blip/@r:embed')
+    if len(ids) != 1 or ids[0] not in paragraph.part.rels:
+        raise FormatMonographError('P3D image relationship identity is unavailable.')
+    rel = paragraph.part.rels[ids[0]]
+    return (str(paragraph.part.partname), ids[0], rel.reltype, rel.is_external,
+            rel.target_ref if rel.is_external else str(rel.target_part.partname))
+
+
+def _apply_foundation_figure_captions(document: Any, mapping: dict[str, Any], rule: dict[str, Any]):
+    plans, skipped = _foundation_figure_plan(document, mapping, rule)
+    # Isolate only the selected captions; never edit the shared Caption style.
+    if plans:
+        apply_style_rule_to_paragraphs(document, rule, [p[1] for p in plans], isolate_targets=True)
+    for image, caption, properties in plans:
+        clear_controlled_direct_format(image, FOUNDATION_IMAGE_PROPERTIES)
+        clear_controlled_direct_format(caption, {"space_after_pt": properties["space_after_pt"]})
+        fmt = image.paragraph_format
+        image.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        ind = image._p.get_or_add_pPr().get_or_add_ind()
+        for name in list(ind.attrib):
+            del ind.attrib[name]
+        fmt.first_line_indent = fmt.left_indent = fmt.right_indent = Pt(0)
+        _set_image_paragraph_auto_spacing(image)
+        fmt.space_before, fmt.space_after = Pt(6), Pt(0)
+        fmt.keep_with_next = True
+        caption.paragraph_format.space_after = Pt(properties["space_after_pt"])
+    return {"pairs": len(plans), "skipped": skipped, "same_page": "pending_visual_verification"}
 
 
 def _special_paragraph_style(
@@ -4457,6 +4641,8 @@ def _table_matches_approved_cleanup_result(
 
 
 def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
+    if getattr(document, "_foundation_figures_only", False):
+        return 0
     changed = 0
     for entry in structure_map.get("tables", []):
         if not entry.get("approved"):

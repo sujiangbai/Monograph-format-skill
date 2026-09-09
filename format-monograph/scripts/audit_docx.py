@@ -38,6 +38,11 @@ from _common import (
 from validate_profile import validate
 from docx_pagination import audit_pagination_sections
 from structure_map import (
+    FOUNDATION_FIGURE_RULE,
+    FOUNDATION_IMAGE_PROPERTIES,
+    _foundation_figure_plan,
+    _foundation_readonly_contexts,
+    _foundation_image_relationship_identity,
     approved_data_tables,
     approved_role_paragraphs,
     audit_caption_identifier_replacements,
@@ -1014,7 +1019,29 @@ def main() -> int:
                 )
                 continue
             kind = rule["selector"]["kind"]
-            if kind in {"document", "section_role"}:
+            if rule["id"] == FOUNDATION_FIGURE_RULE:
+                original_plans, _ = _foundation_figure_plan(original_document, structure_map or {}, rule)
+                plans, skipped = _foundation_figure_plan(document, structure_map or {}, rule)
+                failures = []
+                contexts = _foundation_readonly_contexts(original_document, structure_map or {}, original_plans, profile['rules'])
+                for index, paragraph in enumerate(original_document.paragraphs):
+                    if paragraph._p not in contexts:
+                        continue
+                    if index >= len(document.paragraphs) or etree.tostring(paragraph._p, method='c14n') != etree.tostring(document.paragraphs[index]._p, method='c14n'):
+                        failures.append({'reason': 'P3D read-only following context changed'})
+                if len(plans) != len(original_plans):
+                    failures.append({"reason": "P3D approved pair became unsupported or disappeared"})
+                for original_pair, current_pair in zip(original_plans, plans):
+                    if _foundation_image_relationship_identity(original_pair[0]) != _foundation_image_relationship_identity(current_pair[0]):
+                        failures.append({'reason': 'P3D actual image relationship identity changed'})
+                    before = original_pair[0]._p.xpath('.//w:drawing')[0]
+                    after = current_pair[0]._p.xpath('.//w:drawing')[0]
+                    if etree.tostring(before, method='c14n') != etree.tostring(after, method='c14n'):
+                        failures.append({"reason": "P3D drawing XML changed (including crop/extent/anchor)"})
+                for image, caption, properties in plans:
+                    failures.extend(audit_paragraph_rule(document, {**rule, "properties": FOUNDATION_IMAGE_PROPERTIES}, [image]))
+                    failures.extend(audit_paragraph_rule(document, {**rule, "properties": properties}, [caption]))
+            elif kind in {"document", "section_role"}:
                 failures = audit_section_rule(document, rule, structure_map)
             elif kind == "table_role":
                 table_targets = (

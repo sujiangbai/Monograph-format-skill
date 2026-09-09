@@ -531,6 +531,8 @@ def style_name_for_selector(selector: dict[str, str]) -> str | None:
 
 
 def isolated_approved_style_name(selector: dict[str, str]) -> str | None:
+    if selector == {"kind": "caption_role", "value": "figure_caption"}:
+        return "Monograph Approved Figure Caption"
     if (
         selector.get("kind") != "paragraph_role"
         or selector.get("value") not in ISOLATED_APPROVED_PARAGRAPH_ROLES
@@ -565,7 +567,8 @@ def validate_isolated_approved_style_targets(
     derived_style_id = (
         derived.style_id if derived is not None else derived_name.replace(" ", "")
     )
-    if selector == {"kind": "paragraph_role", "value": "toc_heading"}:
+    figure_caption = selector == {"kind": "caption_role", "value": "figure_caption"}
+    if selector == {"kind": "paragraph_role", "value": "toc_heading"} or figure_caption:
         target_ids = {id(paragraph._p) for paragraph in targets}
         style_reference_xpath = etree.XPath(
             ".//w:p[w:pPr/w:pStyle[@w:val=$style_id]]",
@@ -586,6 +589,20 @@ def validate_isolated_approved_style_targets(
                 references = style_reference_xpath(
                     root, style_id=derived_style_id
                 )
+                if figure_caption:
+                    # Reject direct, dangling and inheritance references outside
+                    # this batch's target paragraphs, including other stories.
+                    refs = etree.XPath(
+                        './/w:pStyle | .//w:rStyle | .//w:tblStyle | '
+                        './/w:basedOn | .//w:next | .//w:link', namespaces=NS)(root)
+                    if any(ref.get(qn('w:val')) == derived_style_id and not (
+                        ref.tag == qn('w:pStyle') and part is document.part
+                        and ref.getparent().tag == qn('w:pPr')
+                        and id(ref.getparent().getparent()) in target_ids
+                    ) for ref in refs):
+                        raise FormatMonographError(
+                            'P3D isolated caption style has a non-target or inheritance reference.'
+                        )
             except (TypeError, ValueError, etree.XMLSyntaxError) as exc:
                 raise FormatMonographError(
                     "The isolated approved-role style references in an existing "
