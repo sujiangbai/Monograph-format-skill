@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import re
@@ -12,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from docx.oxml.ns import qn
+from lxml import etree
+
+from field_writeback import DEFAULT_ALLOWED_FIELD_TYPES, parse_fields, _result_text_nodes
 
 from _common import (
     STYLE_PROPERTIES,
@@ -898,6 +902,75 @@ def uses_derived_normalization(profile: dict) -> bool:
     )
 
 
+def _audit_scalar_identity(paragraph: Any) -> bytes | None:
+    """Audit-only body identity; formatting is checked by the original rules."""
+    root = copy.deepcopy(paragraph._p)
+    if root.xpath("./w:pPr/w:sectPr | .//w:pPrChange | .//w:rPrChange"):
+        return None  # Section boundaries/revision payloads are not formatting-only.
+    try:
+        records = parse_fields(root)
+    except FormatMonographError:
+        return None  # Multi-paragraph or malformed fields are not scalar targets.
+    if any(
+        record.parent_order is not None
+        or any(parent.tag == qn("w:fldSimple") for parent in (
+            record.simple if record.form == "simple" else record.begin
+        ).iterancestors())
+        for record in records
+    ):
+        return None
+    found = False
+    for record in records:
+        if record.field_type not in DEFAULT_ALLOWED_FIELD_TYPES - {"TOC"}:
+            continue
+        nodes = _result_text_nodes(root, record)
+        if not nodes:
+            return None
+        found = True
+        for node in nodes:
+            node.text = ""
+        marker = record.simple if record.form == "simple" else record.begin
+        marker.attrib.pop(qn("w:dirty"), None)
+    if not found:
+        return None
+    # Original input predates approved formatting. Exclude only paragraph/run
+    # properties from identity, not field instructions, boundaries or objects.
+    # audit_paragraph_rule still checks the actual candidate's formatting.
+    for properties in list(root.xpath("./w:pPr | ./w:r/w:rPr | ./w:fldSimple/w:r/w:rPr")):
+        properties.getparent().remove(properties)
+    return etree.tostring(root, method="c14n")
+
+
+def _audit_role_targets(document: Any, original: Any, structure_map: dict,
+                        selector: dict) -> list[Any]:
+    """Reconcile approved body scalar caches only at the final audit entry."""
+    if selector != {"kind": "paragraph_role", "value": "body_text"}:
+        return approved_role_paragraphs(document, structure_map, selector)
+    result = []
+    seen = set()
+    for entry in structure_map.get("paragraph_roles", []):
+        scoped = dict(structure_map, paragraph_roles=[entry])
+        originals = approved_role_paragraphs(original, scoped, selector)
+        if not originals:
+            continue
+        key = (_audit_scalar_identity(originals[0]) if len(originals) == 1
+               and entry.get("locator", {}).get("kind") == "body_paragraph" else None)
+        if key is None:
+            targets = approved_role_paragraphs(document, scoped, selector)
+        else:
+            if sum(_audit_scalar_identity(p) == key for p in original.paragraphs) != 1:
+                raise FormatMonographError("Audit scalar source identity is not unique.")
+            targets = [p for p in document.paragraphs if _audit_scalar_identity(p) == key]
+            if len(targets) != 1:
+                raise FormatMonographError("Audit scalar target identity is ambiguous or missing.")
+        for paragraph in targets:
+            if paragraph._p in seen:
+                raise FormatMonographError("Audit scalar target identity is reused.")
+            seen.add(paragraph._p)
+            result.append(paragraph)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("original", type=Path)
@@ -929,6 +1002,7 @@ def main() -> int:
         formatted_payloads = protected_payload_manifest(args.formatted)
         objects_ok = original_payloads == formatted_payloads
         document = load_document(args.formatted)
+        original_document = load_document(args.original)
         rule_results = []
 
         for rule in profile["rules"]:
@@ -966,8 +1040,8 @@ def main() -> int:
                 and has_semantic_structure_map(structure_map)
                 and kind in {"paragraph_role", "caption_role", "bibliography_role"}
             ):
-                paragraphs = approved_role_paragraphs(
-                    document, structure_map, rule["selector"]
+                paragraphs = _audit_role_targets(
+                    document, original_document, structure_map, rule["selector"]
                 )
                 failures = audit_paragraph_rule(document, rule, paragraphs)
             else:

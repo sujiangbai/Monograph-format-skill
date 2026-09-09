@@ -8,6 +8,7 @@ import hashlib
 import posixpath
 import re
 import zipfile
+from urllib.parse import unquote, urlsplit
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -295,6 +296,18 @@ def _canonical_attributes(element: etree._Element | None) -> tuple[tuple[str, st
     )
 
 
+def _on_off(parent: etree._Element, tag: str) -> bool:
+    elements = parent.findall(qn(tag))
+    if len(elements) > 1:
+        raise FormatMonographError("Ambiguous header/footer activation setting.")
+    if not elements:
+        return False
+    value = elements[0].get(qn("w:val"), "true")
+    if value not in {"true", "1", "on", "false", "0", "off"}:
+        raise FormatMonographError("Invalid header/footer activation setting.")
+    return value in {"true", "1", "on"}
+
+
 def _section_manifest(root: etree._Element) -> list[tuple[Any, ...]]:
     result: list[tuple[Any, ...]] = []
     for section in root.xpath(".//w:sectPr", namespaces=NS):
@@ -314,7 +327,7 @@ def _section_manifest(root: etree._Element) -> list[tuple[Any, ...]]:
                     pg_num.get(qn("w:start")),
                     pg_num.get(qn("w:fmt"), "decimal"),
                 ),
-                section.find(qn("w:titlePg")) is not None,
+                _on_off(section, "w:titlePg"),
                 "top" if vertical is None else vertical.get(qn("w:val"), "top"),
             )
         )
@@ -380,38 +393,121 @@ def _story_roles(package: zipfile.ZipFile) -> dict[tuple[str, int, str], str]:
     if "word/document.xml" not in package.namelist():
         return {}
     relationships = _document_relationships(package)
+    relation_root = etree.fromstring(package.read("word/_rels/document.xml.rels"))
+    relation_nodes = {item.get("Id"): item for item in relation_root}
+    if len(relation_nodes) != len(relation_root):
+        raise FormatMonographError("Ambiguous header/footer relationship IDs.")
     document = etree.fromstring(package.read("word/document.xml"))
     inherited: dict[str, dict[str, str]] = {"header": {}, "footer": {}}
     roles: dict[tuple[str, int, str], str] = {}
     sections = document.xpath(".//w:sectPr", namespaces=NS)
     for section_index, section in enumerate(sections):
         for story in ("header", "footer"):
+            seen = set()
             for reference in section.xpath(f"./w:{story}Reference", namespaces=NS):
                 kind = reference.get(qn("w:type"), "default")
+                if kind not in {"default", "first", "even"} or kind in seen:
+                    raise FormatMonographError("Ambiguous header/footer role.")
+                seen.add(kind)
                 rel_id = reference.get(qn("r:id"))
                 target = relationships.get(rel_id or "")
-                if target:
-                    inherited[story][kind] = target
+                relation = relation_nodes.get(rel_id)
+                raw = "" if relation is None else relation.get("Target", "")
+                parsed = urlsplit(raw)
+                if (relation is None or relation.get("TargetMode") not in {None, "Internal"}
+                    or relation.get("Type") != NS['r'] + '/' + story
+                    or parsed.scheme or parsed.netloc or parsed.query or parsed.fragment
+                    or '\\' in raw or unquote(raw) != raw
+                    or not target or not re.fullmatch(r"word/" + story + r"\d+\.xml", target)
+                    or target not in package.namelist()):
+                    raise FormatMonographError("Invalid header/footer role target.")
+                inherited[story][kind] = target
             for kind, target in inherited[story].items():
                 roles[(story, section_index, kind)] = target
     return roles
 
 
+def _empty_candidate_story(package: zipfile.ZipFile, part: str, story: str) -> str:
+    """Classify only a content-free story shell, without resolving its styles."""
+    rels = posixpath.join(posixpath.dirname(part), '_rels', posixpath.basename(part) + '.rels')
+    if rels in package.namelist():
+        raise FormatMonographError("Extra candidate story has relationships.")
+    try:
+        data = package.read(part)
+        root = etree.fromstring(data)
+    except (KeyError, etree.XMLSyntaxError) as exc:
+        raise FormatMonographError("Invalid extra candidate story.") from exc
+    if root.tag != qn('w:hdr' if story == 'header' else 'w:ftr'):
+        raise FormatMonographError("Invalid extra candidate story root.")
+    children = {
+        root.tag: {qn('w:p')}, qn('w:p'): {qn('w:pPr'), qn('w:r')},
+        qn('w:pPr'): {qn('w:pStyle'), qn('w:rPr')},
+        qn('w:r'): {qn('w:rPr')}, qn('w:rPr'): set(), qn('w:pStyle'): set(),
+    }
+    for element in root.iter():
+        if not isinstance(element.tag, str) or element.tag not in children:
+            raise FormatMonographError("Extra candidate story has unknown or substantive payload.")
+        if (element.text and element.text.strip()) or (element.tail and element.tail.strip()):
+            raise FormatMonographError("Extra candidate story has text payload.")
+        if any(child.tag not in children[element.tag] for child in element):
+            raise FormatMonographError("Extra candidate story has unknown or substantive payload.")
+        for attribute in element.attrib:
+            name = etree.QName(attribute)
+            allowed = (
+                element is root and name.namespace == 'http://schemas.openxmlformats.org/markup-compatibility/2006' and name.localname == 'Ignorable'
+                or element.tag == qn('w:p') and name.namespace == NS['w'] and name.localname in {'rsidR','rsidRDefault','rsidP','rsidRPr'}
+                or element.tag == qn('w:p') and name.namespace == 'http://schemas.microsoft.com/office/word/2010/wordml' and name.localname in {'paraId','textId'}
+                or element.tag == qn('w:pStyle') and attribute == qn('w:val')
+            )
+            if not allowed:
+                raise FormatMonographError("Extra candidate story has unknown or relationship attributes.")
+    return hashlib.sha256(data).hexdigest()
+
+
 def _semantic_part_sources(
-    baseline: zipfile.ZipFile, refreshed: zipfile.ZipFile
+    baseline: zipfile.ZipFile, refreshed: zipfile.ZipFile,
+    audit: dict[str, Any] | None = None,
 ) -> tuple[dict[str, list[str]], list[str]]:
     baseline_roles = _story_roles(baseline)
     refreshed_roles = _story_roles(refreshed)
-    if set(baseline_roles) != set(refreshed_roles):
+    if not set(baseline_roles) <= set(refreshed_roles):
         raise FormatMonographError(
             "Target application changed the effective header or footer role set."
         )
     sources: dict[str, list[str]] = {}
+    reverse_sources: dict[str, str] = {}
     for role, baseline_part in baseline_roles.items():
         refreshed_part = refreshed_roles[role]
+        if reverse_sources.setdefault(refreshed_part, baseline_part) != baseline_part:
+            raise FormatMonographError("Ambiguous baseline header/footer field source.")
         values = sources.setdefault(baseline_part, [])
         if refreshed_part not in values:
             values.append(refreshed_part)
+    if any(len(values) != 1 for values in sources.values()):
+        raise FormatMonographError("Ambiguous baseline header/footer field source.")
+    extra_roles = set(refreshed_roles) - set(baseline_roles)
+    extra_parts: dict[str, str] = {}
+    for role in sorted(extra_roles):
+        part = refreshed_roles[role]
+        # Candidate-only is a semantic ownership property, not a filename:
+        # Word may renumber both old and extra parts while saving.
+        if part in reverse_sources:
+            raise FormatMonographError("Extra candidate role shares a baseline field source.")
+        if part not in extra_parts:
+            extra_parts[part] = _empty_candidate_story(refreshed, part, role[0])
+    for package in (baseline, refreshed):
+        if len(package.namelist()) != len(set(package.namelist())):
+            raise FormatMonographError("Ambiguous duplicate package entries.")
+    # Compare semantic on/off values rather than namespace serialization.
+    def enabled(package: zipfile.ZipFile) -> bool:
+        root = etree.fromstring(package.read("word/settings.xml"))
+        return _on_off(root, "w:evenAndOddHeaders")
+    if enabled(baseline) != enabled(refreshed):
+        raise FormatMonographError("Target application changed header/footer activation settings.")
+    if audit is not None:
+        audit.update({'discarded_candidate_role_count': len(extra_roles),
+                      'discarded_candidate_part_count': len(extra_parts),
+                      'discarded_candidate_part_sha256': sorted(extra_parts.values())})
     return sources, [
         "header_footer_relationship_serialization",
         "header_footer_part_renumbering",
@@ -821,9 +917,10 @@ def selective_field_result_writeback(
     unapproved_dirty_fields = 0
     approved_source_fields = 0
     verified_toc_fields = 0
+    candidate_audit: dict[str, Any] = {}
     with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(refreshed_path) as refreshed:
         refreshed_names = set(refreshed.namelist())
-        story_sources, story_discarded = _semantic_part_sources(baseline, refreshed)
+        story_sources, story_discarded = _semantic_part_sources(baseline, refreshed, candidate_audit)
         discarded_categories.update(story_discarded)
         for name in baseline.namelist():
             if not FIELD_RESULT_PART.fullmatch(name):
@@ -964,6 +1061,15 @@ def selective_field_result_writeback(
                 output.writestr(info, patched_parts.get(info.filename, baseline.read(info.filename)))
         if protected_payload_manifest(temp_output) != protected_payload_manifest(baseline_path):
             raise FormatMonographError("Selective field writeback changed a protected payload.")
+        with zipfile.ZipFile(baseline_path) as baseline, zipfile.ZipFile(temp_output) as output:
+            def graph(package):
+                root = etree.fromstring(package.read('word/document.xml'))
+                refs = [tuple((child.tag, tuple(sorted(child.attrib.items())))
+                              for child in section if child.tag in {qn('w:headerReference'), qn('w:footerReference')})
+                        for section in root.xpath('.//w:sectPr', namespaces=NS)]
+                return _story_roles(package), refs, _section_manifest(root)
+            if graph(baseline) != graph(output):
+                raise FormatMonographError("Selective output changed baseline story roles or inheritance.")
         temp_output.replace(output_path)
     finally:
         temp_output.unlink(missing_ok=True)
@@ -982,4 +1088,5 @@ def selective_field_result_writeback(
         "unapproved_dirty_fields": unapproved_dirty_fields,
         "patched_parts": sorted(patched_parts),
         "discarded_backend_differences": sorted(discarded_categories),
+        "candidate_story_audit": candidate_audit,
     }

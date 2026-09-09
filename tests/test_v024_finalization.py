@@ -210,6 +210,62 @@ def expand_toc_cache(source: Path, output: Path) -> None:
 
 
 class V024FinalizationTests(unittest.TestCase):
+    def test_no_toc_inventory_counts_all_existing_stories_and_unknown_fields(self) -> None:
+        from test_v032_selective_field_writeback import add_complex_field
+        from field_completion import _field_cache_shape_errors
+
+        for kind in ("PAGE", "REF anchor", "SECTIONPAGES", "UNSUPPORTED", ""):
+            for footer in (False, True):
+                for dirty in (False, True):
+                    with self.subTest(kind=kind, footer=footer, dirty=dirty):
+                        doc = Document()
+                        paragraph = doc.sections[0].footer.paragraphs[0] if footer else doc.add_paragraph()
+                        add_complex_field(paragraph, kind, "1", dirty=dirty)
+                        path = self.root / "scalar.docx"
+                        doc.save(path)
+                        cache = field_cache_inventory(path)
+                        self.assertEqual("stale" if dirty else "refreshed", cache["status"])
+                        self.assertEqual(0, cache["main_toc_fields"])
+                        self.assertTrue(cache["field_types"])
+                        self.assertTrue(_field_cache_shape_errors("cache", {**cache, "status": "absent"}))
+        path = self.root / "empty.docx"
+        Document().save(path)
+        self.assertEqual("absent", field_cache_inventory(path)["status"])
+
+    def test_external_operations_require_exact_protocol_version_and_operation(self) -> None:
+        source = self.root / "protocol.docx"
+        Document().save(source)
+        output = self.root / "protocol-output.docx"
+        Document().save(output)
+        pdf = self.root / "protocol.pdf"
+        pdf.write_bytes(b"synthetic protocol fixture")
+        operations = {
+            "refresh_fields": lambda: finalize_docx.external_refresh(source, output, "fixture", source, source, pdf, "Microsoft Word"),
+            "measure_layout": lambda: finalize_docx.external_measure(source, "fixture", source, source, "Microsoft Word"),
+            "verify_only": lambda: finalize_docx.external_verify(source, "fixture", source, source, pdf, "Microsoft Word"),
+        }
+        for operation, call in operations.items():
+            valid = dict(protocol_version="1.1", operation=operation, status="success",
+                         software="Microsoft Word", backend="external", repaginated=True,
+                         saved=operation == "refresh_fields", field_cache_verified=True,
+                         read_only_verified=True, pdf_exported=True, structural_changes_applied=0,
+                         page_count=1, updated_field_types=[])
+            for key, value in [(None, None)] + [(key, value) for key in ("protocol_version", "operation") for value in (None, 1.1, True, [], {}, "", "1.0", "wrong")]:
+                with self.subTest(operation=operation, key=key, value=value):
+                    response = dict(valid)
+                    if key:
+                        if value is None:
+                            response.pop(key)
+                        else:
+                            response[key] = value
+                    completed = subprocess.CompletedProcess([], 0, json.dumps(response), "")
+                    with patch.object(finalize_docx, "_invoke_external_command", return_value=completed):
+                        if key:
+                            with self.assertRaises(FormatMonographError):
+                                call()
+                        else:
+                            self.assertEqual(operation, call()["operation"])
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -1070,6 +1126,212 @@ class V024FinalizationTests(unittest.TestCase):
                 self.assertFalse(
                     (case_root / finalize_docx.PUBLICATION_RECOVERY_DIRECTORY).exists()
                 )
+
+    def test_external_post_writeback_diagnostics_use_actual_checks_without_payloads(self) -> None:
+        from types import SimpleNamespace
+        from run_monograph import retain_finalize_failure
+
+        formatted = self.apply()
+        names = ("field_contract", "field_refresh", "content_integrity",
+                 "protected_object_integrity", "effective_font_integrity")
+        cases = [((name,), False) for name in names] + [
+            (names[:2], False), (names, False), ((), False), ((names[0],), True),
+        ]
+        canary = "BODY_FIELD_IMAGE_TABLE_SECRET_CANARY"
+        for index, (failures, broken_diagnostic) in enumerate(cases):
+            with self.subTest(failures=failures, broken_diagnostic=broken_diagnostic):
+                checks = {name: name not in failures for name in names}
+                folder = self.root / f"five-checks-{index}"
+                folder.mkdir()
+                target = folder / "final.docx"
+                status = folder / "finalization.json"
+                target.write_bytes(b"previous publication")
+                status.write_bytes(b"previous status")
+                argv = ["finalize_docx.py", str(formatted), "--source", str(self.source),
+                        "--profile", str(self.profile), "--structure-map", str(self.structure),
+                        "--output", str(target), "--status-output", str(status),
+                        "--pdf-output", str(folder / "verification.pdf"),
+                        "--field-updater", "external", "--field-updater-command", "synthetic-only",
+                        "--target-software", "microsoft_word", "--force"]
+                stderr = io.StringIO()
+                candidates = []
+                before_delete = []
+                real_unlink = Path.unlink
+                real_print = print
+
+                def diagnostic_print(*args, **kwargs):
+                    if broken_diagnostic and args and str(args[0]).startswith("post_writeback_checks="):
+                        raise OSError(canary)
+                    return real_print(*args, **kwargs)
+
+                def writeback(source, refreshed, output, **kwargs):
+                    output.write_bytes(source.read_bytes())
+                    candidates.append(output)
+                    return {"status": "selective_verified", "unapproved_dirty_fields": 0,
+                            "synthetic_payload": canary}
+
+                def unlink(path, *args, **kwargs):
+                    if path in candidates:
+                        before_delete.append("post_writeback_checks=" in stderr.getvalue())
+                    return real_unlink(path, *args, **kwargs)
+
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.object(sys, "argv", argv))
+                    stack.enter_context(contextlib.redirect_stderr(stderr))
+                    stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                    stack.enter_context(patch("builtins.print", side_effect=diagnostic_print))
+                    stack.enter_context(patch.object(Path, "unlink", unlink))
+                    stack.enter_context(patch.object(finalize_docx, "external_measure", return_value={}))
+                    stack.enter_context(patch.object(finalize_docx, "approved_front_matter_section_indexes", return_value=[]))
+                    stack.enter_context(patch.object(finalize_docx, "external_refresh", return_value={
+                        "backend": "external", "target_id": "microsoft_word",
+                        "field_cache_verified": checks["field_refresh"]}))
+                    stack.enter_context(patch.object(finalize_docx, "selective_field_result_writeback", side_effect=writeback))
+                    stack.enter_context(patch.object(finalize_docx, "external_verify", return_value={"read_only_verified": True}))
+                    stack.enter_context(patch.object(finalize_docx, "_require_matching_word_final_snapshots"))
+                    stack.enter_context(patch.object(finalize_docx, "field_contract_preserved", return_value=checks["field_contract"]))
+                    stack.enter_context(patch.object(finalize_docx, "structure_content_fingerprint", side_effect=[canary, canary, canary if checks["content_integrity"] else "different"]))
+                    stack.enter_context(patch.object(finalize_docx, "protected_payload_manifest", side_effect=[canary, canary if checks["protected_object_integrity"] else "different"]))
+                    font_audit = stack.enter_context(patch.object(finalize_docx, "effective_font_failures", side_effect=[[], [] if checks["effective_font_integrity"] else [{"payload": canary}]]))
+                    checkpoint = stack.enter_context(patch.object(finalize_docx, "backend_audit_bytes", side_effect=FormatMonographError("after_gate_checkpoint")))
+                    self.assertEqual(1, finalize_docx.main())
+                output_font_call = font_audit.call_args_list[1]
+                eligible = checks["field_contract"] and checks["field_refresh"]
+                self.assertEqual(eligible, output_font_call.kwargs["baseline_path"] is not None)
+                self.assertEqual(eligible, output_font_call.kwargs["scalar_refresh_fields"] is not None)
+                lines = [line for line in stderr.getvalue().splitlines() if line.startswith("post_writeback_checks=")]
+                self.assertEqual(b"previous publication", target.read_bytes())
+                self.assertEqual(b"previous status", status.read_bytes())
+                self.assertFalse((folder / "verification.pdf").exists())
+                if not failures:
+                    checkpoint.assert_called_once()
+                    self.assertEqual([], lines)
+                    self.assertTrue(candidates[0].exists())
+                    continue
+                checkpoint.assert_not_called()
+                if broken_diagnostic:
+                    self.assertEqual([False], before_delete)
+                    self.assertFalse(candidates[0].exists())
+                    self.assertEqual([], lines)
+                    self.assertNotIn(canary, stderr.getvalue())
+                    self.assertIn("Field refresh did not preserve", stderr.getvalue())
+                    continue
+                self.assertEqual([True], before_delete)
+                self.assertFalse(candidates[0].exists())
+                self.assertEqual(1, len(lines))
+                detail = json.loads(lines[0].split("=", 1)[1])
+                self.assertEqual({"checks": checks, "failed_checks": list(failures)}, detail)
+                self.assertTrue(all(type(value) is bool for value in detail["checks"].values()))
+                for forbidden in (canary, str(self.root), "synthetic_payload"):
+                    self.assertNotIn(forbidden, lines[0])
+                summary = retain_finalize_failure(folder, SimpleNamespace(returncode=1, stdout="", stderr=stderr.getvalue()))
+                self.assertEqual(1, summary["returncode"])
+                self.assertTrue(summary["local_diagnostic_saved"])
+                self.assertNotIn(canary, json.dumps(summary))
+                record = json.loads(next(folder.glob(".finalize-diagnostic-*/failure.json")).read_text())
+                self.assertIn(lines[0], record["stderr"])
+
+    def test_font_refresh_entry_preserves_real_external_protocol_backend(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "font_entry_word_adapter",
+            ROOT / "adapters/microsoft-word/macos/word_field_updater.py",
+        )
+        adapter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(adapter)
+        formatted = self.apply()
+        cases = ("external", "auto", "contract", "selective", "read_only",
+                 "dirty", "non_strict", "wrong_target", "invalid_cache", "non_external")
+        for case in cases:
+            with self.subTest(case=case):
+                folder = self.root / f"font-protocol-{case}"
+                folder.mkdir()
+                mode = "auto" if case == "auto" else "external"
+                argv = ["finalize_docx.py", str(formatted), "--source", str(self.source),
+                        "--profile", str(self.profile), "--structure-map", str(self.structure),
+                        "--output", str(folder / "final.docx"),
+                        "--status-output", str(folder / "finalization.json"),
+                        "--pdf-output", str(folder / "verification.pdf"),
+                        "--field-updater", mode, "--target-software", adapter.TARGET_ID]
+                if case == "non_external":
+                    argv[argv.index("--field-updater") + 1] = "libreoffice"
+                else:
+                    argv += ["--field-updater-command", "synthetic-only"]
+                requests = []
+                responses = []
+                allowed = []
+
+                def invoke(command, request, label):
+                    requests.append(request)
+                    Path(request["output_path"]).write_bytes(Path(request["input_path"]).read_bytes())
+                    response = {
+                        "protocol_version": adapter.PROTOCOL_VERSION,
+                        "operation": "refresh_fields", "status": "success",
+                        "backend": "deferred_on_open" if case == "non_strict" else adapter.BACKEND,
+                        "software": "LibreOffice" if case == "wrong_target" else "Microsoft Word",
+                        "repaginated": True, "saved": True,
+                        "field_cache_verified": case != "invalid_cache",
+                        "read_only_verified": False, "pdf_exported": False,
+                        "structural_changes_applied": 0, "page_count": 1,
+                        "updated_field_types": request["allowed_field_types"],
+                        "input_sha256_unchanged": True,
+                    }
+                    return subprocess.CompletedProcess([], 0, json.dumps(response), "")
+
+                real_refresh = finalize_docx.external_refresh
+
+                def refresh(*args, **kwargs):
+                    allowed.append(kwargs["allowed_field_types"])
+                    response = real_refresh(*args, **kwargs)
+                    responses.append(response)
+                    return response
+
+                def writeback(source, refreshed, output, **kwargs):
+                    output.write_bytes(source.read_bytes())
+                    return {"status": "rejected" if case == "selective" else "selective_verified",
+                            "unapproved_dirty_fields": 1 if case == "dirty" else 0}
+
+                def libreoffice(source, output, *args, **kwargs):
+                    output.write_bytes(source.read_bytes())
+                    return {"backend": "libreoffice_uno", "field_cache_verified": True}
+
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.object(sys, "argv", argv))
+                    stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                    stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                    stack.enter_context(patch.object(finalize_docx, "external_measure", return_value={}))
+                    stack.enter_context(patch.object(finalize_docx, "approved_front_matter_section_indexes", return_value=[]))
+                    stack.enter_context(patch.object(finalize_docx, "_invoke_external_command", side_effect=invoke))
+                    stack.enter_context(patch.object(finalize_docx, "external_refresh", side_effect=refresh))
+                    stack.enter_context(patch.object(finalize_docx, "libreoffice_refresh", side_effect=libreoffice))
+                    stack.enter_context(patch.object(finalize_docx, "selective_field_result_writeback", side_effect=writeback))
+                    stack.enter_context(patch.object(finalize_docx, "external_verify", return_value={"read_only_verified": case != "read_only"}))
+                    stack.enter_context(patch.object(finalize_docx, "_require_matching_word_final_snapshots"))
+                    stack.enter_context(patch.object(finalize_docx, "field_contract_preserved", return_value=case != "contract"))
+                    stack.enter_context(patch.object(finalize_docx, "structure_content_fingerprint", return_value="same"))
+                    stack.enter_context(patch.object(finalize_docx, "protected_payload_manifest", return_value="same"))
+                    audit = stack.enter_context(patch.object(finalize_docx, "effective_font_failures", return_value=[]))
+                    stack.enter_context(patch.object(finalize_docx, "backend_audit_bytes", side_effect=FormatMonographError("after_gate_checkpoint")))
+                    self.assertEqual(1, finalize_docx.main())
+                if case in {"wrong_target", "invalid_cache"}:
+                    self.assertEqual(1, audit.call_count)  # Protocol rejects before output audit.
+                    self.assertEqual([], responses)
+                    continue
+                self.assertEqual(2, audit.call_count)
+                call = audit.call_args_list[1]
+                if case in {"external", "auto"}:
+                    self.assertEqual(formatted.resolve(), call.kwargs["baseline_path"])
+                    self.assertEqual(allowed[0], call.kwargs["scalar_refresh_fields"])
+                    self.assertEqual(set(requests[0]["allowed_field_types"]), allowed[0])
+                    self.assertEqual("external", responses[0]["backend"])
+                    self.assertEqual(adapter.BACKEND, responses[0]["implementation_backend"])
+                    self.assertEqual(adapter.TARGET_ID, responses[0]["target_id"])
+                else:
+                    self.assertIsNone(call.kwargs["baseline_path"])
+                    self.assertIsNone(call.kwargs["scalar_refresh_fields"])
+                if case == "non_external":
+                    self.assertEqual([], requests)
 
     def test_field_contract_rejects_removed_editable_fields(self) -> None:
         before = {

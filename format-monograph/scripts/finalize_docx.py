@@ -71,6 +71,7 @@ from structure_map import (
 from validate_profile import validate
 from field_writeback import (
     DEFAULT_ALLOWED_FIELD_TYPES,
+    _result_text_nodes,
     parse_fields,
     selective_field_result_writeback,
 )
@@ -3183,8 +3184,75 @@ def field_contract_preserved(before: dict, after: dict) -> bool:
     )
 
 
+def _font_scalar_cache_key(paragraph: Any, allowed: set[str]) -> bytes | None:
+    """Exact paragraph identity except approved scalar cache text/dirty flags."""
+    root = copy.deepcopy(paragraph._p)
+    found = False
+    try:
+        records = parse_fields(root)
+    except FormatMonographError:
+        # A paragraph inside a multi-paragraph field is not a scalar target.
+        return None
+    if any(
+        record.parent_order is not None
+        or any(parent.tag == qn("w:fldSimple") for parent in (
+            record.simple if record.form == "simple" else record.begin
+        ).iterancestors())
+        for record in records
+    ):
+        # Do not hide an unapproved nested cache inside an approved result.
+        return None
+    for record in records:
+        if record.field_type not in allowed & (DEFAULT_ALLOWED_FIELD_TYPES - {"TOC"}):
+            continue
+        nodes = _result_text_nodes(root, record)
+        if not nodes:
+            raise FormatMonographError("Font target scalar cache has no text container.")
+        found = True
+        for node in nodes:
+            node.text = ""
+        marker = record.simple if record.form == "simple" else record.begin
+        assert marker is not None
+        marker.attrib.pop(qn("w:dirty"), None)
+    return etree.tostring(root, method="c14n") if found else None
+
+
+def _font_targets_after_scalar_refresh(
+    document: Any, baseline: Any, structure_map: dict, selector: dict,
+    allowed: set[str],
+) -> list[Any]:
+    # This is a font-audit-only identity reconciliation, not a new authorization
+    # or a relaxation of the shared structure-map/content/writeback contracts.
+    if selector.get("kind") != "paragraph_role" or selector.get("value") == "toc_heading":
+        raise FormatMonographError("Font target has no scalar refresh reconciliation.")
+    result = []
+    seen = set()
+    for entry in structure_map.get("paragraph_roles", []):
+        scoped_map = dict(structure_map, paragraph_roles=[entry])
+        try:
+            targets = approved_role_paragraphs(document, scoped_map, selector)
+        except FormatMonographError:
+            originals = approved_role_paragraphs(baseline, scoped_map, selector)
+            if len(originals) != 1 or entry.get("locator", {}).get("kind") != "body_paragraph":
+                raise
+            key = _font_scalar_cache_key(originals[0], allowed)
+            if key is None:
+                raise
+            targets = [p for p in document.paragraphs if _font_scalar_cache_key(p, allowed) == key]
+            if len(targets) != 1:
+                raise FormatMonographError("Font target scalar identity is ambiguous or missing.")
+        for paragraph in targets:
+            if paragraph._p in seen:
+                raise FormatMonographError("Font target scalar identity is reused.")
+            seen.add(paragraph._p)
+            result.append(paragraph)
+    return result
+
+
 def effective_font_failures(
-    path: Path, profile: dict, structure_map: dict | None = None
+    path: Path, profile: dict, structure_map: dict | None = None,
+    *, baseline_path: Path | None = None,
+    scalar_refresh_fields: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     document = load_document(path)
     result = []
@@ -3284,7 +3352,15 @@ def effective_font_failures(
                 except KeyError:
                     pass
             try:
-                targets = approved_role_paragraphs(document, structure_map, selector)
+                try:
+                    targets = approved_role_paragraphs(document, structure_map, selector)
+                except FormatMonographError:
+                    if baseline_path is None or not scalar_refresh_fields:
+                        raise
+                    targets = _font_targets_after_scalar_refresh(
+                        document, load_document(baseline_path), structure_map, selector,
+                        scalar_refresh_fields,
+                    )
             except FormatMonographError:
                 result.append(
                     {
@@ -3463,6 +3539,21 @@ def _invoke_external_command(
         ) from exc
 
 
+def _classify_external_response(response: dict[str, Any]) -> None:
+    # The protocol may name a concrete implementation; business evidence uses
+    # the existing external category. Keep the original name in the raw audit.
+    implementation = response.get("backend", "external")
+    if isinstance(implementation, str) and implementation in {
+        "external", "microsoft_word_macos_applescript",
+    }:
+        response["implementation_backend"] = implementation
+        response["backend"] = "external"
+    else:
+        # Do not relabel unknown/other categories as external or bypass their
+        # existing canonical and completion validation.
+        response.setdefault("backend", "external")
+
+
 def external_refresh(
     input_path: Path,
     output_path: Path,
@@ -3504,6 +3595,8 @@ def external_refresh(
         ) from exc
     if not isinstance(response, dict):
         raise FormatMonographError("External field updater response must be an object.")
+    if response.get("protocol_version") != "1.1" or response.get("operation") != "refresh_fields":
+        raise FormatMonographError("External field updater protocol version or operation mismatch.")
     _require_external_target(response, target_software)
     required_true = ("repaginated", "saved", "field_cache_verified")
     if response.get("status") != "success" or any(
@@ -3524,7 +3617,7 @@ def external_refresh(
         raise FormatMonographError(
             "External field updater reported a non-approved field type."
         )
-    response.setdefault("backend", "external")
+    _classify_external_response(response)
     response["command"] = _external_command(command)[0]
     return response
 
@@ -3566,6 +3659,7 @@ def external_measure(
     required = {
         "status": "success",
         "operation": "measure_layout",
+        "protocol_version": "1.1",
         "repaginated": True,
         "saved": False,
         "read_only_verified": True,
@@ -3597,7 +3691,7 @@ def external_measure(
         raise FormatMonographError(
             "External layout measurer returned an invalid page count."
         )
-    response.setdefault("backend", "external")
+    _classify_external_response(response)
     response["command"] = _external_command(command)[0]
     return response
 
@@ -3920,6 +4014,7 @@ def external_verify(
     required = {
         "status": "success",
         "operation": "verify_only",
+        "protocol_version": "1.1",
         "repaginated": True,
         "saved": False,
         "read_only_verified": True,
@@ -3948,9 +4043,47 @@ def external_verify(
             raise FormatMonographError(
                 "Selective output page count differs from the field calculation session."
             )
-    response.setdefault("backend", "external")
+    _classify_external_response(response)
     response["command"] = _external_command(command)[0]
     return response
+
+
+def _final_snapshot_without_round(
+    response: dict[str, Any], label: str
+) -> dict[str, Any]:
+    convergence = response.get("convergence")
+    if not isinstance(convergence, list) or not convergence:
+        raise FormatMonographError(f"{label} omitted final convergence evidence.")
+    snapshot = convergence[-1]
+    if not isinstance(snapshot, dict):
+        raise FormatMonographError(f"{label} returned invalid convergence evidence.")
+    return {
+        key: copy.deepcopy(value)
+        for key, value in snapshot.items()
+        if key != "round"
+    }
+
+
+def _require_matching_word_final_snapshots(
+    refresh_response: dict[str, Any],
+    verify_response: dict[str, Any],
+    pdf_output: Path,
+) -> None:
+    try:
+        refresh_snapshot = _final_snapshot_without_round(
+            refresh_response, "External field refresh"
+        )
+        verify_snapshot = _final_snapshot_without_round(
+            verify_response, "External read-only verification"
+        )
+    except FormatMonographError:
+        pdf_output.unlink(missing_ok=True)
+        raise
+    if refresh_snapshot != verify_snapshot:
+        pdf_output.unlink(missing_ok=True)
+        raise FormatMonographError(
+            "External read-only verification differs from the final field refresh snapshot."
+        )
 
 
 class _CommittedStdoutSink:
@@ -4302,7 +4435,7 @@ def main(
                             "Target Word verification requires a persistent --pdf-output artifact."
                         )
                     verification_pdf = args.pdf_output
-                    backend["read_only_verification"] = external_verify(
+                    verification = external_verify(
                         args.output,
                         args.field_updater_command,
                         args.profile,
@@ -4312,6 +4445,10 @@ def main(
                         expected_page_count=backend.get("page_count"),
                         allowed_field_types=allowed_field_types,
                     )
+                    _require_matching_word_final_snapshots(
+                        backend, verification, verification_pdf
+                    )
+                    backend["read_only_verification"] = verification
                 delivery_status = "selective_verified"
             except FormatMonographError as exc:
                 if args.field_updater != "auto" or not args.approve_deferred:
@@ -4476,8 +4613,15 @@ def main(
 
         output_fp = structure_content_fingerprint(args.output, structure_map)
         output_objects = protected_payload_manifest(args.output)
+        font_refresh_identity = bool(
+            external_requested and effective_target_software == MICROSOFT_WORD
+            and backend.get("target_id") == MICROSOFT_WORD and strict_backend
+            and selective_ok and refreshed_ok and field_contract_ok
+        )
         output_font_failures = effective_font_failures(
-            args.output, profile, structure_map
+            args.output, profile, structure_map,
+            baseline_path=args.input if font_refresh_identity else None,
+            scalar_refresh_fields=allowed_field_types if font_refresh_identity else None,
         )
         content_ok = baseline_fp == output_fp
         objects_ok = baseline_objects == output_objects
@@ -4520,6 +4664,24 @@ def main(
                 objects_ok = baseline_objects == output_objects
                 fonts_ok = not output_font_failures
             else:
+                if args.field_updater == "external":
+                    checks = {
+                        "field_contract": bool(field_contract_ok),
+                        "field_refresh": bool(refreshed_ok),
+                        "content_integrity": bool(content_ok),
+                        "protected_object_integrity": bool(objects_ok),
+                        "effective_font_integrity": bool(fonts_ok),
+                    }
+                    # Existing stderr retention is private and bounded. Emit
+                    # only calculated booleans and fixed check names, before
+                    # the original candidate deletion; never include payloads.
+                    try:
+                        print("post_writeback_checks=" + json.dumps({
+                            "checks": checks,
+                            "failed_checks": [name for name, passed in checks.items() if not passed],
+                        }, sort_keys=True), file=sys.stderr)
+                    except (OSError, ValueError):
+                        pass  # Diagnostics must not replace the original failure.
                 args.output.unlink(missing_ok=True)
                 raise FormatMonographError(
                     "Field refresh did not preserve the editable-field "

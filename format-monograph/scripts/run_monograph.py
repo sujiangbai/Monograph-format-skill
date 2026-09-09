@@ -9,11 +9,15 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
+import tempfile
 import uuid
+import zipfile
+from lxml import etree
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +32,7 @@ from backend_evidence import (
     backend_audit_path,
     read_bound_backend_audit,
 )
-from _common import field_cache_inventory
+from _common import FormatMonographError, field_cache_inventory
 from external_command import (
     external_command_cache_reusable,
     external_command_identity,
@@ -720,6 +724,33 @@ def finalization_gate_errors(
         errors.append("finalization output path differs from state finalized artifact")
 
     completion = gate.get("field_completion") or {}
+    check_cached_scalars = (
+        completion.get("input_cache_status") == "refreshed"
+        and completion.get("delivery_status") == "selective_verified"
+    )
+    for label, path, cache_key in (
+        ("formatted input", formatted_path, "input_cache_status"),
+        ("finalized DOCX", finalized_path, "output_cache_status"),
+    ):
+        if completion.get(cache_key) == "absent" or check_cached_scalars:
+            try:
+                actual = field_cache_inventory(path) if path is not None else None
+                if completion.get(cache_key) == "absent" and (
+                    actual is None or actual["status"] != "absent"
+                ):
+                    errors.append(f"{label} contains fields despite no-fields evidence")
+                types_key = cache_key.replace("cache_status", "field_types")
+                if check_cached_scalars and (
+                    actual is None
+                    or actual["field_types"] != completion.get(types_key)
+                    or actual["status"] != completion.get(cache_key)
+                ):
+                    errors.append(f"{label} cached scalar inventory differs from completion evidence")
+            except (
+                OSError, ValueError, KeyError, zipfile.BadZipFile,
+                etree.XMLSyntaxError, FormatMonographError,
+            ):
+                errors.append(f"{label} field inventory could not be verified")
     recalculated_evidence_errors = final_ready_evidence_errors(completion)
     validation = gate.get("evidence_validation") or {}
     if validation.get("status") != "pass":
@@ -1144,6 +1175,46 @@ def run_script(script: str, *arguments: object) -> subprocess.CompletedProcess[s
         text=True,
         check=False,
     )
+
+
+def retain_finalize_failure(work_dir: Path, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    """Private bounded subprocess evidence; never expose raw detail publicly."""
+    limit = 64 * 1024
+    record: dict[str, Any] = {"returncode": completed.returncode}
+    for name in ("stdout", "stderr"):
+        value = getattr(completed, name, "") or ""
+        tail = value[-limit:].encode("utf-8", errors="replace")
+        record[name] = tail[-limit:].decode("utf-8", errors="ignore")
+        record[name + "_truncated"] = len(value) > limit or len(tail) > limit
+    # These are reports from the existing upstream handler, not independently
+    # verified recovery. Ambiguous or absent reports remain unknown.
+    matches = re.findall(
+        r"stage=([A-Za-z0-9_.:-]+); error_number=(-?[0-9]+); "
+        r"close_outcome=([A-Za-z0-9_]+); close_failed=(true|false); restore_failed=(true|false)",
+        record["stderr"],
+    )
+    record["word_error"] = {"evidence": "unknown"}
+    if len(matches) == 1:
+        stage, number, outcome, close_failed, restore_failed = matches[0]
+        record["word_error"] = {
+            "evidence": "upstream_reported", "stage": stage,
+            "error_number": number, "close_outcome": outcome,
+            "close_failed": close_failed == "true",
+            "restore_failed": restore_failed == "true",
+        }
+    saved = False
+    try:
+        directory = Path(tempfile.mkdtemp(prefix=".finalize-diagnostic-", dir=work_dir))
+        descriptor = os.open(directory / "failure.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, ensure_ascii=True)
+        saved = True
+    except (OSError, ValueError, TypeError):
+        # Diagnostics are subordinate to the original failure. Do not print
+        # an exception which might contain a private filesystem path.
+        pass
+    return {"failure": "finalize_subprocess", "returncode": completed.returncode,
+            "local_diagnostic_saved": saved}
 
 
 def begin_stage(state: dict[str, Any], name: str, input_key: str) -> float:
@@ -1586,7 +1657,8 @@ def finalize(args: argparse.Namespace) -> int:
     if completed.returncode != 0:
         state.clear()
         state.update(state_before_execution)
-        print("finalize_docx.py failed with a nonzero exit code.", file=sys.stderr)
+        summary = retain_finalize_failure(work_dir, completed)
+        print(json.dumps(summary, sort_keys=True), file=sys.stderr)
         return 2
     try:
         evidence = read_json(final_status)

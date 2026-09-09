@@ -2309,6 +2309,7 @@ def field_cache_inventory(path: Path) -> dict[str, Any]:
     toc_entries = 0
     dirty_fields = 0
     update_on_open = False
+    field_markers = 0
     with zipfile.ZipFile(path) as package:
         document = etree.fromstring(package.read("word/document.xml"))
         toc_entries = len(
@@ -2317,20 +2318,33 @@ def field_cache_inventory(path: Path) -> dict[str, Any]:
                 namespaces=NS,
             )
         )
-        dirty_fields = len(
-            document.xpath(
-                ".//w:fldSimple[@w:dirty='true' or @w:dirty='1'] | "
-                ".//w:fldChar[@w:fldCharType='begin'][@w:dirty='true' or @w:dirty='1']",
-                namespaces=NS,
+        for name in package.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            story = etree.fromstring(package.read(name))
+            markers = story.xpath(
+                ".//w:fldSimple | .//w:fldChar[@w:fldCharType='begin']", namespaces=NS
             )
-        )
+            field_markers += len(markers)
+            if not markers and story.xpath(".//w:instrText | .//w:fldChar", namespaces=NS):
+                field_markers += 1  # Malformed/unknown fields are never absent.
+            dirty_fields += len(
+                story.xpath(
+                    ".//w:fldSimple[@w:dirty='true' or @w:dirty='1'] | "
+                    ".//w:fldChar[@w:fldCharType='begin'][@w:dirty='true' or @w:dirty='1']",
+                    namespaces=NS,
+                )
+            )
         if "word/settings.xml" in package.namelist():
             settings = etree.fromstring(package.read("word/settings.xml"))
             update_on_open = bool(settings.xpath(".//w:updateFields", namespaces=NS))
 
-    if toc_fields == 0:
+    unidentified = max(0, field_markers - inventory["total"])
+    if unidentified:
+        inventory["types"]["UNKNOWN"] = inventory["types"].get("UNKNOWN", 0) + unidentified
+    if not inventory["types"] and not field_markers:
         status = "absent"
-    elif toc_entries == 0:
+    elif toc_fields and toc_entries == 0:
         status = "code_only"
     elif dirty_fields:
         status = "stale"

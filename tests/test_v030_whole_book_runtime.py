@@ -194,6 +194,8 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
     def test_complete_no_fields_and_word_evidence_are_the_only_valid_shapes(self) -> None:
         no_fields = {
             "delivery_status": "absent",
+            "input_field_types": {},
+            "output_field_types": {},
             "input_cache_status": "absent",
             "output_cache_status": "absent",
             "backend": "not_needed",
@@ -224,6 +226,118 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
         }
         self.assertTrue(final_ready_field_evidence(no_fields))
         self.assertTrue(final_ready_field_evidence(self._word_completion_evidence()))
+
+    def test_cached_scalar_completion_requires_full_word_evidence_and_known_inventory(self) -> None:
+        evidence = self._word_completion_evidence()
+        evidence.update(input_cache_status="refreshed", input_field_types={"PAGE": 1, "REF": 1, "SECTIONPAGES": 1}, output_field_types={"PAGE": 1, "REF": 1, "SECTIONPAGES": 1})
+        self.assertEqual([], final_ready_evidence_errors(evidence))
+        for key, value in (
+            ("backend", "not_needed"), ("backend", "libreoffice_uno"),
+            ("delivery_status", "absent"), ("word_verification_completed", False),
+            ("read_only_saved", True), ("verification_pdf_exported", False),
+            ("input_field_types", {}), ("input_field_types", {"TOC": 1}),
+            ("input_field_types", {"UNKNOWN": 1}), ("input_field_types", {"PAGE": True}),
+            ("output_field_types", {"PAGE": 1}),
+        ):
+            with self.subTest(key=key, value=value):
+                self.assertTrue(final_ready_evidence_errors({**evidence, key: value}))
+
+    def test_cached_scalar_word_evidence_reaches_verify_and_read_only_status(self) -> None:
+        from _common import field_cache_inventory
+        from test_v032_selective_field_writeback import add_complex_field
+        work, state, _, args = self._cached_final_ready_run("cached-scalar-word")
+        status_path = work / "final/finalization.json"
+        value = json.loads(status_path.read_text())
+        for part, name in (("input", "formatted.docx"), ("output", "final/source-finalized.docx")):
+            path = work / name
+            doc = Document()
+            add_complex_field(doc.add_paragraph(), "REF anchor", "1", dirty=False)
+            add_complex_field(doc.sections[0].footer.paragraphs[0], "SECTIONPAGES", "7", dirty=False)
+            doc.save(path)
+            value[part + "_field_cache"] = field_cache_inventory(path)
+            value["workflow_state"][part + "_sha256"] = file_sha256(path)
+        value["artifact_binding"]["finalized_docx"] = local_artifact_identity(work / "final/source-finalized.docx")
+        status_path.write_text(json.dumps(value))
+        state["field_writeback"]["completion_evidence"] = completion_evidence(value)
+        state["field_writeback"]["artifact_binding"] = value["artifact_binding"]
+        state["finalization_gate"] = canonical_finalization_gate_summary(work, value)
+        state["stages"]["finalize"]["input_key_sha256"] = json_sha256({"formatted": file_sha256(work / "formatted.docx"), "map": file_sha256(work / "structure.json"), "behavior": state["finalization_request"]})
+        self.assertEqual([], finalization_consistency_errors(work, value, state)[1])
+        args.resume = False
+        with patch("run_monograph.load_state", return_value=state), patch("run_monograph.save_state"), patch("run_monograph.run_script", side_effect=self._verification_script_result(work, target_software="Microsoft Word", renderer_identity=None, use_target_pdf=True)) as scripts, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, verify(args))
+            self.assertEqual(2, scripts.call_count)
+        self.assertEqual("final_ready", state["status"])
+        with patch("run_monograph.load_state", return_value=state), patch("run_monograph.save_state"), patch("run_monograph.run_script") as scripts, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, orchestrate_status(SimpleNamespace(work_dir=work, json=True)))
+            scripts.assert_not_called()
+
+    def test_no_fields_claim_is_rechecked_against_docx_in_finalize_verify_status(self) -> None:
+        from test_v032_selective_field_writeback import add_complex_field
+        for kind in ("PAGE", "REF anchor", "SECTIONPAGES", "UNKNOWN"):
+            for stage, part in [(stage, part) for stage in ("finalize", "verify", "status") for part in ("input", "output")]:
+                with self.subTest(kind=kind, stage=stage, part=part):
+                    work, state, finalize_args, verify_args = self._cached_no_fields_final_ready_run("actual-inventory-" + kind.split()[0] + stage + part)
+                    output = work / ("formatted.docx" if part == "input" else "final/source-finalized.docx")
+                    doc = Document(output)
+                    add_complex_field(doc.sections[0].footer.paragraphs[0], kind, "1", dirty=False)
+                    doc.save(output)
+                    # Even internally synchronized hashes cannot hide fields
+                    # behind an old/forged absent inventory.
+                    path = work / "final/finalization.json"
+                    value = json.loads(path.read_text())
+                    value["workflow_state"][part + "_sha256"] = file_sha256(output)
+                    if part == "output":
+                        value["artifact_binding"]["finalized_docx"] = local_artifact_identity(output)
+                    path.write_text(json.dumps(value))
+                    state["field_writeback"]["completion_evidence"] = completion_evidence(value)
+                    state["field_writeback"]["artifact_binding"] = value["artifact_binding"]
+                    state["finalization_gate"] = canonical_finalization_gate_summary(work, value)
+                    _, errors = finalization_consistency_errors(work, value, state)
+                    self.assertTrue(any("contains fields despite no-fields" in error for error in errors), errors)
+                    finalize_args.field_updater = "auto"
+                    finalize_args.field_updater_command = None
+                    request = finalize_request_identity(finalize_args, target_id=LIBREOFFICE, renderer_used=False)
+                    state["finalization_request"] = request
+                    state["stages"]["finalize"]["input_key_sha256"] = json_sha256({"formatted": file_sha256(work / "formatted.docx"), "map": file_sha256(work / "structure.json"), "behavior": request})
+                    with patch("run_monograph.load_state", return_value=state), patch("run_monograph.save_state"), patch("run_monograph.run_script") as scripts, contextlib.redirect_stdout(io.StringIO()):
+                        if stage == "finalize":
+                            result = orchestrate_finalize(finalize_args)
+                        elif stage == "verify":
+                            result = verify(verify_args)
+                        else:
+                            result = orchestrate_status(SimpleNamespace(work_dir=work, json=True))
+                        self.assertEqual(2, result)
+                        scripts.assert_not_called()
+                    self.assertEqual("candidate_ready", state["status"])
+
+    def test_first_toc_completion_preserves_all_other_word_evidence_requirements(self) -> None:
+        for input_status in ("stale", "code_only"):
+            evidence = self._word_completion_evidence()
+            evidence["input_cache_status"] = input_status
+            self.assertEqual([], final_ready_evidence_errors(evidence))
+            self.assertTrue(final_ready_field_evidence(evidence))
+            for name, value in (
+                ("input_cache_status", "refreshed"),
+                ("input_cache_status", "absent"),
+                ("input_cache_status", None),
+                ("input_cache_status", "unknown"),
+                ("output_cache_status", "code_only"),
+                ("output_cache_status", "stale"),
+                ("output_cache_status", "absent"),
+                ("output_cache_status", "unknown"),
+                ("backend", "libreoffice_uno"),
+                ("read_only_verified", False),
+                ("read_only_saved", True),
+                ("word_verification_completed", False),
+                ("verification_page_count", 8),
+                ("artifact_binding", None),
+                ("selective_writeback_status", "rejected"),
+            ):
+                with self.subTest(input_status=input_status, field=name, value=value):
+                    changed = dict(evidence, **{name: value})
+                    self.assertTrue(final_ready_evidence_errors(changed))
+                    self.assertFalse(final_ready_field_evidence(changed))
 
     def test_contradictory_final_ready_evidence_matrix_is_rejected(self) -> None:
         cases = {}
@@ -475,6 +589,77 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
 
         self.assertTrue(render_page_count_errors(completion_evidence(finalization), 8))
 
+    def test_finalize_failure_retains_private_bounded_evidence_without_public_canaries(self) -> None:
+        from run_monograph import retain_finalize_failure
+
+        canary = "BODY_CANARY /private/synthetic-canary SECRET_FAKE_KEY_123"
+        upstream = "stage=document.open; error_number=-2763; close_outcome=close_not_verified; close_failed=true; restore_failed=false"
+        result = SimpleNamespace(returncode=17, stdout="界" * 90000 + canary, stderr=canary + "\n" + upstream)
+        summary = retain_finalize_failure(self.root, result)
+        self.assertTrue(summary["local_diagnostic_saved"])
+        self.assertEqual(17, summary["returncode"])
+        for token in canary.split():
+            self.assertNotIn(token, json.dumps(summary))
+        log = next(self.root.glob(".finalize-diagnostic-*/failure.json"))
+        record = json.loads(log.read_text())
+        self.assertIn(canary, record["stdout"])
+        self.assertTrue(record["stdout_truncated"])
+        self.assertLessEqual(len(record["stdout"].encode()), 65536)
+        self.assertEqual("upstream_reported", record["word_error"]["evidence"])
+        self.assertEqual("document.open", record["word_error"]["stage"])
+        self.assertTrue(record["word_error"]["close_failed"])
+        self.assertFalse(record["word_error"]["restore_failed"])
+        self.assertEqual(0o700, log.parent.stat().st_mode & 0o777)
+        self.assertEqual(0o600, log.stat().st_mode & 0o777)
+
+    def test_finalize_failure_missing_or_conflicting_recovery_is_unknown(self) -> None:
+        from run_monograph import retain_finalize_failure
+
+        report = "stage=document.open; error_number=-1; close_outcome=close_not_verified; close_failed=true; restore_failed=true"
+        for index, stderr in enumerate(("missing evidence", report + "\n" + report)):
+            work = self.root / f"unknown-{index}"
+            work.mkdir()
+            retain_finalize_failure(work, SimpleNamespace(returncode=1, stdout="", stderr=stderr))
+            record = json.loads(next(work.glob(".finalize-diagnostic-*/failure.json")).read_text())
+            self.assertEqual({"evidence": "unknown"}, record["word_error"])
+
+    def test_finalize_nonzero_diagnostic_write_failure_does_not_mask_original_or_publish(self) -> None:
+        for fail_save in (False, True):
+            with self.subTest(fail_save=fail_save):
+                work, state, args, _ = self._cached_final_ready_run(f"diagnostic-{fail_save}")
+                state["status"] = "candidate_ready"
+                original = copy.deepcopy(state)
+                canary = "BODY_CANARY /private/synthetic-canary SECRET_FAKE_KEY_123"
+                checks = {name: name != "field_contract" for name in (
+                    "field_contract", "field_refresh", "content_integrity",
+                    "protected_object_integrity", "effective_font_integrity",
+                )}
+                diagnostic = "post_writeback_checks=" + json.dumps({
+                    "checks": checks, "failed_checks": ["field_contract"],
+                }, sort_keys=True)
+                completed = SimpleNamespace(returncode=1, stdout=canary, stderr=diagnostic)
+                output = io.StringIO()
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(patch("run_monograph.load_state", return_value=state))
+                    call = stack.enter_context(patch("run_monograph.run_script", return_value=completed))
+                    save = stack.enter_context(patch("run_monograph.save_state"))
+                    stack.enter_context(contextlib.redirect_stderr(output))
+                    if fail_save:
+                        stack.enter_context(patch("run_monograph.os.open", side_effect=OSError(canary)))
+                    self.assertEqual(2, orchestrate_finalize(args))
+                call.assert_called_once()
+                save.assert_not_called()
+                self.assertEqual(original, state)
+                summary = json.loads(output.getvalue())
+                self.assertEqual(1, summary["returncode"])
+                self.assertEqual(not fail_save, summary["local_diagnostic_saved"])
+                self.assertNotIn("post_writeback_checks", output.getvalue())
+                if not fail_save:
+                    record = json.loads(next(work.glob(".finalize-diagnostic-*/failure.json")).read_text())
+                    self.assertEqual(diagnostic, record["stderr"])
+                for token in canary.split():
+                    self.assertNotIn(token, output.getvalue())
+
     def test_finalize_orchestration_rejects_invalid_word_cache_shape(self) -> None:
         work = self.root / "orchestration"
         work.mkdir()
@@ -550,10 +735,9 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
             "run_monograph.run_script",
             return_value=SimpleNamespace(returncode=0),
         ), patch("run_monograph.save_state"):
-            self.assertEqual(0, orchestrate_finalize(args))
+            self.assertEqual(2, orchestrate_finalize(args))
         self.assertEqual("candidate_ready", state["status"])
-        self.assertTrue(state["blockers"])
-        self.assertTrue(state["field_writeback"]["completion_evidence_errors"])
+        self.assertNotIn("field_writeback", state)
 
     def _cached_final_ready_run(self, name: str) -> tuple[Path, dict, SimpleNamespace, SimpleNamespace]:
         work = self.root / name
@@ -775,6 +959,15 @@ class V030WholeBookRuntimeTests(unittest.TestCase):
         work, state, finalize_args, verify_args = self._cached_final_ready_run(name)
         finalization_path = work / "final/finalization.json"
         finalization = json.loads(finalization_path.read_text(encoding="utf-8"))
+        # A no-fields fixture must contain actual field-free DOCX packages,
+        # not arbitrary bytes with an absent label.
+        for path in (work / "formatted.docx", work / "final/source-finalized.docx"):
+            doc = Document()
+            doc.add_paragraph("No fields")
+            doc.save(path)
+        finalization["workflow_state"]["input_sha256"] = file_sha256(work / "formatted.docx")
+        finalization["workflow_state"]["output_sha256"] = file_sha256(work / "final/source-finalized.docx")
+        finalization["artifact_binding"]["finalized_docx"] = local_artifact_identity(work / "final/source-finalized.docx")
         canonical_backend, audit_binding, audit_path = self._persist_backend_audit(
             finalization_path, {"backend": "not_needed"}
         )
