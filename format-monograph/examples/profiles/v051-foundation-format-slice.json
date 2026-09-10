@@ -1,12 +1,12 @@
 {
   "schema_version": "1.1",
   "profile_id": "v051-foundation-format-slice",
-  "name": "V0.5.1 基础页节、书名、标题、正文与独立图题格式切片",
+  "name": "V0.5.1 基础页节、书名、标题、正文、独立图题与简单表格格式切片",
   "locale": "zh-CN",
   "scope": {
     "document_type": "monograph",
     "input_format": "DOCX",
-    "notes": "仅格式化结构图中逐项批准的书名、既有标准目录题名、普通标题、普通正文及 P3-D 正文单张嵌入图片与紧邻已有图题；图片配对/后续语义须批准，不缩放或改号，同页待视觉验证。页节默认保持；目录题名缺失时不创建，自定义或未批准题名保持。唯一文字例外是把获批既有精确文字“目录”规范为“目    录”（四个 ASCII 半角空格）。"
+    "notes": "仅格式化结构图中逐项批准的书名、既有标准目录题名、普通标题、普通正文、P3-D 正文单张嵌入图片与紧邻已有图题，以及 P3-E 正文简单数据表与紧邻表上的既有普通文字表题。配对、表头和普通列语义须批准，不移动或改号，同页与分页待视觉验证；表格宽度、网格、自动适应和行高保持。页节默认保持；目录题名缺失时不创建，自定义或未批准题名保持。唯一文字例外是把获批既有精确文字“目录”规范为“目    录”（四个 ASCII 半角空格）。"
   },
   "target_applications": [
     "Microsoft 365"
@@ -17,6 +17,11 @@
   ],
   "sources": [
     {
+      "id": "SRC-504", "type": "user_requirement", "public": true,
+      "label": "V0.5.1 P3-E bounded simple data-table approval",
+      "summary": "V040 N001/N002/N003/N010/N011/N012/N013: explicitly approved plain rectangular body data tables, one confirmed leading header, existing immediately preceding plain caption with separate style_only and pairing approval. Preserve widths/grid/autofit, text/numbering, topology and position. No inferred header/column semantics, caption creation/movement, complex tables or notes. Pagination and overflow require visual verification."
+    },
+    {
       "id": "SRC-503", "type": "user_requirement", "public": true,
       "label": "V0.5.1 P3-D bounded image/caption approval",
       "summary": "V040 M003/M006/M007: approved body single inline image and immediately following existing caption only. Image: centered, zero indents, auto single, before 6 pt/after 0, keepNext. Caption trailing spacing: 18 pt before approved body/list; 0 before approved heading/image/table/display equation/page break. No resizing, movement, numbering or content edits. M004 remains subject to visual verification."
@@ -25,7 +30,7 @@
       "id": "SRC-501",
       "type": "user_requirement",
       "label": "V0.5.1 P3 foundation slice approval",
-      "summary": "Approved V0.4.0 foundation values for existing page/section, title, heading levels 1-4, and ordinary body roles; all other roles remain excluded under this original SRC-501 approval. Separately approved P3-D pairs are governed by SRC-503.",
+      "summary": "Approved V0.4.0 foundation values for existing page/section, title, heading levels 1-4, and ordinary body roles; all other roles remain excluded under this original SRC-501 approval. Separately approved P3-D pairs are governed by SRC-503; P3-E simple tables and existing table captions by SRC-504.",
       "public": true
     },
     {
@@ -37,6 +42,22 @@
     }
   ],
   "rules": [
+    {
+      "id": "FMT-TABLE-501", "category": "table",
+      "selector": {"kind": "table_role", "value": "data_table"},
+      "properties": {
+        "alignment": "center", "text_wrapping": "none", "border_preset": "three_line",
+        "all_cell_alignment": "center", "vertical_alignment": "center",
+        "font_name_ascii": "Times New Roman", "font_name_east_asia": "Songti",
+        "font_name_complex_script": "Times New Roman", "font_size_pt": 9,
+        "line_spacing_rule": "at_least", "line_spacing_pt": 15,
+        "space_before_pt": 0, "space_after_pt": 0, "first_line_indent_pt": 0,
+        "cell_margins_mm": {"top": 1, "bottom": 1, "left": 1.5, "right": 1.5},
+        "repeat_header_row": true, "prevent_row_split": true
+      },
+      "source_ids": ["SRC-504"], "confidence": "high", "status": "approved", "application": "automatic",
+      "evidence_summary": "P3-E bounded table entry, not the legacy table defaults. Existing visual approval must explicitly confirm three_line, centered ordinary column roles and one leading header. Width/autofit change requests and complex cells are excluded. Caption approval is separate; no missing caption creation. 1pt top/bottom, 0.5pt header; caption 9pt/min15, before6/after3, keepNext. Zero targets reported, not formatting success; visual verification pending."
+    },
     {
       "id": "FMT-FIGCAP-501", "category": "caption",
       "selector": {"kind": "caption_role", "value": "figure_caption"},
@@ -270,7 +291,7 @@
     "status": "approved",
     "approved_by": "V0.5.1 project manager",
     "approved_at": "2026-09-04T00:00:00Z",
-    "notes": "Limited to the approved P3 foundation slice, one existing standard TOC title, and bounded P3-D image/caption pairs. No missing-title creation, TOC entry formatting, field update, numbering, image resizing/movement, page rewrite, or excluded-role formatting. P3-D same-page verification remains pending."
+    "notes": "Limited to the approved P3 foundation slice, one existing standard TOC title, bounded P3-D image/caption pairs and separately approved P3-E simple body tables/existing captions. No missing-title/caption creation, TOC entry formatting, field update, numbering, object resizing/movement, width/autofit/row-height rewrite, or excluded-role formatting. P3-D/P3-E visual verification remains pending."
   },
   "runtime_policy": {
     "caller_requirements_highest": true,

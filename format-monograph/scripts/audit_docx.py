@@ -38,6 +38,8 @@ from _common import (
 from validate_profile import validate
 from docx_pagination import audit_pagination_sections
 from structure_map import (
+    FOUNDATION_TABLE_RULE,
+    audit_foundation_simple_tables,
     FOUNDATION_FIGURE_RULE,
     FOUNDATION_IMAGE_PROPERTIES,
     _foundation_figure_plan,
@@ -1019,6 +1021,13 @@ def main() -> int:
                 )
                 continue
             kind = rule["selector"]["kind"]
+            if rule['id'] == FOUNDATION_TABLE_RULE:
+                failures, evidence = audit_foundation_simple_tables(
+                    original_document, document, structure_map or {}, rule, profile['rules'])
+                rule_results.append({'id': rule['id'], 'status': 'fail' if failures else
+                                     'pass' if evidence['tables'] else 'not_applicable',
+                                     'failures': failures, 'table_evidence': evidence})
+                continue
             if rule["id"] == FOUNDATION_FIGURE_RULE:
                 original_plans, _ = _foundation_figure_plan(original_document, structure_map or {}, rule)
                 plans, skipped = _foundation_figure_plan(document, structure_map or {}, rule)
