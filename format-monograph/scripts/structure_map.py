@@ -31,6 +31,10 @@ from _common import (
     _heading_prefix_pattern,
     _paragraph_text_without_field_results,
     _unique_row_cells,
+    _set_border,
+    _clear_cell_shading,
+    _set_table_borders,
+    _set_table_cell_margins,
     apply_style_rule_to_paragraphs,
     apply_table_properties,
     apply_style_properties,
@@ -4029,6 +4033,8 @@ def _apply_outline_cleanup(document: Any, structure_map: dict[str, Any]) -> int:
         if not entry.get("approved"):
             continue
         role = normalized_role(str(entry.get("role", "unknown")))
+        if getattr(document, '_foundation_simple_tables', False) and role in {'table_caption', 'table_note'}:
+            continue
         if getattr(document, "_foundation_figures_only", False) and role in {
             "figure_caption", "figure_caption_unnumbered", "image", "display_equation", "page_break", "list", "list_item"
         }:
@@ -4072,6 +4078,10 @@ def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> in
         if not group.get("approved"):
             continue
         kind = group["kind"]
+        if getattr(document, '_foundation_simple_tables', False) and kind in {
+            'table_caption_with_table', 'keep_rows_together'
+        }:
+            continue  # P3-E verifies the exact pair/table before any pagination write.
         if kind == "figure_with_caption" and getattr(document, "_foundation_figures_only", False):
             continue
         if kind in {"figure_with_caption", "table_caption_with_table"}:
@@ -4092,6 +4102,331 @@ def _apply_pagination_groups(document: Any, structure_map: dict[str, Any]) -> in
                 _set_row_property(row, "cantSplit", True)
                 changed += int(before is None)
     return changed
+
+
+FOUNDATION_TABLE_RULE = 'FMT-TABLE-501'
+FOUNDATION_TABLE_PROPERTIES = {
+    'alignment': 'center', 'text_wrapping': 'none', 'border_preset': 'three_line',
+    'all_cell_alignment': 'center', 'vertical_alignment': 'center',
+    'font_name_ascii': 'Times New Roman', 'font_name_east_asia': 'Songti',
+    'font_name_complex_script': 'Times New Roman', 'font_size_pt': 9,
+    'line_spacing_rule': 'at_least', 'line_spacing_pt': 15,
+    'space_before_pt': 0, 'space_after_pt': 0, 'first_line_indent_pt': 0,
+    'cell_margins_mm': {'top': 1, 'bottom': 1, 'left': 1.5, 'right': 1.5},
+    'repeat_header_row': True, 'prevent_row_split': True,
+}
+
+
+def _foundation_table_plan(document, mapping, rule):
+    """Corroborate existing caller approvals; never infer semantics or a header.
+
+    The existing visual approval supplies the three-line/plain-column decision.
+    No visual width/default/autofit override is imported into this bounded rule.
+    """
+    if mapping.get('status') != 'approved' or mapping.get('schema_version') != '1.5':
+        return [], [{'reason': 'missing_approved_structure'}]
+    if mapping.get('block_spacing', {}).get('approved') or any(
+        e.get('approved') for e in mapping.get('table_cell_cleanups', [])
+    ) or any(e.get('approved') and e.get('action') not in {'preserve', 'style_only'}
+             for e in mapping.get('captions', [])):
+        raise FormatMonographError('P3E forbids legacy content cleanup or caption movement/numbering')
+    plans, skipped, seen = [], [], set()
+    for entry in mapping.get('tables', []):
+        index, visual = entry.get('table'), entry.get('visual', {})
+        if not isinstance(visual, dict):
+            raise FormatMonographError('P3E visual must be a JSON object')
+        if not entry.get('approved') or entry.get('kind') != 'data' or not visual.get('approved'):
+            skipped.append({'table': index, 'reason': 'table_visual_not_approved'})
+            continue
+        if type(index) is not int or not 0 <= index < len(document.tables) or index in seen:
+            raise FormatMonographError('P3E table identity is not unique/in range')
+        seen.add(index)
+        if sum(e.get('table') == index for e in mapping.get('tables', [])) != 1:
+            raise FormatMonographError('P3E duplicate table identity')
+        table = document.tables[index]
+        if entry.get('table_text_sha256') != _table_text_hash(table) or entry.get('row_count') != len(table.rows):
+            raise FormatMonographError('P3E table source identity changed')
+        reason = None
+        # A local, closed request surface; compatible candidate defaults are
+        # accepted only when they exactly agree with this batch's fixed format.
+        fixed = {'approved': True, 'alignment': 'center', 'text_wrapping': 'none',
+                 'border_preset': 'three_line', 'all_cell_alignment': 'center',
+                 'vertical_alignment': 'center', 'orientation': 'portrait',
+                 'landscape_approved': False,
+                 'cell_margins_mm': FOUNDATION_TABLE_PROPERTIES['cell_margins_mm']}
+        invalid = set(visual) - set(fixed) - {'column_roles'}
+        for key, expected in fixed.items():
+            if key not in visual:
+                continue
+            value = visual[key]
+            if isinstance(expected, dict):
+                if (not isinstance(value, dict) or set(value) != set(expected)
+                        or any(type(value[k]) not in (int, float) or value[k] != v for k, v in expected.items())):
+                    invalid.add(key)
+            elif type(value) is not type(expected) or value != expected:
+                invalid.add(key)
+        roles = visual.get('column_roles')
+        if not isinstance(roles, list) or any(type(role) is not str for role in roles):
+            invalid.add('column_roles')
+        if invalid:
+            skipped.append({'table': index, 'reason': 'unsupported_or_conflicting_visual_request',
+                            'fields': sorted(invalid)})
+            continue
+        if (entry.get('header_rows') != [0] or entry.get('repeat_header_rows') != [0]
+                or any(type(i) is not int for i in entry.get('header_rows', []) + entry.get('repeat_header_rows', []))):
+            reason = 'single_leading_header_not_explicitly_approved'
+        if (visual.get('border_preset') != 'three_line' or visual.get('all_cell_alignment') != 'center'
+                or visual.get('alignment') != 'center' or visual.get('text_wrapping') != 'none'
+                or len(visual.get('column_roles', [])) != len(table.columns)
+                or any(r not in {'numeric', 'unit', 'narrative'} for r in visual.get('column_roles', []))):
+            reason = 'ordinary_centered_columns_not_approved'
+        if any(k in visual for k in ('available_width_percent', 'preferred_column_widths_percent', 'allow_autofit')):
+            reason = 'conflicting_width_or_autofit_request'
+        if visual.get('orientation') == 'landscape' or visual.get('landscape_approved') or entry.get('caption_row') is not None:
+            reason = 'legacy_layout_operation_out_of_scope'
+        rows = table._tbl.findall(qn('w:tr'))
+        if (table._tbl.getparent() is not document.element.body or len(rows) < 2
+                or not len(table.columns) or any(len(row.findall(qn('w:tc'))) != len(table.columns) for row in rows)
+                or any(n.tag not in {qn('w:tblPr'), qn('w:tblGrid'), qn('w:tr')} for n in table._tbl)
+                or any(n.tag not in {qn('w:tblPrEx'), qn('w:trPr'), qn('w:tc')} for row in rows for n in row)
+                or table._tbl.xpath('.//w:gridSpan | .//w:vMerge | .//w:hMerge | .//w:tblpPr | .//w:gridBefore | .//w:gridAfter | .//w:tc/w:tbl')):
+            reason = 'complex_or_floating_topology'
+        # Plain text only. Unknown inline containers are not silently rewritten.
+        for cell in table._tbl.xpath('./w:tr/w:tc'):
+            if any(child.tag not in {qn('w:tcPr'), qn('w:p')} for child in cell):
+                reason = 'complex_cell_payload'
+            for paragraph in cell.findall(qn('w:p')):
+                if not _foundation_plain_paragraph(paragraph):
+                    reason = 'complex_cell_payload'
+        caption = None
+        groups = [g for g in mapping.get('pagination_groups', [])
+                  if g.get('kind') == 'table_caption_with_table' and g.get('table') == index and g.get('approved')]
+        if len(groups) > 1:
+            raise FormatMonographError('P3E ambiguous table/caption pairing')
+        if groups:
+            group = groups[0]
+            if type(group.get('table')) is not int:
+                raise FormatMonographError('P3E caption pair table index must be an integer')
+            if group.get('table_text_sha256') != entry['table_text_sha256']:
+                raise FormatMonographError('P3E caption pair table hash mismatch')
+            locator = group.get('anchor', {})
+            if locator.get('kind') != 'body_paragraph':
+                reason = 'caption_not_body_plain_text'
+            else:
+                candidate = resolve_paragraph_locator(document, locator)
+                roles = [e for e in mapping.get('paragraph_roles', []) if e.get('approved') and e.get('locator') == locator]
+                actions = [e for e in mapping.get('captions', []) if e.get('approved') and e.get('locator') == locator]
+                if candidate._p.getnext() is not table._tbl:
+                    reason = 'caption_not_immediately_above_preserved'
+                elif (len(roles) != 1 or normalized_role(roles[0].get('canonical_role') or roles[0].get('role')) != 'table_caption'
+                      or len(actions) != 1 or actions[0].get('action') != 'style_only'
+                      or not candidate.text.strip()
+                      or not _foundation_plain_paragraph(candidate._p)):
+                    reason = 'plain_caption_style_only_not_uniquely_approved'
+                else:
+                    _verified_locator_paragraph(document, roles[0])
+                    _verified_locator_paragraph(document, actions[0])
+                    caption = candidate
+        if reason:
+            skipped.append({'table': index, 'reason': reason})
+        else:
+            # Only explicit minimum/exact heights can establish this blocker.
+            # Use the table's actual section, never the final section by default.
+            section = document.sections[_section_index_for_table(document, table)]
+            dimensions = (section.page_height, section.top_margin, section.bottom_margin)
+            usable = (int(dimensions[0]) - int(dimensions[1]) - int(dimensions[2])
+                      if all(v is not None for v in dimensions) else None)
+            oversized = []
+            uncertain = []
+            for row_index, row in enumerate(rows):
+                for height in row.xpath('./w:trPr/w:trHeight'):
+                    if height.get(qn('w:hRule'), 'atLeast') == 'auto':
+                        continue
+                    value = height.get(qn('w:val'), '')
+                    if (height.get(qn('w:hRule'), 'atLeast') not in {'atLeast', 'exact'}
+                            or not value.isdigit() or usable is None or usable <= 0):
+                        uncertain.append(row_index)
+                    elif int(value) * 635 > usable:  # OOXML twips -> EMU
+                        oversized.append(row_index)
+            if oversized or uncertain:
+                skipped.append({'table': index, 'rows': sorted(set(oversized or uncertain)),
+                                'reason': 'explicit_row_exceeds_section_height' if oversized else 'explicit_row_height_unresolved'})
+                continue
+            plans.append((index, table, caption))
+    if plans and rule['properties'] != FOUNDATION_TABLE_PROPERTIES:
+        raise FormatMonographError('P3E requires the approved bounded table properties')
+    return plans, skipped
+
+
+def _foundation_plain_paragraph(element):
+    if element.xpath('./w:pPr/w:numPr | ./w:pPr/w:sectPr'):
+        return False
+    for child in element:
+        if child.tag == qn('w:pPr'):
+            continue
+        if child.tag != qn('w:r') or any(n.tag not in {qn('w:rPr'), qn('w:t'), qn('w:tab'), qn('w:br')} for n in child):
+            return False
+        if child.xpath('./w:br[@w:type="page" or @w:type="column"]'):
+            return False
+    return True
+
+
+def _foundation_table_text(paragraph, *, caption=False):
+    """Direct target properties only: no shared style mutation or text rebuild."""
+    properties = dict(FOUNDATION_TABLE_PROPERTIES)
+    if caption:
+        properties.pop('first_line_indent_pt')
+    clear_controlled_direct_format(paragraph, properties)
+    fmt = paragraph.paragraph_format
+    fmt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fmt.line_spacing = Pt(15)
+    fmt.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+    fmt.space_before, fmt.space_after = Pt(6 if caption else 0), Pt(3 if caption else 0)
+    if caption:
+        fmt.keep_with_next = True
+    else:
+        ind = paragraph._p.get_or_add_pPr().get_or_add_ind()
+        ind.set(qn('w:firstLine'), '0')
+        ind.set(qn('w:firstLineChars'), '0')
+    # Include the paragraph mark for empty cells, retaining all unrelated rPr.
+    p_pr = paragraph._p.get_or_add_pPr()
+    mark = p_pr.find(qn('w:rPr'))
+    if mark is None:
+        mark = OxmlElement('w:rPr')
+        p_pr.append(mark)
+    for r_pr in [mark] + [r._r.get_or_add_rPr() for r in paragraph.runs]:
+        fonts = r_pr.find(qn('w:rFonts'))
+        if fonts is None:
+            fonts = OxmlElement('w:rFonts')
+            r_pr.insert(0, fonts)
+        for attribute, value in {'ascii': 'Times New Roman', 'hAnsi': 'Times New Roman', 'eastAsia': 'Songti', 'cs': 'Times New Roman'}.items():
+            fonts.set(qn('w:' + attribute), value)
+            fonts.attrib.pop(qn('w:' + attribute + 'Theme'), None)
+        for tag in ('sz', 'szCs'):
+            size = r_pr.find(qn('w:' + tag))
+            if size is None:
+                size = OxmlElement('w:' + tag)
+                r_pr.append(size)
+            size.set(qn('w:val'), '18')
+
+
+def _apply_foundation_simple_tables(document, mapping, rule):
+    plans, skipped = _foundation_table_plan(document, mapping, rule)
+    for index, table, caption in plans:
+        # Reuse the border/margin primitives, not the legacy defaults/overrides.
+        for borders in table._tbl.xpath('./w:tr/w:tc/w:tcPr/w:tcBorders'):
+            borders.clear()  # Retain property position for repeat stability.
+        if table.alignment != WD_TABLE_ALIGNMENT.CENTER:
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _set_table_cell_margins(table, FOUNDATION_TABLE_PROPERTIES['cell_margins_mm'])
+        _set_table_borders(table, 'three_line', [0])
+        for row_index, row in enumerate(table.rows):
+            _set_row_property(row, 'tblHeader', row_index == 0)
+            _set_row_property(row, 'cantSplit', True)
+            # Presence alone does not enable an existing val=0/false/off node.
+            # Keep the normalization local to approved P3-E rows.
+            for name in ('cantSplit', 'tblHeader') if row_index == 0 else ('cantSplit',):
+                for node in row._tr.xpath('./w:trPr/w:' + name):
+                    node.set(qn('w:val'), 'true')
+            # Row-level border/margin overrides can otherwise defeat tblPr.
+            for override in row._tr.xpath('./w:tblPrEx/w:tblBorders | ./w:tblPrEx/w:tblCellMar'):
+                override.getparent().remove(override)
+            for cell in row.cells:
+                if cell.vertical_alignment != WD_CELL_VERTICAL_ALIGNMENT.CENTER:
+                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                tc_pr = cell._tc.get_or_add_tcPr()
+                # Batch-local explicit no shading overrides inherited/conditional
+                # table shading. Clear theme attributes without changing the
+                # legacy helper or any paragraph/run/style properties.
+                shading = list(tc_pr.findall(qn('w:shd')))
+                if shading:
+                    shading[0].attrib.clear()
+                    for duplicate in shading[1:]:
+                        tc_pr.remove(duplicate)
+                _clear_cell_shading(cell)
+                tc_pr.find(qn('w:shd')).set(qn('w:val'), 'nil')
+                for margin in list(tc_pr.findall(qn('w:tcMar'))):
+                    tc_pr.remove(margin)
+                borders = tc_pr.find(qn('w:tcBorders'))
+                if borders is None:
+                    borders = OxmlElement('w:tcBorders')
+                    tc_pr.append(borders)
+                for side in ('top', 'bottom', 'left', 'right', 'start', 'end', 'insideH', 'insideV', 'tl2br', 'tr2bl'):
+                    size = 8 if (side == 'top' and row_index == 0) or (side == 'bottom' and row_index == len(table.rows) - 1) else 4 if side == 'bottom' and row_index == 0 else 0
+                    _set_border(borders, side, style='single' if size else 'nil', size=size)
+                for paragraph in cell.paragraphs:
+                    _foundation_table_text(paragraph)
+        if caption is not None:
+            _foundation_table_text(caption, caption=True)
+    return {'tables': len(plans), 'captions': sum(p[2] is not None for p in plans),
+            'skipped': skipped, 'visual_verification': 'pending',
+            'row_overflow_and_caption_same_page': 'pending_visual_verification'}
+
+
+def audit_foundation_simple_tables(original, document, mapping, rule, rules=()):
+    """Compare the bounded expected table delta and untouched table/caption scope.
+
+    Unlike the legacy table audit this checks the complete table XML, including
+    grid, widths, row geometry, run properties and exact block position.
+    """
+    expected = copy.deepcopy(original)
+    evidence = _apply_foundation_simple_tables(expected, mapping, rule)
+    failures = []
+    def canonical(element):
+        return etree.tostring(element, method='c14n')
+    if len(expected.tables) != len(document.tables):
+        failures.append({'reason': 'P3E table count changed'})
+    for index, (before, after) in enumerate(zip(expected.tables, document.tables)):
+        if (canonical(before._tbl) != canonical(after._tbl)
+                or list(expected.element.body).index(before._tbl) != list(document.element.body).index(after._tbl)):
+            failures.append({'table': index, 'reason': 'P3E table format/content/topology/position differs from bounded delta'})
+    for entry in mapping.get('paragraph_roles', []):
+        if normalized_role(entry.get('canonical_role') or entry.get('role', 'unknown')) != 'table_caption':
+            continue
+        a = resolve_paragraph_locator(expected, entry['locator'])
+        b = resolve_paragraph_locator(document, entry['locator'])
+        if canonical(a._p) != canonical(b._p):
+            failures.append({'reason': 'P3E target or preserved table caption differs from bounded delta'})
+    # Adjacent paragraphs (including notes) are read-only context, unless a
+    # different active rule independently authorizes them. This grants no new
+    # semantic role and must not disable the foundation/body/image rules.
+    independent = set()
+    for other in rules:
+        if other.get('status') != 'approved' or other.get('application') != 'automatic':
+            continue
+        if other['selector']['kind'] == 'paragraph_role':
+            independent.update(p._p for p in approved_role_paragraphs(original, mapping, other['selector']))
+        elif other['id'] == FOUNDATION_FIGURE_RULE:
+            pairs, _ = _foundation_figure_plan(original, mapping, other)
+            independent.update(p._p for image, caption, properties in pairs for p in (image, caption))
+    neighbors = {node for table in original.tables for node in
+                 (table._tbl.getprevious(), table._tbl.getnext())
+                 if node is not None and node.tag == qn('w:p') and node not in independent}
+    original_blocks, expected_blocks, current_blocks = map(list, (original.element.body, expected.element.body, document.element.body))
+    for node in neighbors:
+        index = original_blocks.index(node)
+        if index >= len(current_blocks) or canonical(expected_blocks[index]) != canonical(current_blocks[index]):
+            failures.append({'reason': 'P3E read-only adjacent paragraph changed'})
+    # This batch uses direct formatting: shared styles must remain unchanged.
+    protected_styles = {style.style_id for style in original.styles if style.type == 3 or style.name == 'Caption'}
+    styled_paragraphs = [p for table in original.tables for row in table.rows for cell in row.cells for p in cell.paragraphs]
+    styled_paragraphs += [p for p in original.paragraphs if p._p in neighbors]
+    for paragraph in styled_paragraphs:
+        style, seen_styles = paragraph.style, set()
+        while style is not None and style.style_id not in seen_styles:
+            seen_styles.add(style.style_id)
+            protected_styles.add(style.style_id)
+            style = style.base_style
+    for style_id in protected_styles:
+        old = next(s for s in original.styles if s.style_id == style_id)
+        current = [s for s in document.styles if s.style_id == style_id]
+        if len(current) != 1 or canonical(old.element) != canonical(current[0].element):
+            failures.append({'reason': 'P3E shared table/caption style changed'})
+    defaults_before = original.styles.element.find(qn('w:docDefaults'))
+    defaults_after = document.styles.element.find(qn('w:docDefaults'))
+    if (None if defaults_before is None else canonical(defaults_before)) != (None if defaults_after is None else canonical(defaults_after)):
+        failures.append({'reason': 'P3E inherited document defaults changed'})
+    return failures, evidence
 
 
 FOUNDATION_FIGURE_RULE = "FMT-FIGCAP-501"
@@ -4641,6 +4976,8 @@ def _table_matches_approved_cleanup_result(
 
 
 def _apply_tables(document: Any, structure_map: dict[str, Any]) -> int:
+    if getattr(document, '_foundation_simple_tables', False):
+        return 0  # The bounded P3-E plan replaces legacy table operations only.
     if getattr(document, "_foundation_figures_only", False):
         return 0
     changed = 0

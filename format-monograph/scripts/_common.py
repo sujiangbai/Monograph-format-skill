@@ -670,6 +670,9 @@ def supported_properties(rule: dict[str, Any]) -> set[str]:
     if kind in {"document", "section_role"}:
         return SECTION_PROPERTIES
     if kind == "table_role":
+        if rule.get('id') == 'FMT-TABLE-501':
+            return TABLE_PROPERTIES | {'line_spacing_rule', 'space_before_pt',
+                                       'space_after_pt', 'first_line_indent_pt'}
         return TABLE_PROPERTIES
     if kind == "field_role":
         return FIELD_PROPERTIES

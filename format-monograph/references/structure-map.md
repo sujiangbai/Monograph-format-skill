@@ -14,6 +14,91 @@ New maps use schema `1.5`; readers continue to accept `1.0` through `1.4`. Versi
 
 ## Schema 1.5
 
+### P3-E: bounded simple body data tables and existing table captions
+
+`FMT-TABLE-501` in the foundation profile formats only explicitly approved
+top-level, inline, rectangular, unmerged, unnested plain-text data tables.
+The calling Agent proposes the table/header/column semantics; the user approves
+them. Scripts verify the existing source fingerprint, unique table index, text
+hash, row count, actual topology and exact caption adjacency. They do not infer
+permission from the first row, table style, a number or a nearby paragraph.
+
+The approved batch also requires no cell shading: each target cell receives
+explicit `w:shd w:val="nil"` with automatic colors and no theme attributes,
+overriding inherited/conditional table shading locally. Shared styles,
+non-target tables, and paragraph/run shading or highlights remain unchanged.
+The audit rejects reintroduced cell shading; this is not general color cleanup.
+
+Use existing schema 1.5 fields: `tables[].approved=true`, `kind=data`,
+`header_rows=[0]`, `repeat_header_rows=[0]`, and a separately approved `visual`
+with `alignment=center`, `text_wrapping=none`, `border_preset=three_line`,
+`all_cell_alignment=center` and one approved ordinary `column_roles` value per
+column. The existing `unit`, `numeric`, or `narrative` vocabulary is used only
+when the caller confirms ordinary centered content; it is not a heuristic for
+decimal alignment, code, DOI or long-text layout. `short_code` and ambiguous or
+special-column decisions are outside this batch. Remove unapproved candidate
+width/autofit suggestions before approving this bounded visual request: a
+request containing `available_width_percent`, `preferred_column_widths_percent`
+or `allow_autofit` is reported as conflicting and remains untouched, not silently
+applied. Do not approve legacy table layout, blank insertion or content cleanup.
+
+P3-E checks a closed local visual request surface, without adding schema fields:
+only the required centered three-line/plain-column request and matching optional
+candidate defaults (center vertical alignment, portrait, landscape approval false,
+and the fixed margins) are supported. `column_roles` must be a JSON array of
+strings, not an object. Extra requests such as header shading, horizontal-rule
+rows, inside vertical borders or alternate border widths are skipped/reported,
+not silently ignored and counted as formatted. Invalid input may instead be
+rejected by existing structure validation before any output is written.
+
+An existing caption additionally needs an approved `table_caption` paragraph
+role, a matching `captions` entry with `action=style_only`, and an approved
+`pagination_groups` entry with `kind=table_caption_with_table`, hashed body
+`anchor`, exact `table` index and `table_text_sha256`. All identities must agree.
+The caption must be the actual immediately preceding body paragraph. Existing
+multiline captions may be explicitly mapped by the caller even when candidate
+heuristics do not recognize them. No caption is created, moved or renumbered;
+unpaired captions and table notes remain unchanged. Conflicting approved pairs
+skip the table/pair or reject ambiguous identity before any table write.
+
+The rule uses direct target formatting, not shared Caption/table-style edits.
+Three-line borders are 1 pt top/bottom and 0.5 pt under the approved header,
+with explicit cell border overrides for inherited grid/diagonal borders.
+Cells use Songti/Times New Roman 9 pt, minimum 15 pt line spacing, 0/0 pt
+paragraph spacing, zero first-line indent, centered horizontal/vertical
+alignment, and 1 mm top/bottom plus 1.5 mm left/right margins. Existing
+uncontrolled character attributes remain. The caption uses the same fonts,
+size and minimum line spacing, center alignment, 6/3 pt before/after and
+keepNext. No extra blank paragraph or field is introduced.
+
+Existing table width, grid, cell widths, autofit and row-height properties are
+retained, including normal explicit `atLeast`/`exact` row heights. Only the
+confirmed leading header repeats; ordinary rows receive cantSplit, with existing
+`0`/`false`/`off` values normalized to true only on approved P3-E rows.
+If an explicit minimum/exact row height exceeds its actual section's page height
+minus top/bottom margins, the entire table/pair is preserved and reported with
+the affected row and `explicit_row_exceeds_section_height`. Unresolved explicit
+height/section dimensions are preserved and reported, not guessed. No cantSplit
+is forced on these skipped tables. This does not measure natural row height,
+predict all clipping/overflow, or prove same-page caption placement. Natural
+overflow still requires visual review, not automatic resizing, width changes,
+row-height repair or landscape sections.
+
+Use the existing apply/audit CLI with the approved full foundation profile;
+body/title/heading and P3-D rules need not be disabled. The P3-E route avoids
+legacy table operations and caption-outline/pagination side effects. Apply
+rechecks the saved table/caption delta before publishing review output; audit
+compares all table XML and block positions against the bounded expected delta,
+including untouched tables, captions and shared styles. Independently approved
+foundation paragraph/image changes continue through their own existing audits.
+Adjacent non-target paragraphs (including notes), the table/caption paragraph
+style inheritance chain and document defaults are also checked; an independently
+approved active body/figure rule remains responsible for its own actual targets.
+The format report and audit include table/caption counts, skips and mandatory
+`pending_visual_verification`. Zero tables is `not_applicable`, not proof that
+formatting succeeded. Offline property, integrity and repeat checks are not
+Word or representative-manuscript acceptance, nor `final_ready` evidence.
+
 ### P3-D: bounded image paragraph and existing caption
 
 The foundation rule `FMT-FIGCAP-501` is limited to a single body inline image

@@ -28,6 +28,10 @@ from _common import (
 from validate_profile import validate
 from docx_pagination import finalize_pagination_sections
 from structure_map import (
+    FOUNDATION_TABLE_RULE,
+    _foundation_table_plan,
+    _apply_foundation_simple_tables,
+    audit_foundation_simple_tables,
     FOUNDATION_FIGURE_RULE,
     _apply_foundation_figure_captions,
     _foundation_figure_plan,
@@ -54,7 +58,7 @@ def output_paths(input_path: Path, output_dir: Path) -> tuple[Path, Path, Path]:
 
 
 def preserve_zip_directory_metadata(source: Path, output: Path) -> None:
-    """P3-D only: retain omitted zero-byte ZIP directory markers, never files."""
+    """Bounded P3-D/P3-E saves: retain zero-byte ZIP directory markers, never files."""
     temporary = None
     reason = 'directory_metadata_io_error'
     try:
@@ -84,7 +88,7 @@ def preserve_zip_directory_metadata(source: Path, output: Path) -> None:
     except Exception:
         output.unlink(missing_ok=True)
         raise FormatMonographError(
-            f'P3-D directory metadata preservation refused; reason={reason}; candidate removed.'
+            f'Bounded directory metadata preservation refused; reason={reason}; candidate removed.'
         ) from None
     finally:
         if temporary is not None:
@@ -252,6 +256,9 @@ def report_markdown(
         lines.append("| - | - | 0 | 没有自动规则 |")
 
     for change in changes:
+        if "table_evidence" in change:
+            lines.extend(["", "P3-E 简单表格式证据（零处理不代表已格式化；分页/溢出待视觉验收）：",
+                          json.dumps(change["table_evidence"], ensure_ascii=False)])
         if "figure_evidence" in change:
             lines.extend(["", "P3-D 配对格式证据（同页仍待视觉验收）：",
                           json.dumps(change["figure_evidence"], ensure_ascii=False)])
@@ -389,6 +396,11 @@ def main() -> int:
             else content_fingerprint(args.input, normalize_derived=normalize_derived)
         )
         document = load_document(args.input)
+        table_rule = next((r for r in profile['rules'] if r['id'] == FOUNDATION_TABLE_RULE
+                           and r['status'] == 'approved' and r['application'] == 'automatic'), None)
+        if table_rule:
+            _foundation_table_plan(document, structure_map or {}, table_rule)
+            document._foundation_simple_tables = True
         figure_rule = next((r for r in profile["rules"] if r["id"] == FOUNDATION_FIGURE_RULE
                             and r["status"] == "approved" and r["application"] == "automatic"), None)
         if figure_rule:
@@ -412,6 +424,12 @@ def main() -> int:
                 continue
             if rule["application"] == "manual_review":
                 manual.append(rule)
+                continue
+            if rule['id'] == FOUNDATION_TABLE_RULE:
+                evidence = _apply_foundation_simple_tables(document, structure_map or {}, rule)
+                changes.append({'id': rule['id'], 'selector': 'approved simple body tables',
+                                'targets': evidence['tables'], 'properties': rule['properties'],
+                                'table_evidence': evidence})
                 continue
             if rule["id"] == FOUNDATION_FIGURE_RULE:
                 evidence = _apply_foundation_figure_captions(document, structure_map or {}, rule)
@@ -487,7 +505,7 @@ def main() -> int:
             getattr(document, "_format_monograph_derived_changes", [])
         )
         document.save(str(formatted_path))
-        if figure_rule:
+        if figure_rule or table_rule:
             preserve_zip_directory_metadata(args.input, formatted_path)
         formatted_fp = (
             structure_content_fingerprint(formatted_path, structure_map)
@@ -506,6 +524,13 @@ def main() -> int:
                 f"formatted_fingerprint={formatted_fp}). "
                 "The generated formatted copy was removed."
             )
+
+        if table_rule:
+            failures, _ = audit_foundation_simple_tables(
+                load_document(args.input), load_document(formatted_path), structure_map or {}, table_rule, profile['rules'])
+            if failures:
+                formatted_path.unlink(missing_ok=True)
+                raise FormatMonographError('P3E bounded table integrity failed: ' + json.dumps(failures))
 
         review = load_document(formatted_path)
         unanchored: list[str] = []
@@ -542,7 +567,7 @@ def main() -> int:
                 initials="FM",
             )
         review.save(str(review_path))
-        if figure_rule:
+        if figure_rule or table_rule:
             try:
                 preserve_zip_directory_metadata(args.input, review_path)
             except FormatMonographError:
