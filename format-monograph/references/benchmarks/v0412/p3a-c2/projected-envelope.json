@@ -1,0 +1,3274 @@
+{
+  "compose_projection_strategy": "single_core_probe",
+  "contract_version": "1.0",
+  "decision_population_summary": {
+    "v041_primary": 150,
+    "v042_protected": 20,
+    "v043_protected": 1
+  },
+  "derivation_policy": "manual_prediction_with_later_mechanical_validation",
+  "document_kind": "p3a_c2_projected_envelope",
+  "entries": [
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-A-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-a-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-A-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-a-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-A-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-a-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-A-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-a-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-A-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-a-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-B-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-b-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-C-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-c-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-D-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-d-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-D-008",
+      "derivation_formula": "V0.4.1 §9 PR only assigns P6/P7 state/finalization responsibility; no P3 rule assets.",
+      "implementation_owner": "p6",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-d-008",
+      "zero_load_reason": "no_base_appearance"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-E-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-e-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-F-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-f-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-F-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-f-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-F-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-f-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-F-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-f-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-F-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-f-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-F-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-f-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-G-001",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-g-001",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-G-002",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-g-002",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-G-003",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-g-003",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-G-004",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-g-004",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-G-005",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-g-005",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-H-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-h-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-H-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-h-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-H-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-h-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-H-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-h-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-H-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-h-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-I-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-i-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-I-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-i-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-I-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-i-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-I-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-i-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-I-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-i-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-I-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-i-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-J-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-j-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-J-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-j-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-J-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-j-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-J-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_b",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-j-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-K-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-k-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-K-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-k-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-K-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-k-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-K-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-k-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-K-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-k-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-K-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-k-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-L-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-l-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-L-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-l-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-L-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-l-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-L-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-l-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-L-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-l-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-L-006",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-l-006",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-L-007",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-l-007",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-L-008",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-l-008",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-008",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-008",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-M-009",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-m-009",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-N-005",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-n-005",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-008",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-008",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-009",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-009",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-010",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-010",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-011",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-011",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-012",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-012",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-013",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-013",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-014",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-014",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-N-015",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-n-015",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-O-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-o-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-O-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-o-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-O-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-o-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-O-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-o-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-O-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-o-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-P-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-p-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-P-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-p-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-P-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-p-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-P-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-p-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Q-001",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-q-001",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Q-002",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-q-002",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Q-003",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-q-003",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Q-004",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-q-004",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Q-005",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-q-005",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-R-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-r-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-R-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-r-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-R-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-r-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-R-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-r-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-R-005",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-r-005",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-S-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-s-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-S-002",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-s-002",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-S-003",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-s-003",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-S-004",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-s-004",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-S-005",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-s-005",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-T-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-t-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-U-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-u-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-U-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-u-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-U-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-u-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-U-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-u-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-U-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-u-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-U-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-u-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-V-008",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-v-008",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-W-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-w-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-W-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-w-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-W-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-w-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-W-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-w-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-W-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-w-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-W-006",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-w-006",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-W-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-w-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-X-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-x-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-X-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-x-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-X-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-x-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-X-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-x-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Y-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-y-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Y-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-y-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Y-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-y-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Y-004",
+      "derivation_formula": "V0.4.2 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.2",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-y-004",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Y-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "base_appearance",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-y-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-001",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-001",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-002",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-002",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-003",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-003",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-004",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-004",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-005",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-005",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-006",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-006",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-007",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-007",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Z-008",
+      "derivation_formula": "V0.4.3 protected future-primary decision; no V0.4.1 base appearance workload is projected.",
+      "implementation_owner": "future_primary",
+      "primary_version": "V0.4.3",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "protected_boundary",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-z-008",
+      "zero_load_reason": "protected_boundary"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "high",
+      "conflict_approval_assumption": "unmodeled",
+      "decision_id": "V040-Z-009",
+      "derivation_formula": "V0.4.1 §9 PR only assigns P6/P7 state/finalization responsibility; no P3 rule assets.",
+      "implementation_owner": "p6",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 0,
+        "candidate": 0,
+        "key": 0,
+        "rule_fragment": 0
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "unmodeled",
+      "source_locator": "plan:v040-z-009",
+      "zero_load_reason": "no_base_appearance"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-010",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-010",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-011",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-011",
+      "zero_load_reason": "none"
+    },
+    {
+      "blocked_projection": false,
+      "confidence": "medium",
+      "conflict_approval_assumption": "none",
+      "decision_id": "V040-Z-012",
+      "derivation_formula": "V0.4.1 §9 PR includes P3; one decision-level fragment, two probe bindings/candidates, one normalized key.",
+      "implementation_owner": "p3b_o",
+      "primary_version": "V0.4.1",
+      "projected_counts": {
+        "binding": 2,
+        "candidate": 2,
+        "key": 1,
+        "rule_fragment": 1
+      },
+      "requirement_kind": "system_projection",
+      "scope_topology": "single_core_probe",
+      "source_locator": "plan:v040-z-012",
+      "zero_load_reason": "none"
+    }
+  ],
+  "envelope_digest": "sha256:98d3f1e20e126c56b605b7ecda84e3f6d3ed8d9a070c95dd7fcfb392fce740d6",
+  "envelope_digest_basis": "canonical_json_excluding_envelope_digest",
+  "projection_kind": "formal_planning_projection",
+  "projection_status": "planning_projection",
+  "source_plan_digest": "sha256:7231845cc128da949e0008d060343d277c6e259f1b9082ff5e421900724dcb2c",
+  "unmodeled_dimensions": [
+    "docx_runtime",
+    "full_production_property_registry",
+    "multi_property_production_distribution",
+    "real_monograph_base_assets",
+    "reference_hardware"
+  ]
+}
