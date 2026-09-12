@@ -1,0 +1,50 @@
+{
+  "source_commit": "3c8d40d6c04113845ad7fa6a776cb500e3834c94",
+  "input": {
+    "aggregate_counts": {
+      "rule_fragment": 2,
+      "binding": 4,
+      "key": 2,
+      "candidate": 4
+    },
+    "scale_id": "1.0x",
+    "scenario_id": "dense-crossing",
+    "generation_seed": 41,
+    "permutation_seed": null
+  },
+  "canonical_basis": "canonical_composition_report_plus_final_profile_if_present_v1",
+  "expected": {
+    "terminal": "unresolvable",
+    "report_canonical_sha256": "sha256:1eaaae1cfd3c91441ddb67bbe6c127005d19ae37f65051d5d7fbe50d5464ca18",
+    "final_canonical_sha256": null,
+    "report_semantic_fingerprint": "sha256:9e00cc4d7a61ce31d864337f4adaaae17d97478c00398c57acac06528bcbc003",
+    "final_semantic_fingerprint": null,
+    "metrics": {
+      "input_asset_count": 2,
+      "input_rule_count": 4,
+      "input_binding_count": 4,
+      "expected_key_count": 2,
+      "candidate_count": 4,
+      "candidate_group_count": 0,
+      "partition_count": 1,
+      "conflict_count": 0,
+      "proposal_count": 0,
+      "blocker_count": 1,
+      "max_candidates_per_key": 0,
+      "max_partition_width": 1,
+      "max_repartition_depth": 1
+    },
+    "coverage": {
+      "expected_count": 4,
+      "consumed_count": 4,
+      "expected_digest": "sha256:63f71198afdc1ef32c6a8f42cd649c1032aaa2950eb1d34f7c5944bbec81856c",
+      "consumed_digest": "sha256:4d16c1a73328d2ef6145b3a015ac7a539e203d1f80105ab07a99b68cba6e2a1b"
+    },
+    "stable_ids": {
+      "candidate_group_ids": [],
+      "blocker_ids": [
+        "blocker:3b279d800a191eb23096879b64ff3134c52393210451d92394fc4922e1bd6a65"
+      ]
+    }
+  }
+}
